@@ -208,27 +208,22 @@ HLPSHOW:
         CALL    OUTSTR
 
         ; Draw help lines (rows 3-23, 2 columns)
-        MVI     B,0             ; B = line index
+        ; Index stored in HLPIDX (registers clobbered by calls)
+        XRA     A
+        STA     HLPIDX
 
-HLPLP:
-        MOV     A,B
+HLPLP:  LDA     HLPIDX
         CPI     HLPLINES
         JNC     HLPWAIT
 
-        ; Row = 3 + B
-        MOV     A,B
+        ; Position left column (row = index + 3, col = 1)
         ADI     3
-        MOV     D,A             ; D = row
-
-        ; Print left column (cols 1-40)
-        MOV     B,D
+        MOV     B,A
         MVI     C,1
         CALL    CURGOTO
 
-        ; Get left text pointer
-        MOV     A,D
-        SUI     3               ; restore index
-        MOV     B,A
+        ; Get left text pointer from table
+        LDA     HLPIDX
         MOV     L,A
         MVI     H,0
         DAD     H               ; *2
@@ -237,17 +232,17 @@ HLPLP:
         MOV     E,M
         INX     H
         MOV     D,M
-        CALL    OUTSTR          ; print left column text
+        CALL    OUTSTR
 
-        ; Print right column (cols 41-80)
-        MOV     A,B
+        ; Position right column (row = index + 3, col = 41)
+        LDA     HLPIDX
         ADI     3
         MOV     B,A
         MVI     C,41
         CALL    CURGOTO
 
-        MOV     A,B
-        SUI     3
+        ; Get right text pointer from table
+        LDA     HLPIDX
         MOV     L,A
         MVI     H,0
         DAD     H
@@ -258,11 +253,10 @@ HLPLP:
         MOV     D,M
         CALL    OUTSTR
 
-        MOV     A,B
-        SUI     3
-        INR     A               ; increment index
-        MOV     B,A
-
+        ; Increment index
+        LDA     HLPIDX
+        INR     A
+        STA     HLPIDX
         JMP     HLPLP
 
 HLPWAIT:
@@ -393,6 +387,9 @@ HLPRTBL:
         DW      HLR18
         DW      HLR19
         DW      HLR20
+
+; Loop index for help display
+HLPIDX: DB      0
 
         END
 
