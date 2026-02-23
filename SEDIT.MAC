@@ -296,26 +296,16 @@ START:
 ;------------------------------------------------------------
 MAINLP:
         ; Force full redraw if marking in progress (highlight tracks cursor)
-        LHLD    CURBDP
         MVI     A,BD_MRKEN
-        ADD     L
-        MOV     L,A
-        MVI     A,0
-        ADC     H
-        MOV     H,A             ; HL -> BD_MRKEN
+        CALL    BDFLD           ; HL -> BD_MRKEN
         MOV     A,M
         INX     H
         ANA     M               ; A = low AND high
         INR     A               ; Z if FFFF
         JNZ     MLNOMK          ; MRKEN != FFFF -> not marking
         ; MRKEN==FFFF; check MRKBG != FFFF
-        LHLD    CURBDP
         MVI     A,BD_MRKBG
-        ADD     L
-        MOV     L,A
-        MVI     A,0
-        ADC     H
-        MOV     H,A             ; HL -> BD_MRKBG
+        CALL    BDFLD           ; HL -> BD_MRKBG
         MOV     A,M
         INX     H
         ANA     M
@@ -398,9 +388,7 @@ DOCHAR:
         CALL    GBDELRT         ; delete char at cursor
 DCINS:  MOV     A,C             ; character value (C preserved)
         CALL    GBINSRT         ; insert at cursor
-        MVI     A,1
-        STA     DRTLINE         ; redraw current line only
-        JMP     MAINLP
+        JMP     MLDRTL          ; redraw current line only
 
 ;------------------------------------------------------------
 ; Action handlers - each dispatched from ACTTBL
@@ -426,78 +414,45 @@ DO_WNX: CALL    SVTOPLN
         CALL    CHKSCRL
         JMP     MAINLP
 DO_PGU: CALL    GBPGUP
-        MVI     A,1
-        STA     DIRTY
-        JMP     MAINLP
+        JMP     MLDIRT
 DO_PGD: CALL    GBPGDN
-        MVI     A,1
-        STA     DIRTY
-        JMP     MAINLP
-DO_SCU: CALL    SVTOPLN
-        CALL    GBMVUP
-        CALL    CHKSCRL
-        JMP     MAINLP
-DO_SCD: CALL    SVTOPLN
-        CALL    GBMVDN
-        CALL    CHKSCRL
-        JMP     MAINLP
+        JMP     MLDIRT
+        ; DO_SCU/DO_SCD removed: identical to DO_CUU/DO_CUD, merged via ACTTBL
 DO_LST: CALL    GBMLNS
         JMP     MAINLP          ; cursor-only: no redraw
 DO_LEN: CALL    GBMLNE
         JMP     MAINLP          ; cursor-only: no redraw
 DO_FTP: CALL    GBMVTOP
-        MVI     A,1
-        STA     DIRTY
-        JMP     MAINLP
+        JMP     MLDIRT
 DO_FEN: CALL    GBMVEND
-        MVI     A,1
-        STA     DIRTY
-        JMP     MAINLP
+        JMP     MLDIRT
 DO_DLF: CALL    GBDLFT
         ORA     A
         JNZ     MAINLP          ; at BOF, nothing deleted
         LDA     GBTMP
         CPI     LF
-        JZ      DODLFL          ; LF deleted: lines merged
-        MVI     A,1
-        STA     DRTLINE         ; same line: redraw current only
-        JMP     MAINLP
-DODLFL: MVI     A,1
-        STA     DIRTY           ; full redraw needed
-        JMP     MAINLP
+        JZ      MLDIRT          ; LF deleted: full redraw
+        JMP     MLDRTL          ; same line: redraw current only
 DO_DRT: CALL    GBDELRT
         ORA     A
         JNZ     MAINLP          ; at EOF, nothing deleted
         LDA     GBTMP
         CPI     LF
-        JZ      DODRTL          ; LF deleted: lines merged
-        MVI     A,1
-        STA     DRTLINE         ; same line: redraw current only
-        JMP     MAINLP
-DODRTL: MVI     A,1
-        STA     DIRTY           ; full redraw needed
-        JMP     MAINLP
+        JZ      MLDIRT          ; LF deleted: full redraw
+        JMP     MLDRTL          ; same line: redraw current only
 DO_DWD: CALL    GBWRDNX         ; move to next word
         CALL    GBDLFT         ; then delete back
-        MVI     A,1
-        STA     DIRTY
-        JMP     MAINLP
+        JMP     MLDIRT
 DO_DLN: CALL    GBDLLN
-        MVI     A,1
-        STA     DIRTY
-        JMP     MAINLP
+        JMP     MLDIRT
 DO_TAB: MVI     A,TAB
         CALL    GBINSRT
-        MVI     A,1
-        STA     DRTLINE         ; redraw current line only
-        JMP     MAINLP
+        JMP     MLDRTL          ; redraw current line only
 DO_NLN: MVI     A,CR
         CALL    GBINSRT
         MVI     A,LF
         CALL    GBINSRT
-        MVI     A,1
-        STA     DIRTY
-        JMP     MAINLP
+        JMP     MLDIRT
 DO_TIN: LDA     INSMODE         ; toggle insert mode
         XRI     1
         STA     INSMODE
@@ -505,43 +460,36 @@ DO_TIN: LDA     INSMODE         ; toggle insert mode
         JMP     MAINLP
 DO_LIT: JMP     MAINLP          ; literal next - TODO
 DO_FNX: CALL    SRFNDNX
-        MVI     A,1
-        STA     DIRTY
-        JMP     MAINLP
+        JMP     MLDIRT
 DO_FND: CALL    SRFIND
-        MVI     A,1
-        STA     DIRTY
-        JMP     MAINLP
+        JMP     MLDIRT
 DO_SAV: LXI     D,SAVWMSG
         CALL    STATMSG
         CALL    FISAVE
         CALL    INFOBAR
         JMP     MAINLP
-DO_OPN: CALL    MNUSHOW         ; open via menu
-        MVI     A,1
-        STA     DIRTY
-        JMP     MAINLP
+        ; DO_OPN removed: identical to DO_MNU, merged via ACTTBL
 DO_EXT: CALL    DOEXIT          ; save & exit
         JMP     MAINLP          ; returns if cancelled
 DO_BMK: CALL    BLMARK
-        MVI     A,1
-        STA     DIRTY
-        JMP     MAINLP
+        JMP     MLDIRT
 DO_BCP: CALL    BLCOPY
-        MVI     A,1
-        STA     DIRTY
-        JMP     MAINLP
+        JMP     MLDIRT
 DO_BDL: CALL    BLDEL
-        MVI     A,1
-        STA     DIRTY
-        JMP     MAINLP
+        JMP     MLDIRT
 DO_BPS: CALL    BLPASTE
-        MVI     A,1
+        JMP     MLDIRT
+DO_MNU: CALL    MNUSHOW
+        ; fall through to MLDIRT
+
+;------------------------------------------------------------
+; Shared exit points for action handlers
+;------------------------------------------------------------
+MLDIRT: MVI     A,1
         STA     DIRTY
         JMP     MAINLP
-DO_MNU: CALL    MNUSHOW
-        MVI     A,1
-        STA     DIRTY
+MLDRTL: MVI     A,1
+        STA     DRTLINE
         JMP     MAINLP
 
 ;------------------------------------------------------------
@@ -579,13 +527,8 @@ DOEXIT:
 
 DXYES:
         ; Check if filename exists (BD_FNAME[0] != space)
-        LHLD    CURBDP
         MVI     A,BD_FNAME
-        ADD     L
-        MOV     L,A
-        MVI     A,0
-        ADC     H
-        MOV     H,A
+        CALL    BDFLD
         MOV     A,M
         ANI     7FH
         CPI     ' '
@@ -631,13 +574,8 @@ MEMFAIL:
 ; Exit:   OLDTPLN filled; AF HL clobbered
 ;------------------------------------------------------------
 SVTOPLN:
-        LHLD    CURBDP
         MVI     A,BD_TOPLN
-        ADD     L
-        MOV     L,A
-        MVI     A,0
-        ADC     H
-        MOV     H,A             ; HL -> BD_TOPLN
+        CALL    BDFLD           ; HL -> BD_TOPLN
         MOV     A,M
         STA     OLDTPLN
         INX     H
@@ -652,13 +590,8 @@ SVTOPLN:
 ; Exit:   AF HL clobbered
 ;------------------------------------------------------------
 CHKSCRL:
-        LHLD    CURBDP
         MVI     A,BD_TOPLN
-        ADD     L
-        MOV     L,A
-        MVI     A,0
-        ADC     H
-        MOV     H,A             ; HL -> BD_TOPLN
+        CALL    BDFLD           ; HL -> BD_TOPLN
         LDA     OLDTPLN
         CMP     M
         JNZ     CHKYES          ; low byte differs - scrolled
@@ -668,6 +601,20 @@ CHKSCRL:
         RZ                      ; both match - no scroll
 CHKYES: MVI     A,1
         STA     DIRTY           ; viewport scrolled, full redraw
+        RET
+
+;------------------------------------------------------------
+; BDFLD - Compute pointer to buffer descriptor field.
+; Entry:  A = field offset (BD_xxx constant)
+; Exit:   HL -> field in current descriptor; A clobbered
+;------------------------------------------------------------
+BDFLD:
+        LHLD    CURBDP
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A
         RET
 
 ;------------------------------------------------------------
@@ -684,8 +631,8 @@ ACTTBL:
         DW      DO_WNX          ;  6 ACT_WRDNX
         DW      DO_PGU          ;  7 ACT_PGUP
         DW      DO_PGD          ;  8 ACT_PGDN
-        DW      DO_SCU          ;  9 ACT_SCRUP
-        DW      DO_SCD          ; 10 ACT_SCRDN
+        DW      DO_CUU          ;  9 ACT_SCRUP (=cursor up)
+        DW      DO_CUD          ; 10 ACT_SCRDN (=cursor down)
         DW      DO_LST          ; 11 ACT_LINST
         DW      DO_LEN          ; 12 ACT_LINEN
         DW      DO_FTP          ; 13 ACT_FTOP
@@ -700,7 +647,7 @@ ACTTBL:
         DW      DO_LIT          ; 22 ACT_LITNX
         DW      DO_FNX          ; 23 ACT_FNDNX
         DW      DO_SAV          ; 24 ACT_FSAVE
-        DW      DO_OPN          ; 25 ACT_FOPEN
+        DW      DO_MNU          ; 25 ACT_FOPEN (=menu)
         DW      DO_EXT          ; 26 ACT_FEXIT
         DW      DO_BMK          ; 27 ACT_BLKMK
         DW      DO_BCP          ; 28 ACT_BLKCP
