@@ -1057,32 +1057,30 @@ GPUCLP: MOV     A,M
         CALL    GBSETCSOFF
         ; --- Update CSROW and TOPLN ---
         LDA     GPGLFS
-        MOV     B,A             ; B = LFs crossed (L)
-        CALL    GBCSROW
-        MOV     A,L             ; A = current row (R)
-        CMP     B               ; R vs L
-        JNC     GPUNSC          ; R >= L: no TOPLN change
-        ; R < L: CSROW=0, TOPLN -= (L - R)
-        MOV     C,A             ; C = R
-        MOV     A,B             ; A = L
-        SUB     C               ; A = L - R = TOPLN decrease
-        MOV     C,A
-        MVI     B,0             ; BC = TOPLN decrease
-        CALL    GBTOPLN
+        MOV     B,A             ; B = L (preserved across accessors)
+        ; TOPLN -= L, CSROW unchanged (stays at R)
+        CALL    GBTOPLN         ; HL = T
+        PUSH    H               ; save T for underflow case
         MOV     A,L
-        SUB     C
+        SUB     B
         MOV     L,A
         MOV     A,H
-        SBB     B
+        SBI     0
         MOV     H,A
-        JNC     GPUTOK          ; no underflow
-        LXI     H,0             ; clamp to 0
-GPUTOK: CALL    GBSETTOPLN
-        LXI     H,0
-        CALL    GBSETCSROW
+        JC      GPUUFL          ; underflow: T < L
+        ; No underflow: TOPLN = T - L, CSROW unchanged
+        CALL    GBSETTOPLN
+        POP     H               ; discard saved T
         JMP     GPUCOL
-GPUNSC: ; R >= L: just decrement CSROW
-        SUB     B               ; A = R - L
+GPUUFL: ; T < L: TOPLN = 0, CSROW = R + T - L
+        POP     H               ; HL = old T (T < L <= 19)
+        MOV     C,L             ; C = T (low byte sufficient)
+        LXI     H,0
+        CALL    GBSETTOPLN
+        CALL    GBCSROW         ; L = R
+        MOV     A,L             ; A = R
+        ADD     C               ; A = R + T
+        SUB     B               ; A = R + T - L
         MOV     L,A
         MVI     H,0
         CALL    GBSETCSROW
@@ -1216,15 +1214,13 @@ GPDCLP: MOV     A,M
         ADD     B               ; A = R + L
         CPI     EDITROW
         JC      GPDNSC          ; R + L < EDITROW, no scroll
-        ; Scroll: TOPLN += (R + L) - (EDITROW - 1)
-        SUI     EDITROW-1       ; A = TOPLN increment
+        ; Scroll: TOPLN += L, CSROW unchanged (stays at R)
+        LDA     GPGLFS
         MOV     C,A
-        MVI     B,0             ; BC = increment
+        MVI     B,0             ; BC = L
         CALL    GBTOPLN
         DAD     B
         CALL    GBSETTOPLN
-        LXI     H,EDITROW-1
-        CALL    GBSETCSROW
         JMP     GPDCOL
 GPDNSC: ; No scroll: CSROW = R + L
         MOV     L,A

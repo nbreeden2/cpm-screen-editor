@@ -295,73 +295,63 @@ BLCOPY:
         CALL    BLCHKMK         ; check block valid; Z = invalid
         RZ
 
-        ; BKBG and BKEN in memory after BLCHKMK
-        LHLD    BLKBG           ; start offset
-        SHLD    BLKPOS          ; walk position
-
-        LXI     H,CLIPBUF       ; HL = clip write ptr
-        LXI     D,0             ; DE = count
+        ; Init walk position and clipboard pointer
+        LHLD    BLKBG
+        SHLD    BLKPOS          ; walk position = mark start
+        LXI     H,0
+        SHLD    CLIPCNT         ; byte count = 0
+        LXI     H,CLIPBUF
+        SHLD    CLPPTR          ; clip write pointer
 
 BCCPLP:
-        ; Check BLKPOS < BKEN
-        LHLD    BLKPOS
-        XCHG                    ; DE saved, let me redo...
-        ; Use B,C for count to avoid DE conflict
-        LHLD    BLKPOS
-        PUSH    H
+        ; Check BLKPOS < BLKEN
         LHLD    BLKEN
-        POP     D
-        ; HL = BKEN, DE = BLKPOS
-        ; if DE >= HL: done
-        MOV     A,D
-        CMP     H
-        JC      BCGBYT          ; BLKPOS.H < BKEN.H
-        JNZ     BCDON           ; BLKPOS.H > BKEN.H: done
-        MOV     A,E
-        CMP     L
-        JNC     BCDON           ; BLKPOS >= BKEN: done
+        XCHG                    ; DE = BLKEN
+        LHLD    BLKPOS          ; HL = BLKPOS
+        MOV     A,H
+        CMP     D
+        JC      BCGBYT          ; BLKPOS.H < BLKEN.H: continue
+        JNZ     BCDON           ; BLKPOS.H > BLKEN.H: done
+        MOV     A,L
+        CMP     E
+        JNC     BCDON           ; BLKPOS >= BLKEN: done
 
 BCGBYT:
         ; Read byte at BLKPOS from gap buffer
         LHLD    BLKPOS
-        CALL    BLGBRD          ; A = byte
-        MOV     M,A             ; store to clip
-        INX     H               ; advance clip ptr
+        CALL    BLGBRD          ; A = byte (HL clobbered)
 
-        ; Check clip full
-        LXI     D,CLIPBUF
+        ; Store byte to clipboard via saved pointer
+        LHLD    CLPPTR
+        MOV     M,A
+        INX     H
+        SHLD    CLPPTR          ; advance write pointer
+
+        ; Increment count and check CLIPMAX
+        LHLD    CLIPCNT
+        INX     H
+        SHLD    CLIPCNT
         MOV     A,H
-        SUB     D
-        ; rough check: if more than CLIPMAX bytes written, stop
-        ; Use CLIPCNT
-        LDA     CLIPCNT+1
-        MOV     B,A
-        LDA     CLIPCNT
-        INR     A
-        STA     CLIPCNT
-        MOV     A,B
-        ACI     0
-        STA     CLIPCNT+1
-        ; Check >= CLIPMAX
-        LDA     CLIPCNT+1
         CPI     HIGH(CLIPMAX)
         JC      BCNFLL
         JNZ     BCDON
-        LDA     CLIPCNT
+        MOV     A,L
         CPI     LOW(CLIPMAX)
-        JNC     BCDON
+        JNC     BCDON           ; count >= CLIPMAX: stop
 
 BCNFLL:
+        ; Advance walk position
         LHLD    BLKPOS
         INX     H
         SHLD    BLKPOS
         JMP     BCCPLP
 
 BCDON:
-        ; NUL-terminate clip (not strictly needed but helpful)
+        ; NUL-terminate clip
+        LHLD    CLPPTR
         MVI     M,0
 
-        ; Store clip length from CLIPCNT
+        ; Store clip length
         LHLD    CLIPCNT
         SHLD    CLIPLEN
 
@@ -440,20 +430,26 @@ BLPASTE:
         ORA     L
         JZ      BPNONE          ; nothing in clipboard
 
-        LXI     H,CLIPBUF       ; source pointer
-        LHLD    CLIPLEN
-        XCHG                    ; DE = count (HL = clipbuf)
+        SHLD    BPCNT           ; count = CLIPLEN
         LXI     H,CLIPBUF
+        SHLD    CLPPTR          ; read pointer = CLIPBUF
 
 BPLOOP:
-        MOV     A,D
-        ORA     E
+        LHLD    BPCNT
+        MOV     A,H
+        ORA     L
         JZ      BPDONE
 
-        MOV     A,M
-        CALL    GBINSRT
+        LHLD    CLPPTR
+        MOV     A,M             ; read byte from clipboard
         INX     H
-        DCX     D
+        SHLD    CLPPTR          ; advance and save read pointer
+
+        CALL    GBINSRT         ; insert at cursor (clobbers all regs)
+
+        LHLD    BPCNT
+        DCX     H
+        SHLD    BPCNT           ; decrement count
         JMP     BPLOOP
 
 BPDONE:
@@ -642,17 +638,9 @@ BLGBF:  ; physical = BSTAR + logical
         RET
 
 BLGAF:  ; physical = BSTAR + logical + (GAPEN - GAPBG)
-        LHLD    CURBDP
-        MOV     A,L
-        ADI     BD_GAPEN
-        MOV     L,A
-        MOV     A,H
-        ACI     0
-        MOV     H,A
-        MOV     L,M
-        INX     H
-        MOV     H,M             ; HL = GAPEN (but H is overwritten!)
-        ; Fix: read low byte first
+        ; DE = BSTAR, BC = GAPBG
+        PUSH    D               ; save BSTAR
+        ; Read GAPEN into DE
         LHLD    CURBDP
         MOV     A,L
         ADI     BD_GAPEN
@@ -661,10 +649,9 @@ BLGAF:  ; physical = BSTAR + logical + (GAPEN - GAPBG)
         ACI     0
         MOV     H,A
         MOV     A,M
-        MOV     E,A             ; E = GAPEN low
+        MOV     E,A
         INX     H
-        MOV     A,M
-        MOV     D,A             ; D = GAPEN high
+        MOV     D,M             ; DE = GAPEN
         ; gap size = GAPEN - GAPBG = DE - BC
         MOV     A,E
         SUB     C
@@ -672,21 +659,22 @@ BLGAF:  ; physical = BSTAR + logical + (GAPEN - GAPBG)
         MOV     A,D
         SBB     B
         MOV     B,A             ; BC = gap size
-        ; physical = logical + gap size
+        ; HL = logical + gap size
         LHLD    BLGOFF
         MOV     A,L
         ADD     C
         MOV     L,A
         MOV     A,H
         ADC     B
-        MOV     H,A             ; HL = physical offset
-        ; Add BSTAR (still in DE)
+        MOV     H,A             ; HL = logical + gap_size
+        ; Add BSTAR
+        POP     D               ; DE = BSTAR (restored)
         MOV     A,L
         ADD     E
         MOV     L,A
         MOV     A,H
         ADC     D
-        MOV     H,A             ; HL = BSTAR + physical offset
+        MOV     H,A             ; HL = BSTAR + logical + gap_size
         MOV     A,M
         RET
 
@@ -712,6 +700,10 @@ BLGOFF: DW      0
 
 ; BLKPOS for BLCOPY walk
 BLKPOS: DW      0
+; Clipboard read/write pointer (shared by BLCOPY and BLPASTE)
+CLPPTR: DW      0
+; Paste counter
+BPCNT:  DW      0
 
 ; Status messages
 BM1MSG:  DB     'Mark start. $'
