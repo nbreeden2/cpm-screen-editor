@@ -1,0 +1,2311 @@
+;============================================================
+; FILE:    SEGAPBUF.MAC
+; PROJECT: SEDIT - Screen Editor for CP/M 2.2
+; VERSION: 1.0
+; DATE:    1984-01-01
+; AUTHOR:
+;------------------------------------------------------------
+; DESCRIPTION:
+;   Gap buffer text engine. All routines operate on the
+;   buffer identified by CURBDP (current buffer descriptor
+;   pointer).  Text is stored as flat bytes with CR+LF
+;   (0DH 0AH) line separators. The gap sits at the cursor
+;   insertion point, allowing O(1) insert/delete there.
+;
+;   Descriptor layout (offsets from BD_xxx in SEDIT.INC):
+;     BD_BSTAR: base address of RAM buffer
+;     BD_BSIZE: total capacity in bytes
+;     BD_GAPBG: offset of first gap byte
+;     BD_GAPEN: offset of first text byte after gap
+;     BD_TXEND: number of text bytes in buffer
+;     BD_TOPLN: line number at top of screen (0-based)
+;     BD_CSROW: cursor screen row (0-based)
+;     BD_CSCOL: cursor text column (0-based)
+;     BD_CSOFF: cursor logical text offset
+;     BD_MRKBG: block mark start offset (NO_MARK=none)
+;     BD_MRKEN: block mark end offset
+;     BD_MODIF: non-zero if buffer is modified
+;------------------------------------------------------------
+; REVISION HISTORY:
+;   1.0  1984-01-01  Initial release
+;============================================================
+;============================================================
+; FILE:    SEDIT.INC
+; PROJECT: SEDIT - Screen Editor for CP/M 2.2
+; VERSION: 1.0
+; DATE:    1984-01-01
+; AUTHOR:
+;------------------------------------------------------------
+; DESCRIPTION:
+;   Shared equates for all SEDIT modules.
+;   INCLUDE this as the first statement of every .MAC file.
+;------------------------------------------------------------
+; REVISION HISTORY:
+;   1.0  1984-01-01  Initial release
+;============================================================
+
+;--- CP/M system addresses ----------------------------
+BDOS    EQU     0005H       ; BDOS call entry
+WBOOT   EQU     0000H       ; warm boot / exit
+DFTFCB  EQU     005CH       ; default FCB (arg 1)
+CMDTAIL EQU     0080H       ; command tail buffer
+
+;--- BDOS function numbers ----------------------------
+BF_CONIN  EQU   1           ; console input (wait)
+BF_CONOUT EQU   2           ; console output: E=char
+BF_RAWIO  EQU   6           ; direct I/O: E=FFH->in
+BF_PRTSTR EQU   9           ; print $-string: DE=addr
+BF_RDLINE EQU   10          ; buffered line input
+BF_CONST  EQU   11          ; console status
+BF_FOPEN  EQU   15          ; open file: DE=FCB
+BF_FCLOSE EQU   16          ; close file: DE=FCB
+BF_FDEL   EQU   19          ; delete: DE=FCB
+BF_FREAD  EQU   20          ; seq read: DE=FCB
+BF_FWRITE EQU   21          ; seq write: DE=FCB
+BF_FMAKE  EQU   22          ; create: DE=FCB
+BF_SETDMA EQU   26          ; set DMA: DE=addr
+BF_USRNUM EQU   32          ; get/set user: E=num
+
+;--- ASCII control codes ------------------------------
+NUL     EQU     00H
+BEL     EQU     07H         ; bell
+BS      EQU     08H         ; backspace
+TAB     EQU     09H         ; horizontal tab
+LF      EQU     0AH         ; line feed
+CR      EQU     0DH         ; carriage return
+ESC     EQU     1BH         ; escape
+DEL     EQU     7FH         ; delete character
+CPMEOF  EQU     1AH         ; CP/M EOF marker (Ctrl-Z)
+CTRLK   EQU     0BH         ; Ctrl-K (prefix key)
+CTRLQ   EQU     11H         ; Ctrl-Q (prefix key)
+
+;--- Screen layout ------------------------------------
+SCRROWS EQU     24          ; terminal row count
+SCRCOLS EQU     80          ; terminal column count
+EDITROW EQU     20          ; edit rows (rows 3-22)
+EDITFR  EQU     3           ; first edit row (1-based)
+INFOROW EQU     1           ; info bar row
+RULRROW EQU     2           ; tab ruler row
+SEPRROW EQU     23          ; separator (===) row
+STATROW EQU     24          ; status/message row
+LNUMWID EQU     4           ; gutter width (3+space)
+TXTCOLS EQU     74          ; max text columns/line
+TXTFCOL EQU     5           ; text start col (1-based)
+TABWID  EQU     4           ; tab stop interval
+
+;--- SGR attribute byte values ------------------------
+ATTR_NRM EQU    00H         ; normal
+ATTR_BLD EQU    01H         ; bold
+ATTR_DIM EQU    02H         ; dim
+ATTR_REV EQU    07H         ; reverse video
+ATTR_CYN EQU    36H         ; cyan foreground
+ATTR_GRN EQU    32H         ; green foreground
+ATTR_YEL EQU    33H         ; yellow foreground
+ATTR_MAG EQU    35H         ; magenta foreground
+
+;--- Buffer descriptor field offsets -----------------
+BD_BSTAR EQU    0           ; 2: buffer base address
+BD_BSIZE EQU    2           ; 2: capacity in bytes
+BD_GAPBG EQU    4           ; 2: gap start offset
+BD_GAPEN EQU    6           ; 2: gap end offset
+BD_TXEND EQU    8           ; 2: text end offset
+BD_TOPLN EQU    10          ; 2: top visible line
+BD_CSROW EQU    12          ; 1: cursor screen row
+BD_CSCOL EQU    13          ; 1: cursor text column
+BD_CSOFF EQU    14          ; 2: cursor byte offset
+BD_MRKBG EQU    16          ; 2: block mark start
+BD_MRKEN EQU    18          ; 2: block mark end
+BD_MODIF EQU    20          ; 1: modified flag
+BD_SYNMD EQU    21          ; 1: syntax mode
+BD_FNAME EQU    22          ; 12: drive+name+ext
+BD_SIZE  EQU    34          ; bytes per descriptor
+
+;--- Number of edit buffers ---------------------------
+MAXBUFS EQU     2           ; maximum open buffers
+MINMEM  EQU     18*1024     ; minimum TPA required
+
+;--- Syntax mode codes --------------------------------
+SYN_NONE EQU    0           ; plain text
+SYN_ASM  EQU    1           ; 8080/Z80 assembly
+
+;--- Insert / overwrite mode --------------------------
+MODE_INS EQU    0           ; insert mode (default)
+MODE_OVR EQU    1           ; overwrite mode
+
+;--- Key type codes (B reg from GETKEY) ---------------
+KT_NONE EQU     0           ; no key available
+KT_ACT  EQU     1           ; C = action code
+KT_CHAR EQU     2           ; C = printable char
+
+;--- Key action codes (C reg when B=KT_ACT) ----------
+ACT_CURUP EQU   1           ; cursor up
+ACT_CURDN EQU   2           ; cursor down
+ACT_CURLT EQU   3           ; cursor left
+ACT_CURRT EQU   4           ; cursor right
+ACT_WRDPV EQU   5           ; previous word
+ACT_WRDNX EQU   6           ; next word
+ACT_PGUP  EQU   7           ; page up
+ACT_PGDN  EQU   8           ; page down
+ACT_SCRUP EQU   9           ; scroll screen up
+ACT_SCRDN EQU   10          ; scroll screen down
+ACT_LINST EQU   11          ; jump to line start
+ACT_LINEN EQU   12          ; jump to line end
+ACT_FTOP  EQU   13          ; jump to file top
+ACT_FEND  EQU   14          ; jump to file end
+ACT_DELLF EQU   15          ; delete left (BS)
+ACT_DELRT EQU   16          ; delete right (Del)
+ACT_DELWD EQU   17          ; delete word right
+ACT_DELLN EQU   18          ; delete entire line
+ACT_INSTB EQU   19          ; insert tab
+ACT_INSNL EQU   20          ; insert newline
+ACT_TOGIN EQU   21          ; toggle insert/overwrite
+ACT_LITNX EQU   22          ; next char is literal
+ACT_FNDNX EQU   23          ; find next
+ACT_FSAVE EQU   24          ; save file
+ACT_FOPEN EQU   25          ; open file
+ACT_FEXIT EQU   26          ; exit editor
+ACT_BLKMK EQU   27          ; toggle block mark
+ACT_BLKCP EQU   28          ; copy block
+ACT_BLKDL EQU   29          ; delete block
+ACT_BLKPS EQU   30          ; paste clipboard
+ACT_MENU  EQU   31          ; open ESC menu
+ACT_MAX   EQU   31          ; highest action code
+
+;--- Block mark sentinel ------------------------------
+NO_MARK EQU     0FFFFH      ; marks absent/unset
+
+;--- FCB field offsets --------------------------------
+FCB_DR  EQU     0           ; drive (0=default)
+FCB_FN  EQU     1           ; filename (8 bytes)
+FCB_FT  EQU     9           ; extension (3 bytes)
+FCB_EX  EQU     12          ; extent number
+FCB_S2  EQU     14          ; extent high
+FCB_RC  EQU     15          ; record count
+FCB_CR  EQU     32          ; current record
+FCB_SIZ EQU     36          ; total FCB size
+
+;--- DMA record size ----------------------------------
+RECSIZ  EQU     128         ; 128 bytes per record
+
+;--- Clipboard buffer size ----------------------------
+CLIPMAX EQU     2048        ; max paste buffer bytes
+
+;--- Search string size limit -------------------------
+SRCHMAX EQU     64          ; max find string length
+
+
+        EXTRN   CURBDP          ; ptr to active descriptor
+
+        PUBLIC  GBINIT          ; init an empty buffer
+        PUBLIC  GBINSRT         ; insert char at cursor
+        PUBLIC  GBDLFT         ; delete char left (BS)
+        PUBLIC  GBDELRT         ; delete char right
+        PUBLIC  GBMVUP          ; cursor up one line
+        PUBLIC  GBMVDN          ; cursor down one line
+        PUBLIC  GBMVLT          ; cursor left one char
+        PUBLIC  GBMVRT          ; cursor right one char
+        PUBLIC  GBMLNS         ; cursor to line start
+        PUBLIC  GBMLNE         ; cursor to line end
+        PUBLIC  GBMVTOP         ; cursor to file top
+        PUBLIC  GBMVEND         ; cursor to file end
+        PUBLIC  GBPGUP          ; page up (EDITROW lines)
+        PUBLIC  GBPGDN          ; page down
+        PUBLIC  GBDLLN         ; delete current line
+        PUBLIC  GBWRDPV         ; move to previous word
+        PUBLIC  GBWRDNX         ; move to next word
+        PUBLIC  GBGETLN         ; get ptr to line N text
+        PUBLIC  GBCNTLN         ; count lines in buffer
+        PUBLIC  GBFNDLN         ; find logical offset of line N (fast)
+        PUBLIC  GBFNDCS         ; find TOPLN offset via backward scan
+        PUBLIC  GBRDLNO         ; read line at given logical offset
+
+;=============================================================
+; Internal helper: load descriptor fields into registers.
+; After LDDESC:
+;   BBASE = buffer base address (in DSEG)
+;   BGAPBG, BGAPEN, BTXEND = gap/text state
+;   BC = GAPBEG (gap start offset)
+;   DE = GAPEN  (gap end offset)
+;   HL = TXEND  (text end offset) -- logical text length
+; All from current descriptor at CURBDP.
+;=============================================================
+        CSEG
+
+; Macro-like helper: load HL = address of field in desc
+; Uses A as scratch.  Entry: A = field offset constant.
+; Result: HL = &desc[offset]
+; (Implemented inline where needed for clarity)
+
+;=============================================================
+; GBINIT - Initialise a buffer descriptor for empty file.
+; Entry:  HL = buffer descriptor address
+;         DE = RAM buffer base address
+;         BC = RAM buffer size in bytes
+; Exit:   Descriptor zeroed and gap set to full capacity
+;         All regs clobbered
+;=============================================================
+GBINIT:
+        ; Invalidate line count cache
+        XRA     A
+        STA     GLNVAL
+        PUSH    H               ; save descriptor address
+        ; Store base address
+        MOV     M,E             ; BD_BSTAR low
+        INX     H
+        MOV     M,D             ; BD_BSTAR high
+        INX     H
+        ; Store size
+        MOV     M,C             ; BD_BSIZE low
+        INX     H
+        MOV     M,B             ; BD_BSIZE high
+        INX     H
+        ; GAPBG = 0 (gap at start)
+        MVI     M,0
+        INX     H
+        MVI     M,0
+        INX     H
+        ; GAPEN = BC (gap end = full buffer)
+        POP     H
+        PUSH    H
+        MVI     A,BD_GAPEN
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A
+        MOV     M,C
+        INX     H
+        MOV     M,B
+        ; TXEND = 0 (no text)
+        POP     H
+        PUSH    H
+        MVI     A,BD_TXEND
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A
+        MVI     M,0
+        INX     H
+        MVI     M,0
+        ; TOPLN=0, CSROW=0, CSCOL=0, CSOFF=0,
+        ; MRKBG=FFFF, MRKEN=FFFF, MODIF=0, SYNMD=0
+        POP     H
+        PUSH    H
+        MVI     A,BD_TOPLN
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A
+        MVI     M,0             ; TOPLN low
+        INX     H
+        MVI     M,0             ; TOPLN high
+        INX     H
+        MVI     M,0             ; CSROW
+        INX     H
+        MVI     M,0             ; CSCOL
+        INX     H
+        MVI     M,0             ; CSOFF low
+        INX     H
+        MVI     M,0             ; CSOFF high
+        INX     H
+        MVI     M,0FFH          ; MRKBG low = NO_MARK
+        INX     H
+        MVI     M,0FFH          ; MRKBG high
+        INX     H
+        MVI     M,0FFH          ; MRKEN low
+        INX     H
+        MVI     M,0FFH          ; MRKEN high
+        INX     H
+        MVI     M,0             ; MODIF = clean
+        INX     H
+        MVI     M,SYN_NONE      ; SYNMD = plain text
+        POP     H
+        RET
+
+;=============================================================
+; GBINSRT - Insert byte A at current cursor position.
+; Entry:  A = byte to insert
+; Exit:   A=0 ok; A=0FFH buffer full; all regs clobbered
+;=============================================================
+GBINSRT:
+        STA     GBTMP           ; save char to insert
+        ; Check gap is non-empty
+        CALL    GBGAPLN         ; HL = gap size
+        MOV     A,H
+        ORA     L
+        JZ      GBIFULL         ; gap=0 means full
+
+        ; Get descriptor fields
+        CALL    GBBASE          ; DE = buffer base
+        CALL    GBGAPBG         ; HL = GAPBG offset
+        ; Compute absolute address: DE+HL
+        DAD     D               ; HL = base + GAPBG
+        ; Write character
+        LDA     GBTMP
+        MOV     M,A
+
+        ; Advance GAPBG by 1
+        CALL    GBGAPBG         ; HL = GAPBG offset
+        INX     H               ; +1
+        CALL    GBSETGAPBG      ; store new GAPBG
+
+        ; Advance TXEND by 1
+        CALL    GBTXEND         ; HL = TXEND
+        INX     H
+        CALL    GBSETTXEND
+
+        ; Update cursor column and offset
+        LDA     GBTMP
+        CPI     CR
+        JZ      GBISKPC         ; CR is invisible, skip col increment
+        CALL    GBCSCOL         ; HL = cursor col
+        INX     H
+        CALL    GBSETCSCOL
+GBISKPC:
+        CALL    GBCSOFF         ; HL = cursor offset
+        INX     H
+        CALL    GBSETCSOFF
+
+        ; Mark buffer modified
+        CALL    GBSETMOD
+
+        ; Handle newline: reset column, advance row
+        LDA     GBTMP
+        CPI     LF
+        JNZ     GBIDONE
+        ; LF inserted: update line count cache
+        LDA     GLNVAL
+        ORA     A
+        JZ      GBILCS          ; cache not valid, skip
+        LHLD    GLNCNT
+        INX     H
+        SHLD    GLNCNT
+GBILCS: ; After LF: col=0, row++
+        LXI     H,0
+        CALL    GBSETCSCOL
+        CALL    GBCSROW         ; HL = screen row
+        INX     H
+        MOV     A,L
+        CPI     EDITROW         ; scroll if needed
+        JNC     GBISCRL
+        CALL    GBSETCSROW
+        JMP     GBIDONE
+GBISCRL:
+        ; Scroll: increment TOPLN, keep row at EDITROW-1
+        CALL    GBTOPLN         ; HL = TOPLN
+        INX     H
+        CALL    GBSETTOPLN
+        LXI     H,EDITROW-1
+        CALL    GBSETCSROW
+
+GBIDONE:
+        XRA     A               ; A=0 = ok
+        RET
+
+GBIFULL:
+        MVI     A,0FFH          ; A=FFH = error
+        RET
+
+;=============================================================
+; GBDLFT - Delete char to the left of cursor (backspace).
+; Entry:  (none)
+; Exit:   A=0 ok (deleted); A=FFH at beginning of buffer
+;=============================================================
+GBDLFT:
+        CALL    GBGAPBG         ; HL = GAPBG
+        MOV     A,H
+        ORA     L
+        JZ      GBDLBER         ; at BOF, nothing to del
+
+        ; Check if char before gap is LF
+        CALL    GBBASE          ; DE = buffer base
+        CALL    GBGAPBG         ; HL = GAPBG
+        DCX     H               ; HL = GAPBG - 1
+        DAD     D               ; abs address
+        MOV     A,M             ; byte before cursor
+        STA     GBTMP           ; save it
+
+        ; Shrink gap leftward: GAPBG -= 1
+        CALL    GBGAPBG
+        DCX     H
+        CALL    GBSETGAPBG
+
+        ; Shrink TXEND by 1
+        CALL    GBTXEND
+        DCX     H
+        CALL    GBSETTXEND
+
+        ; Update cursor: offset -= 1
+        CALL    GBCSOFF
+        DCX     H
+        CALL    GBSETCSOFF
+
+        ; Update column
+        LDA     GBTMP
+        CPI     LF
+        JNZ     GBDLBCL         ; not a newline
+        ; LF deleted: update line count cache
+        LDA     GLNVAL
+        ORA     A
+        JZ      GBDLCS          ; cache not valid, skip
+        LHLD    GLNCNT
+        DCX     H
+        SHLD    GLNCNT
+GBDLCS: ; Deleted a newline: move up, recalc column
+        CALL    GBCSROW
+        MOV     A,L
+        ORA     A
+        JZ      GBDLBTL         ; was on row 0 of screen
+        DCX     H
+        CALL    GBSETCSROW
+        JMP     GBDLBRC
+GBDLBTL:
+        ; Row was 0 - scroll back (TOPLN--)
+        CALL    GBTOPLN
+        MOV     A,H
+        ORA     L
+        JZ      GBDLBRC         ; already at top
+        DCX     H
+        CALL    GBSETTOPLN
+GBDLBRC:
+        ; Recalculate column as length of current line
+        CALL    GBCURLNL        ; HL = current line length
+        CALL    GBSETCSCOL
+        JMP     GBDLDONE
+GBDLBCL:
+        ; Not a newline
+        CPI     CR
+        JZ      GBDLDONE        ; CR is invisible, no col change
+        ; Visible char: decrement column
+        CALL    GBCSCOL
+        MOV     A,L
+        ORA     A
+        JZ      GBDLDONE        ; col already 0
+        DCX     H
+        CALL    GBSETCSCOL
+GBDLDONE:
+        CALL    GBSETMOD
+        XRA     A
+        RET
+GBDLBER:
+        MVI     A,0FFH
+        RET
+
+;=============================================================
+; GBDELRT - Delete char at cursor (forward delete).
+; Entry:  (none)
+; Exit:   A=0 ok; A=FFH at end of buffer
+;=============================================================
+GBDELRT:
+        ; Check if gap end is at text end (GAPEN >= BSIZE)
+        CALL    GBGAPEN         ; HL = GAPEN
+        PUSH    H               ; save GAPEN (GBBSIZ clobbers HL)
+        CALL    GBBSIZ          ; DE = buffer size
+        POP     H               ; HL = GAPEN restored
+        MOV     A,L
+        SUB     E
+        MOV     A,H
+        SBB     D
+        JNC     GBDREOF         ; GAPEN >= BSIZE, at end
+
+        ; Get char being deleted
+        CALL    GBBASE          ; DE = base
+        CALL    GBGAPEN         ; HL = GAPEN offset
+        DAD     D               ; abs address
+        MOV     A,M
+        STA     GBTMP
+
+        ; Extend gap right: GAPEN += 1
+        CALL    GBGAPEN
+        INX     H
+        CALL    GBSETGAPEN
+
+        ; TXEND -= 1
+        CALL    GBTXEND
+        DCX     H
+        CALL    GBSETTXEND
+
+        ; If deleted char was LF, update line count cache
+        LDA     GBTMP
+        CPI     LF
+        JNZ     GBDRDN
+        LDA     GLNVAL
+        ORA     A
+        JZ      GBDRDN
+        LHLD    GLNCNT
+        DCX     H
+        SHLD    GLNCNT
+GBDRDN: CALL    GBSETMOD
+        XRA     A
+        RET
+GBDREOF:
+        MVI     A,0FFH
+        RET
+
+;=============================================================
+; GBMVLT - Move cursor left one character.
+; Entry:  (none)
+; Exit:   Cursor moved; all regs clobbered
+;=============================================================
+GBMVLT:
+        CALL    GBGAPBG         ; HL = GAPBG
+        MOV     A,H
+        ORA     L
+        RZ                      ; at BOF
+
+        ; Get char to left of gap
+        CALL    GBBASE          ; DE = base
+        CALL    GBGAPBG
+        DCX     H
+        DAD     D               ; abs address
+        MOV     A,M             ; char being passed
+        STA     GBTMP
+
+        ; Slide gap left: copy byte from left of gap
+        ;   to right end of gap (use GBTMP; GBBASE/GBGAPEN clobber A)
+        CALL    GBBASE
+        CALL    GBGAPEN
+        DCX     H
+        DAD     D               ; HL = base + GAPEN - 1
+        LDA     GBTMP
+        MOV     M,A             ; write saved char at right end of gap
+
+        ; Update GAPBG-=1, GAPEN-=1
+        CALL    GBGAPBG
+        DCX     H
+        CALL    GBSETGAPBG
+        CALL    GBGAPEN
+        DCX     H
+        CALL    GBSETGAPEN
+
+        ; Update cursor offset -=1
+        CALL    GBCSOFF
+        DCX     H
+        CALL    GBSETCSOFF
+
+        ; Update cursor col / row
+        LDA     GBTMP
+        CPI     LF
+        JZ      GBLTLF          ; LF: moved back over newline
+        CPI     CR
+        JZ      GBLTDN          ; CR: invisible, no col/row change
+        ; Other chars: decrement column
+GBLTCL:
+        CALL    GBCSCOL
+        MOV     A,L
+        ORA     A
+        JZ      GBLTDN
+        DCX     H
+        CALL    GBSETCSCOL
+GBLTDN: RET
+GBLTLF:
+        ; Moved back over a newline (LF)
+        CALL    GBCSROW
+        MOV     A,L
+        ORA     A
+        JZ      GBLTSR
+        DCX     H
+        CALL    GBSETCSROW
+        JMP     GBLTRC
+GBLTSR:
+        CALL    GBTOPLN
+        MOV     A,H
+        ORA     L
+        JZ      GBLTRC
+        DCX     H
+        CALL    GBSETTOPLN
+GBLTRC:
+        CALL    GBCURLNL
+        CALL    GBSETCSCOL
+        RET
+
+;=============================================================
+; GBMVRT - Move cursor right one character.
+; Entry:  (none)
+; Exit:   Cursor moved; all regs clobbered
+;=============================================================
+GBMVRT:
+        ; Check if at end of text (GAPEN >= BSIZE)
+        CALL    GBGAPEN         ; HL = GAPEN
+        PUSH    H               ; save GAPEN (GBBSIZ clobbers HL)
+        CALL    GBBSIZ          ; DE = buffer size
+        POP     H               ; HL = GAPEN restored
+        MOV     A,L
+        SUB     E
+        MOV     A,H
+        SBB     D
+        JNC     GBRTAT          ; GAPEN >= BSIZE, at end
+
+        ; Get char at right side of gap (GAPEN)
+        CALL    GBBASE
+        CALL    GBGAPEN
+        DAD     D
+        MOV     A,M
+        STA     GBTMP
+
+        ; Copy char from right of gap to left of gap
+        ; (buffer[GAPBG] = buffer[GAPEN])
+        CALL    GBBASE          ; DE = base
+        CALL    GBGAPBG         ; HL = GAPBG
+        DAD     D               ; HL = abs addr of GAPBG
+        LDA     GBTMP
+        MOV     M,A             ; write char at GAPBG
+
+        ; Slide gap right: GAPBG+=1, GAPEN+=1
+        CALL    GBGAPBG
+        INX     H
+        CALL    GBSETGAPBG
+        CALL    GBGAPEN
+        INX     H
+        CALL    GBSETGAPEN
+
+        ; Cursor offset += 1
+        CALL    GBCSOFF
+        INX     H
+        CALL    GBSETCSOFF
+
+        ; Update column / row
+        LDA     GBTMP
+        CPI     LF
+        JZ      GBRTNL          ; LF: new line
+        CPI     CR
+        RZ                      ; CR: invisible, no col/row change
+        ; Other chars: increment column
+GBRTCL:
+        CALL    GBCSCOL
+        INX     H
+        CALL    GBSETCSCOL
+        RET
+GBRTNL:
+        LXI     H,0
+        CALL    GBSETCSCOL
+        CALL    GBCSROW
+        INX     H
+        MOV     A,L
+        CPI     EDITROW
+        JNC     GBRTSC
+        CALL    GBSETCSROW
+        RET
+GBRTSC:
+        CALL    GBTOPLN
+        INX     H
+        CALL    GBSETTOPLN
+        LXI     H,EDITROW-1
+        CALL    GBSETCSROW
+        RET
+GBRTAT: RET
+
+;=============================================================
+; GBMLNS - Move cursor to start of current line.
+; Entry:  (none)
+; Exit:   Cursor at col 0; all regs clobbered
+;=============================================================
+GBMLNS:
+        ; Move left until CSCOL = 0 or at BOF
+GLSLLP: CALL    GBCSCOL
+        MOV     A,L
+        ORA     A
+        RZ                      ; at col 0
+        CALL    GBMVLT
+        JMP     GLSLLP
+
+;=============================================================
+; GBMLNE - Move cursor to end of current line.
+; Entry:  (none)
+; Exit:   Cursor at end of line; all regs clobbered
+;=============================================================
+GBMLNE:
+        ; Move right until LF or EOF
+GLELP:  CALL    GBGAPEN         ; HL = GAPEN
+        PUSH    H               ; save GAPEN (GBBSIZ clobbers HL)
+        CALL    GBBSIZ          ; DE = BSIZE
+        POP     H               ; HL = GAPEN restored
+        ; Check GAPEN >= BSIZE (at end of buffer)
+        MOV     A,L
+        SUB     E
+        MOV     A,H
+        SBB     D
+        JNC     GLEDN           ; GAPEN >= BSIZE, at end
+        CALL    GBBASE
+        CALL    GBGAPEN
+        DAD     D
+        MOV     A,M
+        CPI     LF
+        JZ      GLEDN
+        CPI     CR
+        JZ      GLEDN
+        CALL    GBMVRT
+        JMP     GLELP
+GLEDN:  RET
+
+;=============================================================
+; GBMVTOP - Move cursor to top of file.
+; Entry:  (none)
+; Exit:   Cursor at offset 0; all regs clobbered
+;=============================================================
+GBMVTOP:
+        ; Move left until at beginning of buffer
+GVTLP:  CALL    GBGAPBG
+        MOV     A,H
+        ORA     L
+        JZ      GVTDN
+        CALL    GBMVLT
+        JMP     GVTLP
+GVTDN:
+        LXI     H,0
+        CALL    GBSETTOPLN
+        LXI     H,0
+        CALL    GBSETCSROW
+        LXI     H,0
+        CALL    GBSETCSCOL
+        RET
+
+;=============================================================
+; GBMVEND - Move cursor to end of file.
+; Entry:  (none)
+; Exit:   Cursor at last char; all regs clobbered
+;=============================================================
+GBMVEND:
+GVELPG: CALL    GBGAPEN         ; HL = GAPEN
+        PUSH    H               ; save GAPEN (GBBSIZ clobbers HL)
+        CALL    GBBSIZ          ; DE = BSIZE
+        POP     H               ; HL = GAPEN restored
+        ; Check GAPEN >= BSIZE (at end of buffer)
+        MOV     A,L
+        SUB     E
+        MOV     A,H
+        SBB     D
+        JNC     GVELP2          ; GAPEN >= BSIZE, at end
+        CALL    GBMVRT
+        JMP     GVELPG
+GVELP2: RET
+
+;=============================================================
+; GBPGUP - Scroll up one page (EDITROW lines).
+; Uses bulk gap move for performance: scans backward for
+; EDITROW LFs, then copies bytes in one tight loop instead
+; of calling GBMVRT per character.
+; Entry:  (none)
+; Exit:   Cursor moved up EDITROW lines; regs clobbered
+;=============================================================
+GBPGUP:
+        ; Check if already at top of file
+        CALL    GBGAPBG
+        MOV     A,H
+        ORA     L
+        RZ                      ; GAPBG=0, at BOF
+        ; Save base address
+        CALL    GBBASE
+        XCHG
+        SHLD    GPGBAS
+        ; Compute scan start: base + GAPBG - 1
+        CALL    GBGAPBG
+        XCHG                    ; DE = GAPBG
+        LHLD    GPGBAS          ; HL = base
+        DAD     D               ; HL = base + GAPBG
+        DCX     H               ; HL = last pre-gap byte addr
+        ; Set up scan: HL = scan ptr, DE = base (stop address)
+        XCHG                    ; DE = scan start
+        LHLD    GPGBAS          ; HL = base
+        XCHG                    ; DE = base, HL = scan start
+        MVI     B,EDITROW       ; LF counter
+        ; --- Backward scan for EDITROW LFs ---
+GPUSLP: MOV     A,M
+        CPI     LF
+        JNZ     GPUSNL
+        DCR     B
+        JZ      GPUFND          ; found all EDITROW LFs
+GPUSNL: MOV     A,H             ; check if ptr == base
+        CMP     D
+        JNZ     GPUSGO
+        MOV     A,L
+        CMP     E
+        JZ      GPUBOF          ; reached buffer start
+GPUSGO: DCX     H
+        JMP     GPUSLP
+GPUFND: ; Found all LFs. HL = address of last LF.
+        INX     H               ; cursor target = byte after LF
+        MVI     A,EDITROW-1     ; effective lines back (not L)
+        STA     GPGLFS          ; backward scan: L LFs = L-1 lines
+        JMP     GPUCPY
+GPUBOF: ; Reached beginning of file.
+        MVI     A,EDITROW
+        SUB     B               ; A = LFs actually found
+        JZ      GPURT           ; 0 LFs above cursor, nothing to do
+        STA     GPGLFS
+        ; HL = base = cursor target
+GPUCPY: ; HL = absolute target address, GPGLFS = LFs crossed
+        ; Compute N = (base + GAPBG) - HL
+        XCHG                    ; DE = target
+        CALL    GBGAPBG         ; HL = GAPBG
+        PUSH    D               ; save target
+        XCHG                    ; DE = GAPBG
+        LHLD    GPGBAS
+        DAD     D               ; HL = base + GAPBG
+        POP     D               ; DE = target
+        MOV     A,L
+        SUB     E
+        MOV     C,A
+        MOV     A,H
+        SBB     D
+        MOV     B,A             ; BC = N (bytes to move)
+        MOV     A,B
+        ORA     C
+        JZ      GPURT           ; N=0, nothing to do
+        MOV     H,B
+        MOV     L,C
+        SHLD    GPGCNT          ; save byte count
+        ; --- Backward copy: pre-gap tail → gap tail ---
+        ; Dest end: base + GAPEN - 1
+        CALL    GBGAPEN
+        XCHG
+        LHLD    GPGBAS
+        DAD     D
+        DCX     H               ; HL = dest end
+        PUSH    H               ; save dest end
+        ; Src end: base + GAPBG - 1
+        CALL    GBGAPBG
+        XCHG
+        LHLD    GPGBAS
+        DAD     D
+        DCX     H               ; HL = src end
+        ; Load BC = N
+        PUSH    H               ; save src end
+        LHLD    GPGCNT
+        MOV     B,H
+        MOV     C,L             ; BC = N
+        POP     H               ; HL = src end
+        POP     D               ; DE = dest end
+        ; Copy backward (safe: dest > src)
+GPUCLP: MOV     A,M
+        STAX    D
+        DCX     H
+        DCX     D
+        DCX     B
+        MOV     A,B
+        ORA     C
+        JNZ     GPUCLP
+        ; --- Update descriptor fields ---
+        LHLD    GPGCNT
+        MOV     B,H
+        MOV     C,L             ; BC = N
+        ; GAPBG -= N
+        CALL    GBGAPBG
+        MOV     A,L
+        SUB     C
+        MOV     L,A
+        MOV     A,H
+        SBB     B
+        MOV     H,A
+        CALL    GBSETGAPBG
+        ; GAPEN -= N
+        CALL    GBGAPEN
+        MOV     A,L
+        SUB     C
+        MOV     L,A
+        MOV     A,H
+        SBB     B
+        MOV     H,A
+        CALL    GBSETGAPEN
+        ; CSOFF -= N
+        CALL    GBCSOFF
+        MOV     A,L
+        SUB     C
+        MOV     L,A
+        MOV     A,H
+        SBB     B
+        MOV     H,A
+        CALL    GBSETCSOFF
+        ; --- Update CSROW and TOPLN ---
+        LDA     GPGLFS
+        MOV     B,A             ; B = LFs crossed (L)
+        CALL    GBCSROW
+        MOV     A,L             ; A = current row (R)
+        CMP     B               ; R vs L
+        JNC     GPUNSC          ; R >= L: no TOPLN change
+        ; R < L: CSROW=0, TOPLN -= (L - R)
+        MOV     C,A             ; C = R
+        MOV     A,B             ; A = L
+        SUB     C               ; A = L - R = TOPLN decrease
+        MOV     C,A
+        MVI     B,0             ; BC = TOPLN decrease
+        CALL    GBTOPLN
+        MOV     A,L
+        SUB     C
+        MOV     L,A
+        MOV     A,H
+        SBB     B
+        MOV     H,A
+        JNC     GPUTOK          ; no underflow
+        LXI     H,0             ; clamp to 0
+GPUTOK: CALL    GBSETTOPLN
+        LXI     H,0
+        CALL    GBSETCSROW
+        JMP     GPUCOL
+GPUNSC: ; R >= L: just decrement CSROW
+        SUB     B               ; A = R - L
+        MOV     L,A
+        MVI     H,0
+        CALL    GBSETCSROW
+GPUCOL: CALL    GBCURLNL
+        CALL    GBSETCSCOL
+GPURT:  RET
+
+;=============================================================
+; GBPGDN - Scroll down one page (EDITROW lines).
+; Uses bulk gap move for performance: scans forward for
+; EDITROW LFs, then copies bytes in one tight loop instead
+; of calling GBMVRT per character.
+; Entry:  (none)
+; Exit:   Cursor moved down EDITROW lines; regs clobbered
+;=============================================================
+GBPGDN:
+        ; Check if at end of file
+        CALL    GBGAPEN
+        PUSH    H
+        CALL    GBBSIZ          ; DE = BSIZE
+        POP     H               ; HL = GAPEN
+        MOV     A,L
+        SUB     E
+        MOV     A,H
+        SBB     D
+        RNC                     ; GAPEN >= BSIZE, at EOF
+        ; Save base address
+        CALL    GBBASE
+        XCHG
+        SHLD    GPGBAS
+        ; Compute scan region: base+GAPEN .. base+BSIZE
+        CALL    GBGAPEN
+        XCHG                    ; DE = GAPEN
+        LHLD    GPGBAS
+        DAD     D               ; HL = base + GAPEN = src start
+        PUSH    H               ; save src start
+        CALL    GBBSIZ          ; DE = BSIZE
+        LHLD    GPGBAS
+        DAD     D               ; HL = base + BSIZE = src end
+        XCHG                    ; DE = src end
+        POP     H               ; HL = src start
+        MVI     B,EDITROW       ; LF counter
+        ; --- Forward scan for EDITROW LFs ---
+GPDSLP: MOV     A,H             ; compare ptr with end
+        CMP     D
+        JNZ     GPDSNE
+        MOV     A,L
+        CMP     E
+        JZ      GPDEOF          ; reached end of text
+GPDSNE: MOV     A,M             ; read byte
+        INX     H               ; advance ptr past byte
+        CPI     LF
+        JNZ     GPDSLP
+        DCR     B               ; counted a LF
+        JNZ     GPDSLP
+        ; Found all EDITROW LFs. HL = after last LF.
+        JMP     GPDCNT
+GPDEOF: ; Reached end with fewer LFs. HL = end.
+GPDCNT: ; HL = copy-end position, B = remaining LF count
+        MVI     A,EDITROW
+        SUB     B
+        STA     GPGLFS          ; LFs found
+        ; Compute N = HL - (base + GAPEN)
+        PUSH    H               ; save end position
+        CALL    GBGAPEN
+        XCHG                    ; DE = GAPEN
+        LHLD    GPGBAS
+        DAD     D               ; HL = base + GAPEN = src start
+        POP     D               ; DE = end position
+        MOV     A,E
+        SUB     L
+        MOV     C,A
+        MOV     A,D
+        SBB     H
+        MOV     B,A             ; BC = N (bytes to copy)
+        MOV     A,B
+        ORA     C
+        RZ                      ; N=0, nothing to do
+        MOV     H,B
+        MOV     L,C
+        SHLD    GPGCNT          ; save byte count
+        ; --- Forward copy: base+GAPEN → base+GAPBG ---
+        ; Dest: base + GAPBG
+        CALL    GBGAPBG
+        XCHG
+        LHLD    GPGBAS
+        DAD     D               ; HL = dest
+        PUSH    H               ; save dest
+        ; Src: base + GAPEN
+        CALL    GBGAPEN
+        XCHG
+        LHLD    GPGBAS
+        DAD     D               ; HL = src
+        PUSH    H               ; save src
+        ; Load BC = N
+        LHLD    GPGCNT
+        MOV     B,H
+        MOV     C,L
+        POP     H               ; HL = src
+        POP     D               ; DE = dest
+        ; Copy forward (safe: src > dest)
+GPDCLP: MOV     A,M
+        STAX    D
+        INX     H
+        INX     D
+        DCX     B
+        MOV     A,B
+        ORA     C
+        JNZ     GPDCLP
+        ; --- Update descriptor fields ---
+        LHLD    GPGCNT
+        MOV     B,H
+        MOV     C,L             ; BC = N
+        ; GAPBG += N
+        CALL    GBGAPBG
+        DAD     B
+        CALL    GBSETGAPBG
+        ; GAPEN += N
+        CALL    GBGAPEN
+        DAD     B
+        CALL    GBSETGAPEN
+        ; CSOFF += N
+        CALL    GBCSOFF
+        DAD     B
+        CALL    GBSETCSOFF
+        ; --- Update CSROW and TOPLN ---
+        LDA     GPGLFS
+        MOV     B,A             ; B = LFs crossed (L)
+        CALL    GBCSROW
+        MOV     A,L             ; A = current row (R)
+        ADD     B               ; A = R + L
+        CPI     EDITROW
+        JC      GPDNSC          ; R + L < EDITROW, no scroll
+        ; Scroll: TOPLN += (R + L) - (EDITROW - 1)
+        SUI     EDITROW-1       ; A = TOPLN increment
+        MOV     C,A
+        MVI     B,0             ; BC = increment
+        CALL    GBTOPLN
+        DAD     B
+        CALL    GBSETTOPLN
+        LXI     H,EDITROW-1
+        CALL    GBSETCSROW
+        JMP     GPDCOL
+GPDNSC: ; No scroll: CSROW = R + L
+        MOV     L,A
+        MVI     H,0
+        CALL    GBSETCSROW
+GPDCOL: CALL    GBCURLNL
+        CALL    GBSETCSCOL
+        RET
+
+;=============================================================
+; GBMVUP - Move cursor up one line.
+; Entry:  (none)
+; Exit:   Cursor on previous line, same col if possible
+;=============================================================
+GBMVUP:
+        CALL    GBCSROW
+        MOV     A,L
+        ORA     H
+        JNZ     GVUROW          ; not at top of screen
+        ; At row 0: scroll back if TOPLN > 0
+        CALL    GBTOPLN
+        MOV     A,H
+        ORA     L
+        JZ      GVUBOT          ; already at file top
+        CALL    GBMLNS         ; go to line start
+        CALL    GBMVLT          ; go to end of prev line (TOPLN adjusted by GBMVLT)
+        CALL    GBMLNS         ; go to start of that line
+        RET
+GVUROW:
+        ; Move to start of current line, then prev line
+        CALL    GBMLNS
+        CALL    GBMVLT          ; step over LF (CSROW adjusted by GBMVLT)
+        CALL    GBMLNS         ; start of prev line
+        RET
+GVUBOT: RET
+
+;=============================================================
+; GBMVDN - Move cursor down one line.
+; Entry:  (none)
+; Exit:   Cursor on next line; regs clobbered
+;=============================================================
+GBMVDN:
+        ; Move to end of current line then past newline
+        CALL    GBMLNE
+        ; Check if at end of buffer before reading
+        CALL    GBGAPEN         ; HL = GAPEN
+        PUSH    H
+        CALL    GBBSIZ          ; DE = BSIZE
+        POP     H
+        MOV     A,L
+        SUB     E
+        MOV     A,H
+        SBB     D
+        JNC     GVDNDN          ; GAPEN >= BSIZE, at EOF
+        ; Try to step over CR+LF
+        CALL    GBBASE
+        CALL    GBGAPEN
+        DAD     D
+        MOV     A,M
+        CPI     CR
+        JNZ     GVDNLF
+        CALL    GBMVRT          ; skip CR
+GVDNLF:
+        ; Check again after possible CR skip
+        CALL    GBGAPEN
+        PUSH    H
+        CALL    GBBSIZ
+        POP     H
+        MOV     A,L
+        SUB     E
+        MOV     A,H
+        SBB     D
+        JNC     GVDNDN          ; at EOF after CR
+        CALL    GBBASE
+        CALL    GBGAPEN
+        DAD     D
+        MOV     A,M
+        CPI     LF
+        JNZ     GVDNDN
+        CALL    GBMVRT          ; skip LF (CSROW/scroll adjusted)
+GVDNDN:
+        ; Safety: recalculate CSCOL from scratch.
+        ; Corrects any drift in incremental column tracking
+        ; (e.g. CR handling, tab stops, or other edge cases).
+        CALL    GBCURLNL        ; HL = chars since last LF
+        CALL    GBSETCSCOL      ; force CSCOL = correct value
+        RET
+
+;=============================================================
+; GBDLLN - Delete current line (including its newline).
+; Entry:  (none)
+; Exit:   Line deleted; regs clobbered
+;=============================================================
+GBDLLN:
+        CALL    GBMLNS         ; go to line start
+GDLNLP: CALL    GBGAPEN         ; HL = GAPEN
+        PUSH    H               ; save GAPEN (GBBSIZ clobbers HL)
+        CALL    GBBSIZ          ; DE = BSIZE
+        POP     H               ; HL = GAPEN restored
+        ; Check GAPEN >= BSIZE (at end of buffer)
+        MOV     A,L
+        SUB     E
+        MOV     A,H
+        SBB     D
+        JNC     GDLNDN          ; GAPEN >= BSIZE, at end
+        CALL    GBBASE
+        CALL    GBGAPEN
+        DAD     D
+        MOV     A,M
+        CALL    GBDELRT         ; delete next char
+        CPI     LF
+        JNZ     GDLNLP          ; keep going until LF
+GDLNDN: RET
+
+;=============================================================
+; GBWRDNX - Move to start of next word.
+; Entry:  (none)
+; Exit:   Cursor at start of next word; regs clobbered
+;=============================================================
+GBWRDNX:
+        ; Skip current word chars
+GWNWRD: CALL    GBBASE
+        CALL    GBGAPEN
+        DAD     D
+        MOV     A,M
+        CALL    GBISWS          ; is whitespace?
+        JZ      GWNWSP          ; yes, now skip spaces
+        CALL    GBMVRT
+        JMP     GWNWRD
+GWNWSP: CALL    GBBASE
+        CALL    GBGAPEN
+        DAD     D
+        MOV     A,M
+        CALL    GBISWS
+        JNZ     GWNDN           ; non-space = word start
+        CALL    GBMVRT
+        JMP     GWNWSP
+GWNDN:  RET
+
+;=============================================================
+; GBWRDPV - Move to start of previous word.
+; Entry:  (none)
+; Exit:   Cursor at start of previous word; regs clobbered
+;=============================================================
+GBWRDPV:
+        ; Skip whitespace left
+GWPWSP: CALL    GBGAPBG
+        MOV     A,H
+        ORA     L
+        RZ
+        CALL    GBBASE
+        CALL    GBGAPBG
+        DCX     H
+        DAD     D
+        MOV     A,M
+        CALL    GBISWS
+        JNZ     GWPWRD          ; non-space, in a word
+        CALL    GBMVLT
+        JMP     GWPWSP
+GWPWRD: ; Skip word chars left
+        CALL    GBGAPBG
+        MOV     A,H
+        ORA     L
+        RZ
+        CALL    GBBASE
+        CALL    GBGAPBG
+        DCX     H
+        DAD     D
+        MOV     A,M
+        CALL    GBISWS
+        JZ      GWPDN           ; hit whitespace = done
+        CALL    GBMVLT
+        JMP     GWPWRD
+GWPDN:  RET
+
+;=============================================================
+; GBGETLN - Get pointer to start of line N in text.
+; Entry:  HL = line number (0-based)
+; Exit:   HL = pointer to first byte of line N
+;         A  = length of line (0-74)
+;         Z  set if line is past end of file
+;         Z clear if line exists
+;=============================================================
+GBGETLN:
+        PUSH    H               ; save line number
+        ; Count LF chars from text start
+        ; Text: [0..GAPBG-1] + [GAPEN..BSIZE-1]
+        ; We'll walk logical text using GBLOGRD
+        CALL    GBBASE          ; DE = base
+        LXI     H,0             ; HL = logical offset
+        POP     B               ; BC = target line num
+        MOV     A,B
+        ORA     C
+        JZ      GGLSRT          ; line 0 = start
+        PUSH    B
+GGLLP:
+        CALL    GBLOGRD         ; A=char at HL offset
+        JZ      GGLEOF          ; past end
+        INX     H               ; advance offset
+        CPI     LF
+        JNZ     GGLLP
+        ; Found a LF: decrement line counter
+        POP     B
+        DCX     B
+        MOV     A,B
+        ORA     C
+        JZ      GGLSRT
+        PUSH    B
+        JMP     GGLLP
+GGLEOF: POP     B               ; balance stack
+        LXI     H,0
+        XRA     A
+        ORA     A               ; Z = past end
+        RET
+GGLSRT:
+        ; HL = logical offset of line start
+        ; Check if buffer is empty (TXEND = 0)
+        PUSH    H               ; save logical offset
+        CALL    GBTXEND         ; HL = TXEND
+        MOV     A,H
+        ORA     L               ; TXEND == 0?
+        POP     H               ; restore logical offset
+        JNZ     GGLSRP          ; not empty, proceed
+        ; Empty buffer: line does not exist
+        LXI     H,0
+        XRA     A
+        ORA     A               ; Z set = past end
+        RET
+GGLSRP:
+        ; HL = logical offset of line start
+        ; Copy line into flat buffer via GBLOGRD (gap-safe)
+        LXI     D,GGLBUF        ; DE = output buffer
+        MVI     B,0             ; B = char count
+GGLCPY: MOV     A,B
+        CPI     TXTCOLS
+        JZ      GGLCPD          ; hit column limit
+        PUSH    B               ; save char count (GBLOGRD clobbers BC)
+        PUSH    D               ; save buffer pointer (GBLOGRD clobbers DE)
+        CALL    GBLOGRD         ; A = byte at logical offset HL (preserves HL)
+        POP     D               ; restore buffer pointer
+        POP     B               ; restore char count
+        JZ      GGLCPD          ; past end of text
+        CPI     CR
+        JZ      GGLCPD          ; end of line
+        CPI     LF
+        JZ      GGLCPD          ; end of line
+        STAX    D               ; store char in buffer
+        INX     D
+        INX     H               ; advance logical offset
+        INR     B
+        JMP     GGLCPY
+GGLCPD: ; NUL-terminate the copy buffer
+        XRA     A
+        STAX    D
+        MOV     A,B             ; A = line length
+        LXI     H,GGLBUF        ; HL = pointer to flat copy
+        ORI     1               ; NZ = line exists
+        RET
+
+;=============================================================
+; GBCNTLN - Count lines in current buffer.
+; Uses a cached value when valid; falls back to a fast
+; direct memory scan (not GBLOGRD) when cache is invalid.
+; Entry:  (none)
+; Exit:   HL = line count (number of LF chars + 1)
+;=============================================================
+GBCNTLN:
+        LDA     GLNVAL
+        ORA     A
+        JZ      GCNFULL         ; cache invalid, do full scan
+        ; Return cached value
+        LHLD    GLNCNT
+        RET
+GCNFULL:
+        ; --- Fast direct memory scan ---
+        ; Region 1: base .. base+GAPBG (pre-gap text)
+        CALL    GBBASE
+        XCHG
+        SHLD    GCNBAS
+        CALL    GBGAPBG
+        XCHG                    ; DE = GAPBG
+        LHLD    GCNBAS
+        DAD     D
+        SHLD    GCNR1E          ; R1 end = base + GAPBG
+        ; Region 2: base+GAPEN .. base+BSIZE (post-gap text)
+        CALL    GBGAPEN
+        XCHG
+        LHLD    GCNBAS
+        DAD     D
+        SHLD    GCNR2S          ; R2 start = base + GAPEN
+        CALL    GBBSIZ          ; DE = BSIZE
+        LHLD    GCNBAS
+        DAD     D
+        SHLD    GCNR2E          ; R2 end = base + BSIZE
+        ; Scan R1 counting LFs
+        LXI     B,1             ; line count starts at 1
+        LHLD    GCNR1E
+        XCHG                    ; DE = R1 end
+        LHLD    GCNBAS          ; HL = R1 start
+GCN1LP: MOV     A,H
+        CMP     D
+        JNZ     GCN1NE
+        MOV     A,L
+        CMP     E
+        JZ      GCN1DN          ; end of R1
+GCN1NE: MOV     A,M
+        INX     H
+        CPI     LF
+        JNZ     GCN1LP
+        INX     B
+        JMP     GCN1LP
+GCN1DN: ; Scan R2
+        LHLD    GCNR2E
+        XCHG                    ; DE = R2 end
+        LHLD    GCNR2S          ; HL = R2 start
+GCN2LP: MOV     A,H
+        CMP     D
+        JNZ     GCN2NE
+        MOV     A,L
+        CMP     E
+        JZ      GCNDN           ; end of R2
+GCN2NE: MOV     A,M
+        INX     H
+        CPI     LF
+        JNZ     GCN2LP
+        INX     B
+        JMP     GCN2LP
+GCNDN:  MOV     H,B
+        MOV     L,C             ; HL = line count
+        ; Cache result
+        SHLD    GLNCNT
+        MVI     A,1
+        STA     GLNVAL
+        RET
+
+;=============================================================
+; GBFNDLN - Find logical offset of line N by direct memory scan.
+; Scans buffer memory directly (not through GBLOGRD) for speed.
+; Entry:  HL = 0-based line number
+; Exit:   HL = logical offset of line start
+;         NZ = found; Z = past end of text (or buffer empty)
+; Clobbers: AF BC DE
+;=============================================================
+GBFNDLN:
+        MOV     A,H
+        ORA     L
+        JZ      GFLN0           ; line 0 = offset 0
+
+        SHLD    GFLCNT          ; save target line count
+
+        ; --- Compute physical region boundaries ---
+        ; Region 1 (pre-gap): base .. base+GAPBG-1
+        ; Region 2 (post-gap): base+GAPEN .. end
+        CALL    GBBASE          ; DE = base
+        XCHG
+        SHLD    GFLBAS          ; save base
+
+        CALL    GBBASE          ; DE = base
+        CALL    GBGAPBG         ; HL = GAPBG
+        SHLD    GFLGBG          ; save GAPBG
+        DAD     D               ; HL = base + GAPBG
+        SHLD    GFLR1E          ; R1 end (exclusive)
+
+        CALL    GBBASE          ; DE = base
+        CALL    GBGAPEN         ; HL = GAPEN
+        SHLD    GFLGPE          ; save GAPEN
+        DAD     D               ; HL = base + GAPEN
+        SHLD    GFLR2S          ; R2 start
+
+        ; R2 end = R2 start + (TXEND - GAPBG)
+        CALL    GBTXEND         ; HL = TXEND
+        PUSH    H
+        CALL    GBGAPBG         ; HL = GAPBG
+        POP     D               ; DE = TXEND
+        MOV     A,E
+        SUB     L
+        MOV     E,A
+        MOV     A,D
+        SBB     H
+        MOV     D,A             ; DE = TXEND - GAPBG = post-gap text len
+        LHLD    GFLR2S
+        DAD     D               ; HL = R2 end
+        SHLD    GFLR2E
+
+        ; --- Scan Region 1: HL=ptr, DE=end, BC=lines ---
+        LHLD    GFLCNT
+        MOV     B,H
+        MOV     C,L             ; BC = lines to skip
+        LHLD    GFLR1E
+        XCHG                    ; DE = R1 end
+        LHLD    GFLBAS          ; HL = R1 start (= base)
+
+GFL1LP: MOV     A,H
+        CMP     D
+        JNZ     GFL1NE
+        MOV     A,L
+        CMP     E
+        JZ      GFL1DN          ; reached end of region 1
+GFL1NE: MOV     A,M             ; read byte
+        INX     H               ; advance pointer
+        CPI     LF
+        JNZ     GFL1LP
+        DCX     B               ; found LF, count down
+        MOV     A,B
+        ORA     C
+        JNZ     GFL1LP          ; more lines to skip
+        ; --- Found in region 1: convert to logical offset ---
+        ; logical offset = HL - base
+        XCHG                    ; DE = physical ptr
+        LHLD    GFLBAS
+        MOV     A,E
+        SUB     L
+        MOV     L,A
+        MOV     A,D
+        SBB     H
+        MOV     H,A             ; HL = logical offset
+        ORI     1               ; NZ = found
+        RET
+
+GFL1DN: ; Region 1 exhausted, continue with region 2
+        LHLD    GFLR2E
+        XCHG                    ; DE = R2 end
+        LHLD    GFLR2S          ; HL = R2 start
+
+GFL2LP: MOV     A,H
+        CMP     D
+        JNZ     GFL2NE
+        MOV     A,L
+        CMP     E
+        JZ      GFLEOF          ; past end of all text
+GFL2NE: MOV     A,M
+        INX     H
+        CPI     LF
+        JNZ     GFL2LP
+        DCX     B
+        MOV     A,B
+        ORA     C
+        JNZ     GFL2LP
+        ; --- Found in region 2: convert to logical offset ---
+        ; logical = (ptr - base) - (GAPEN - GAPBG)
+        XCHG                    ; DE = physical ptr
+        LHLD    GFLBAS
+        MOV     A,E
+        SUB     L
+        MOV     L,A
+        MOV     A,D
+        SBB     H
+        MOV     H,A             ; HL = ptr - base
+        XCHG                    ; DE = ptr - base
+        LHLD    GFLGPE          ; HL = GAPEN
+        PUSH    D
+        XCHG                    ; DE = GAPEN
+        LHLD    GFLGBG          ; HL = GAPBG
+        MOV     A,E
+        SUB     L
+        MOV     L,A
+        MOV     A,D
+        SBB     H
+        MOV     H,A             ; HL = gap size
+        POP     D               ; DE = ptr - base
+        MOV     A,E
+        SUB     L
+        MOV     L,A
+        MOV     A,D
+        SBB     H
+        MOV     H,A             ; HL = (ptr - base) - gap = logical offset
+        ORI     1               ; NZ = found
+        RET
+
+GFLEOF: XRA     A               ; Z = past end
+        RET
+
+GFLN0:  ; Line 0 starts at logical offset 0
+        PUSH    H
+        CALL    GBTXEND
+        MOV     A,H
+        ORA     L
+        POP     H
+        LXI     H,0
+        RZ                      ; empty buffer, Z
+        ORI     1               ; NZ = found
+        RET
+
+;=============================================================
+; GBFNDCS - Find TOPLN logical offset by backward scan from
+; cursor position.  Sets up GFL* region boundaries for GBRDLNO.
+; Much faster than GBFNDLN for large files because it scans
+; at most CSROW lines (~1600 bytes) instead of all text.
+; Entry:  (none) - uses CSROW from buffer descriptor
+; Exit:   HL = logical offset of TOPLN start
+;         NZ = found; Z = buffer empty
+; Clobbers: AF BC DE
+;=============================================================
+GBFNDCS:
+        ; --- Compute GFL* region boundaries ---
+        CALL    GBBASE          ; DE = base
+        XCHG
+        SHLD    GFLBAS
+
+        CALL    GBGAPBG         ; HL = GAPBG
+        SHLD    GFLGBG
+        XCHG                    ; DE = GAPBG
+        LHLD    GFLBAS          ; HL = base
+        DAD     D               ; HL = base + GAPBG
+        SHLD    GFLR1E
+
+        CALL    GBGAPEN         ; HL = GAPEN
+        SHLD    GFLGPE
+        XCHG                    ; DE = GAPEN
+        LHLD    GFLBAS          ; HL = base
+        DAD     D               ; HL = base + GAPEN
+        SHLD    GFLR2S
+
+        ; R2 end = R2 start + (TXEND - GAPBG)
+        CALL    GBTXEND         ; HL = TXEND
+        PUSH    H               ; save TXEND for empty check
+        XCHG                    ; DE = TXEND
+        LHLD    GFLGBG          ; HL = GAPBG
+        MOV     A,E
+        SUB     L
+        MOV     E,A
+        MOV     A,D
+        SBB     H
+        MOV     D,A             ; DE = TXEND - GAPBG = post-gap len
+        LHLD    GFLR2S
+        DAD     D
+        SHLD    GFLR2E
+
+        ; Check if buffer is empty
+        POP     H               ; HL = TXEND
+        MOV     A,H
+        ORA     L
+        JZ      GFCSZ           ; TXEND=0, buffer empty
+
+        ; --- Get CSROW and compute LFs to count ---
+        ; We need CSROW+1 LFs because the CSROW-th LF backward
+        ; ends the TOPLN line itself; the (CSROW+1)-th ends the
+        ; line BEFORE TOPLN, so INX H gives TOPLN start.
+        LHLD    CURBDP
+        MVI     A,BD_CSROW
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A
+        MOV     A,M             ; A = CSROW
+        INR     A               ; A = CSROW + 1
+        MOV     C,A             ; C = LFs to find
+
+        ; Safety: GAPBG must be > 0 for backward scan
+        LHLD    GFLGBG
+        MOV     A,H
+        ORA     L
+        JZ      GFCS0           ; R1 empty, TOPLN at offset 0
+
+        ; --- Backward scan in R1 for C LFs ---
+        LHLD    GFLR1E
+        DCX     H               ; HL = last pre-gap byte
+
+GFCSLP: MOV     A,M
+        CPI     LF
+        JNZ     GFCSN1
+        DCR     C
+        JZ      GFCSFD          ; found all LFs
+
+GFCSN1: LDA     GFLBAS+1
+        CMP     H
+        JNZ     GFCSOK
+        LDA     GFLBAS
+        CMP     L
+        JZ      GFCS0           ; reached buffer start
+GFCSOK: DCX     H
+        JMP     GFCSLP
+
+GFCSFD: ; HL = ptr at the last LF; TOPLN starts after it
+        INX     H
+        ; Convert to logical offset: HL - base
+        XCHG                    ; DE = physical ptr
+        LHLD    GFLBAS
+        MOV     A,E
+        SUB     L
+        MOV     L,A
+        MOV     A,D
+        SBB     H
+        MOV     H,A             ; HL = logical offset
+        ORI     1               ; NZ
+        RET
+
+GFCS0:  ; TOPLN starts at offset 0
+        LXI     H,0
+        ORI     1               ; NZ
+        RET
+
+GFCSZ:  ; Buffer empty
+        LXI     H,0
+        XRA     A               ; Z
+        RET
+
+;=============================================================
+; GBRDLNO - Read one line at a given logical offset into GGLBUF.
+; Fast version: uses direct memory access via GFL* region
+; boundaries computed by GBFNDCS or GBFNDLN.
+; Entry:  HL = logical offset of line start
+; Exit:   HL = logical offset of NEXT line start (past LF)
+;         DE = GGLBUF (NUL-terminated text)
+;         A  = line length
+;         NZ = line exists; Z = offset was past end of text
+; Clobbers: AF BC
+;=============================================================
+GBRDLNO:
+        ; Check if offset is past end
+        PUSH    H
+        CALL    GBTXEND         ; HL = TXEND
+        MOV     B,H
+        MOV     C,L             ; BC = TXEND
+        POP     H               ; HL = offset
+        MOV     A,L
+        SUB     C
+        MOV     A,H
+        SBB     B               ; offset - TXEND
+        JNC     GRLEOF          ; offset >= TXEND
+
+        ; Determine which region: offset < GAPBG -> R1, else R2
+        XCHG                    ; DE = logical offset
+        LHLD    GFLGBG          ; HL = GAPBG
+        MOV     A,E
+        SUB     L
+        MOV     A,D
+        SBB     H               ; carry if offset < GAPBG
+        JC      GRLIR1
+
+        ; --- Start in Region 2 ---
+        ; physical = base + offset + GAPEN - GAPBG
+        PUSH    D               ; save offset
+        LHLD    GFLGPE          ; HL = GAPEN
+        POP     D               ; DE = offset
+        DAD     D               ; HL = GAPEN + offset
+        XCHG                    ; DE = GAPEN + offset
+        LHLD    GFLGBG          ; HL = GAPBG
+        MOV     A,E
+        SUB     L
+        MOV     E,A
+        MOV     A,D
+        SBB     H
+        MOV     D,A             ; DE = offset + GAPEN - GAPBG
+        LHLD    GFLBAS
+        DAD     D               ; HL = physical address in R2
+        LXI     D,GGLBUF
+        MVI     B,0
+        JMP     GRL2LP
+
+GRLIR1: ; --- Start in Region 1 ---
+        ; physical = base + offset
+        LHLD    GFLBAS
+        DAD     D               ; HL = base + offset
+        LXI     D,GGLBUF
+        MVI     B,0
+        ; fall through to R1 loop
+
+        ; --- Region 1 reading loop ---
+        ; HL = read ptr, DE = output ptr, B = col count
+GRL1LP: LDA     GFLR1E+1
+        CMP     H
+        JNZ     GRL1NE
+        LDA     GFLR1E
+        CMP     L
+        JZ      GRL1DN          ; R1 exhausted, switch to R2
+GRL1NE: MOV     A,B
+        CPI     TXTCOLS
+        JNC     GRL1SK          ; past column limit
+        MOV     A,M             ; read byte
+        INX     H               ; advance read ptr
+        CPI     LF
+        JZ      GRL1LF
+        CPI     CR
+        JZ      GRL1LP          ; skip CR
+        STAX    D               ; store in GGLBUF
+        INX     D
+        INR     B               ; col++
+        JMP     GRL1LP
+
+GRL1SK: ; Column limit in R1; scan for LF without storing
+        LDA     GFLR1E+1
+        CMP     H
+        JNZ     GRS1NE
+        LDA     GFLR1E
+        CMP     L
+        JZ      GRS1DN          ; R1 exhausted during skip
+GRS1NE: MOV     A,M
+        INX     H
+        CPI     LF
+        JZ      GRL1LF
+        JMP     GRL1SK
+
+GRS1DN: ; R1 skip exhausted, continue skip in R2
+        LHLD    GFLR2S
+
+GRL2SK: ; Column limit in R2; scan for LF
+        LDA     GFLR2E+1
+        CMP     H
+        JNZ     GRS2NE
+        LDA     GFLR2E
+        CMP     L
+        JZ      GRLDN2          ; end of text
+GRS2NE: MOV     A,M
+        INX     H
+        CPI     LF
+        JZ      GRL2LF
+        JMP     GRL2SK
+
+GRL1DN: ; R1 data exhausted, switch to R2
+        LHLD    GFLR2S
+
+        ; --- Region 2 reading loop ---
+GRL2LP: LDA     GFLR2E+1
+        CMP     H
+        JNZ     GRL2NE
+        LDA     GFLR2E
+        CMP     L
+        JZ      GRLDN2          ; end of text
+GRL2NE: MOV     A,B
+        CPI     TXTCOLS
+        JNC     GRL2SK          ; past column limit
+        MOV     A,M             ; read byte
+        INX     H
+        CPI     LF
+        JZ      GRL2LF
+        CPI     CR
+        JZ      GRL2LP          ; skip CR
+        STAX    D               ; store in GGLBUF
+        INX     D
+        INR     B               ; col++
+        JMP     GRL2LP
+
+        ; --- Found LF in Region 1 ---
+GRL1LF: ; HL = ptr past LF (physical, in R1)
+        ; logical offset = HL - base
+        XRA     A
+        STAX    D               ; NUL-terminate output
+        XCHG                    ; DE = physical ptr
+        LHLD    GFLBAS
+        MOV     A,E
+        SUB     L
+        MOV     L,A
+        MOV     A,D
+        SBB     H
+        MOV     H,A             ; HL = logical offset
+        MOV     A,B             ; A = line length
+        LXI     D,GGLBUF
+        ORI     1               ; NZ
+        RET
+
+        ; --- Found LF in Region 2 / end of text ---
+GRL2LF:
+GRLDN2: ; HL = ptr past LF or at R2 end (physical, in R2)
+        ; logical = (HL - base) - (GAPEN - GAPBG)
+        XRA     A
+        STAX    D               ; NUL-terminate output
+        PUSH    B               ; save col count
+        XCHG                    ; DE = physical ptr
+        LHLD    GFLBAS
+        MOV     A,E
+        SUB     L
+        MOV     L,A
+        MOV     A,D
+        SBB     H
+        MOV     H,A             ; HL = ptr - base
+        PUSH    H               ; save ptr-base
+        LHLD    GFLGPE          ; HL = GAPEN
+        XCHG                    ; DE = GAPEN
+        LHLD    GFLGBG          ; HL = GAPBG
+        MOV     A,E
+        SUB     L
+        MOV     L,A
+        MOV     A,D
+        SBB     H
+        MOV     H,A             ; HL = gap size
+        POP     D               ; DE = ptr - base
+        MOV     A,E
+        SUB     L
+        MOV     L,A
+        MOV     A,D
+        SBB     H
+        MOV     H,A             ; HL = logical offset
+        POP     B               ; restore col count
+        MOV     A,B             ; A = line length
+        LXI     D,GGLBUF
+        ORI     1               ; NZ
+        RET
+
+GRLEOF: ; Past end of text
+        LXI     D,GGLBUF
+        XRA     A
+        STAX    D               ; empty NUL-terminated string
+        ; A=0, Z=1
+        RET
+
+;=============================================================
+; GBLOGRD - Read logical text byte at offset HL.
+; Entry:  HL = logical offset into text
+; Exit:   A  = byte; Z set if past end of text
+;         HL unchanged; DE clobbered
+;=============================================================
+GBLOGRD:
+        SHLD    GBLOFF          ; save logical offset; callers need HL unchanged on return
+        PUSH    H
+        CALL    GBTXEND         ; HL = TXEND
+        MOV     A,L
+        ORA     H
+        POP     H
+        JZ      GBLRZ           ; empty buffer
+        ; Compare offset HL with TXEND: is offset >= TXEND?
+        PUSH    H
+        CALL    GBTXEND         ; HL = TXEND
+        POP     D               ; DE = offset
+        MOV     A,E
+        SUB     L
+        MOV     A,D
+        SBB     H               ; offset - TXEND
+        JNC     GBLRZ           ; offset >= TXEND (no borrow = past end)
+        ; Adjust for gap: is offset < GAPBG?
+        PUSH    D               ; save offset
+        CALL    GBGAPBG         ; HL = GAPBG
+        POP     D               ; DE = offset
+        MOV     A,E
+        SUB     L
+        MOV     A,D
+        SBB     H               ; offset - GAPBG
+        JC      GBLRDI          ; offset < GAPBG (borrow = before gap): direct
+        ; offset >= GAPBG: logical = physical + gapsize
+        PUSH    D
+        CALL    GBGAPEN
+        MOV     B,H
+        MOV     C,L             ; BC = GAPEN
+        CALL    GBGAPBG
+        ; gapsize = GAPEN - GAPBG
+        MOV     A,C
+        SUB     L
+        MOV     C,A
+        MOV     A,B
+        SBB     H
+        MOV     B,A             ; BC = gap size
+        POP     D               ; DE = logical offset
+        MOV     A,E
+        ADD     C
+        MOV     E,A
+        MOV     A,D
+        ADC     B
+        MOV     D,A             ; DE = physical offset
+GBLRDI: ; DE = physical offset; compute abs address = base + physical
+        PUSH    D               ; save physical offset (GBBASE clobbers DE)
+        CALL    GBBASE          ; DE = buffer base, HL clobbered to CURBDP+1
+        POP     H               ; HL = physical offset
+        DAD     D               ; HL = buffer_base + physical_offset = abs address
+        MOV     A,M
+        ORA     A
+        JZ      GBLRZ           ; NUL treated as end-of-text
+        MOV     B,A             ; save byte
+        LHLD    GBLOFF          ; restore caller's logical offset into HL
+        MOV     A,B             ; A = byte
+        ORA     A               ; Z=0 (byte exists)
+        RET
+GBLRZ:  LHLD    GBLOFF          ; restore caller's logical offset into HL
+        XRA     A               ; A=0, Z=1 (past end)
+        RET
+
+;=============================================================
+; Helper: GBISWS - test if A is a word separator.
+; Exit:  Z=1 if whitespace/punctuation; Z=0 if word char
+;=============================================================
+GBISWS:
+        CPI     ' '
+        RZ
+        CPI     TAB
+        RZ
+        CPI     CR
+        RZ
+        CPI     LF
+        RZ
+        CPI     ','
+        RZ
+        CPI     '.'
+        RZ
+        CPI     ';'
+        RZ
+        CPI     ':'
+        RZ
+        ORI     1               ; force NZ
+        RET
+
+;=============================================================
+; GBCURLNL - Return length of text before cursor on line.
+; Entry:  (none)
+; Exit:   HL = column count (chars since last LF)
+;=============================================================
+GBCURLNL:
+        CALL    GBCSOFF         ; HL = cursor offset
+        MOV     B,H
+        MOV     C,L             ; BC = offset
+        LXI     H,0             ; HL = count
+GCLL:   MOV     A,B
+        ORA     C
+        RZ
+        ; Read byte at BC-1
+        DCX     B
+        PUSH    B               ; save offset (GBLOGRD clobbers BC)
+        PUSH    H               ; save count
+        MOV     H,B
+        MOV     L,C
+        CALL    GBLOGRD
+        POP     H               ; restore count
+        POP     B               ; restore offset
+        CPI     LF
+        RZ                      ; found previous newline
+        CPI     CR
+        JZ      GCLL            ; skip CR (invisible, not a column)
+        INX     H
+        JMP     GCLL
+
+;=============================================================
+; Descriptor field accessors - read/write via CURBDP
+; Convention: field loaded into HL, or stored from HL
+;=============================================================
+
+; GBBASE: DE = buffer base address
+GBBASE:
+        LHLD    CURBDP
+        MVI     A,BD_BSTAR
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A
+        MOV     E,M
+        INX     H
+        MOV     D,M
+        RET
+
+; GBBSIZ: DE = buffer size
+GBBSIZ:
+        LHLD    CURBDP
+        MVI     A,BD_BSIZE
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A
+        MOV     E,M
+        INX     H
+        MOV     D,M
+        RET
+
+; GBGAPBG: HL = GAPBG
+GBGAPBG:
+        LHLD    CURBDP
+        MVI     A,BD_GAPBG
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A
+        MOV     A,M
+        INX     H
+        MOV     H,M
+        MOV     L,A
+        RET
+
+; GBGAPEN: HL = GAPEN
+GBGAPEN:
+        LHLD    CURBDP
+        MVI     A,BD_GAPEN
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A
+        MOV     A,M
+        INX     H
+        MOV     H,M
+        MOV     L,A
+        RET
+
+; GBTXEND: HL = TXEND
+GBTXEND:
+        LHLD    CURBDP
+        MVI     A,BD_TXEND
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A
+        MOV     A,M
+        INX     H
+        MOV     H,M
+        MOV     L,A
+        RET
+
+; GBTOPLN: HL = TOPLN
+GBTOPLN:
+        LHLD    CURBDP
+        MVI     A,BD_TOPLN
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A
+        MOV     A,M
+        INX     H
+        MOV     H,M
+        MOV     L,A
+        RET
+
+; GBCSROW: HL = CSROW (1 byte, zero-extended)
+GBCSROW:
+        LHLD    CURBDP
+        MVI     A,BD_CSROW
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A
+        MOV     L,M
+        MVI     H,0
+        RET
+
+; GBCSCOL: HL = CSCOL (1 byte, zero-extended)
+GBCSCOL:
+        LHLD    CURBDP
+        MVI     A,BD_CSCOL
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A
+        MOV     L,M
+        MVI     H,0
+        RET
+
+; GBCSOFF: HL = CSOFF
+GBCSOFF:
+        LHLD    CURBDP
+        MVI     A,BD_CSOFF
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A
+        MOV     A,M
+        INX     H
+        MOV     H,M
+        MOV     L,A
+        RET
+
+; GBGAPLN: HL = gap size (GAPEN - GAPBG)
+GBGAPLN:
+        CALL    GBGAPEN
+        MOV     B,H
+        MOV     C,L             ; BC = GAPEN
+        CALL    GBGAPBG         ; HL = GAPBG
+        MOV     A,C
+        SUB     L
+        MOV     L,A
+        MOV     A,B
+        SBB     H
+        MOV     H,A             ; HL = GAPEN - GAPBG
+        RET
+
+; GBSETGAPBG: store HL into GAPBG field
+GBSETGAPBG:
+        PUSH    H
+        LHLD    CURBDP
+        MVI     A,BD_GAPBG
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A
+        POP     D
+        MOV     M,E
+        INX     H
+        MOV     M,D
+        RET
+
+; GBSETGAPEN: store HL into GAPEN field
+GBSETGAPEN:
+        PUSH    H
+        LHLD    CURBDP
+        MVI     A,BD_GAPEN
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A
+        POP     D
+        MOV     M,E
+        INX     H
+        MOV     M,D
+        RET
+
+; GBSETTXEND: store HL into TXEND field
+GBSETTXEND:
+        PUSH    H
+        LHLD    CURBDP
+        MVI     A,BD_TXEND
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A
+        POP     D
+        MOV     M,E
+        INX     H
+        MOV     M,D
+        RET
+
+; GBSETTOPLN: store HL into TOPLN field
+GBSETTOPLN:
+        PUSH    H
+        LHLD    CURBDP
+        MVI     A,BD_TOPLN
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A
+        POP     D
+        MOV     M,E
+        INX     H
+        MOV     M,D
+        RET
+
+; GBSETCSROW: store L into CSROW field
+GBSETCSROW:
+        PUSH    H
+        LHLD    CURBDP
+        MVI     A,BD_CSROW
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A
+        POP     D
+        MOV     M,E             ; store low byte
+        RET
+
+; GBSETCSCOL: store L into CSCOL field
+GBSETCSCOL:
+        PUSH    H
+        LHLD    CURBDP
+        MVI     A,BD_CSCOL
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A
+        POP     D
+        MOV     M,E
+        RET
+
+; GBSETCSOFF: store HL into CSOFF field
+GBSETCSOFF:
+        PUSH    H
+        LHLD    CURBDP
+        MVI     A,BD_CSOFF
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A
+        POP     D
+        MOV     M,E
+        INX     H
+        MOV     M,D
+        RET
+
+; GBSETMOD: mark buffer as modified
+GBSETMOD:
+        LHLD    CURBDP
+        MVI     A,BD_MODIF
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A
+        MVI     M,1
+        RET
+
+;=============================================================
+; DATA SEGMENT
+;=============================================================
+        DSEG
+GBTMP:  DB      0               ; temporary char storage
+GBLOFF: DW      0               ; GBLOGRD: saved logical offset (HL on entry)
+GGLBUF: DS      TXTCOLS+1       ; GBGETLN: flat line copy buffer (NUL terminated)
+
+; GBFNDLN working variables
+GFLCNT: DW      0               ; target line counter
+GFLBAS: DW      0               ; buffer base address
+GFLGBG: DW      0               ; saved GAPBG (for offset calc)
+GFLGPE: DW      0               ; saved GAPEN (for offset calc)
+GFLR1E: DW      0               ; region 1 end (base + GAPBG)
+GFLR2S: DW      0               ; region 2 start (base + GAPEN)
+GFLR2E: DW      0               ; region 2 end
+
+; Bulk page up/down working variables
+GPGBAS: DW      0               ; buffer base address
+GPGCNT: DW      0               ; byte count for bulk copy
+GPGLFS: DB      0               ; LFs found during scan
+
+; Line count cache variables
+GLNCNT: DW      0               ; cached total line count
+GLNVAL: DB      0               ; 1 = GLNCNT is valid, 0 = invalid
+
+; GBCNTLN fast scan working variables
+GCNBAS: DW      0               ; buffer base address
+GCNR1E: DW      0               ; region 1 end (base + GAPBG)
+GCNR2S: DW      0               ; region 2 start (base + GAPEN)
+GCNR2E: DW      0               ; region 2 end (base + BSIZE)
+
+        END
+

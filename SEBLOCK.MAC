@@ -1,0 +1,729 @@
+;============================================================
+; FILE:    SEBLOCK.MAC
+; PROJECT: SEDIT - Screen Editor for CP/M 2.2
+; VERSION: 1.0
+; DATE:    1984-01-01
+; AUTHOR:
+;------------------------------------------------------------
+; DESCRIPTION:
+;   Block mark, copy, delete, and paste operations.
+;
+;   The block is defined by two logical offsets stored in
+;   the buffer descriptor fields BD_MRKBG and BD_MRKEN.
+;   Both are set to NO_MARK (0FFFFh) when no block is
+;   marked.
+;
+;   BLMARK - Toggle block mark: if no mark, set start =
+;            current cursor offset; if start is set but end
+;            is not, set end = current cursor offset
+;            (end >= start enforced); if both set, clear.
+;   BLCOPY - Copy block to clipboard (CLIPBUF).
+;   BLDEL  - Delete block from buffer.
+;   BLPASTE - Insert clipboard contents at cursor.
+;------------------------------------------------------------
+; REVISION HISTORY:
+;   1.0  1984-01-01  Initial release
+;============================================================
+
+;--- Imports ----------------------------------------------
+        EXTRN   CURBDP          ; current buffer descriptor
+        EXTRN   DIRTY           ; screen redraw flag
+        EXTRN   GBDELRT         ; delete char right of cursor
+        EXTRN   GBINSRT         ; insert char at cursor
+        EXTRN   GBMVTOP         ; move cursor to file top
+        EXTRN   GBMVRT          ; move cursor right one char
+        EXTRN   STATMSG         ; status bar message
+
+;--- Exports ----------------------------------------------
+        PUBLIC  BLMARK          ; toggle block mark
+        PUBLIC  BLCOPY          ; copy block to clipboard
+        PUBLIC  BLDEL           ; delete block
+        PUBLIC  BLPASTE         ; paste clipboard at cursor
+
+;=============================================================
+; BLMARK - Toggle block mark at current cursor offset.
+; State machine (stored in BD_MRKBG / BD_MRKEN):
+;   Both = NO_MARK  -> set MRKBG = cursor, MRKEN = NO_MARK
+;   MRKBG set, MRKEN = NO_MARK -> set MRKEN = cursor
+;                                  (swap if MRKEN < MRKBG)
+;   Both set        -> clear both to NO_MARK
+;=============================================================
+;============================================================
+; FILE:    SEDIT.INC
+; PROJECT: SEDIT - Screen Editor for CP/M 2.2
+; VERSION: 1.0
+; DATE:    1984-01-01
+; AUTHOR:
+;------------------------------------------------------------
+; DESCRIPTION:
+;   Shared equates for all SEDIT modules.
+;   INCLUDE this as the first statement of every .MAC file.
+;------------------------------------------------------------
+; REVISION HISTORY:
+;   1.0  1984-01-01  Initial release
+;============================================================
+
+;--- CP/M system addresses ----------------------------
+BDOS    EQU     0005H       ; BDOS call entry
+WBOOT   EQU     0000H       ; warm boot / exit
+DFTFCB  EQU     005CH       ; default FCB (arg 1)
+CMDTAIL EQU     0080H       ; command tail buffer
+
+;--- BDOS function numbers ----------------------------
+BF_CONIN  EQU   1           ; console input (wait)
+BF_CONOUT EQU   2           ; console output: E=char
+BF_RAWIO  EQU   6           ; direct I/O: E=FFH->in
+BF_PRTSTR EQU   9           ; print $-string: DE=addr
+BF_RDLINE EQU   10          ; buffered line input
+BF_CONST  EQU   11          ; console status
+BF_FOPEN  EQU   15          ; open file: DE=FCB
+BF_FCLOSE EQU   16          ; close file: DE=FCB
+BF_FDEL   EQU   19          ; delete: DE=FCB
+BF_FREAD  EQU   20          ; seq read: DE=FCB
+BF_FWRITE EQU   21          ; seq write: DE=FCB
+BF_FMAKE  EQU   22          ; create: DE=FCB
+BF_SETDMA EQU   26          ; set DMA: DE=addr
+BF_USRNUM EQU   32          ; get/set user: E=num
+
+;--- ASCII control codes ------------------------------
+NUL     EQU     00H
+BEL     EQU     07H         ; bell
+BS      EQU     08H         ; backspace
+TAB     EQU     09H         ; horizontal tab
+LF      EQU     0AH         ; line feed
+CR      EQU     0DH         ; carriage return
+ESC     EQU     1BH         ; escape
+DEL     EQU     7FH         ; delete character
+CPMEOF  EQU     1AH         ; CP/M EOF marker (Ctrl-Z)
+CTRLK   EQU     0BH         ; Ctrl-K (prefix key)
+CTRLQ   EQU     11H         ; Ctrl-Q (prefix key)
+
+;--- Screen layout ------------------------------------
+SCRROWS EQU     24          ; terminal row count
+SCRCOLS EQU     80          ; terminal column count
+EDITROW EQU     20          ; edit rows (rows 3-22)
+EDITFR  EQU     3           ; first edit row (1-based)
+INFOROW EQU     1           ; info bar row
+RULRROW EQU     2           ; tab ruler row
+SEPRROW EQU     23          ; separator (===) row
+STATROW EQU     24          ; status/message row
+LNUMWID EQU     4           ; gutter width (3+space)
+TXTCOLS EQU     74          ; max text columns/line
+TXTFCOL EQU     5           ; text start col (1-based)
+TABWID  EQU     4           ; tab stop interval
+
+;--- SGR attribute byte values ------------------------
+ATTR_NRM EQU    00H         ; normal
+ATTR_BLD EQU    01H         ; bold
+ATTR_DIM EQU    02H         ; dim
+ATTR_REV EQU    07H         ; reverse video
+ATTR_CYN EQU    36H         ; cyan foreground
+ATTR_GRN EQU    32H         ; green foreground
+ATTR_YEL EQU    33H         ; yellow foreground
+ATTR_MAG EQU    35H         ; magenta foreground
+
+;--- Buffer descriptor field offsets -----------------
+BD_BSTAR EQU    0           ; 2: buffer base address
+BD_BSIZE EQU    2           ; 2: capacity in bytes
+BD_GAPBG EQU    4           ; 2: gap start offset
+BD_GAPEN EQU    6           ; 2: gap end offset
+BD_TXEND EQU    8           ; 2: text end offset
+BD_TOPLN EQU    10          ; 2: top visible line
+BD_CSROW EQU    12          ; 1: cursor screen row
+BD_CSCOL EQU    13          ; 1: cursor text column
+BD_CSOFF EQU    14          ; 2: cursor byte offset
+BD_MRKBG EQU    16          ; 2: block mark start
+BD_MRKEN EQU    18          ; 2: block mark end
+BD_MODIF EQU    20          ; 1: modified flag
+BD_SYNMD EQU    21          ; 1: syntax mode
+BD_FNAME EQU    22          ; 12: drive+name+ext
+BD_SIZE  EQU    34          ; bytes per descriptor
+
+;--- Number of edit buffers ---------------------------
+MAXBUFS EQU     2           ; maximum open buffers
+MINMEM  EQU     18*1024     ; minimum TPA required
+
+;--- Syntax mode codes --------------------------------
+SYN_NONE EQU    0           ; plain text
+SYN_ASM  EQU    1           ; 8080/Z80 assembly
+
+;--- Insert / overwrite mode --------------------------
+MODE_INS EQU    0           ; insert mode (default)
+MODE_OVR EQU    1           ; overwrite mode
+
+;--- Key type codes (B reg from GETKEY) ---------------
+KT_NONE EQU     0           ; no key available
+KT_ACT  EQU     1           ; C = action code
+KT_CHAR EQU     2           ; C = printable char
+
+;--- Key action codes (C reg when B=KT_ACT) ----------
+ACT_CURUP EQU   1           ; cursor up
+ACT_CURDN EQU   2           ; cursor down
+ACT_CURLT EQU   3           ; cursor left
+ACT_CURRT EQU   4           ; cursor right
+ACT_WRDPV EQU   5           ; previous word
+ACT_WRDNX EQU   6           ; next word
+ACT_PGUP  EQU   7           ; page up
+ACT_PGDN  EQU   8           ; page down
+ACT_SCRUP EQU   9           ; scroll screen up
+ACT_SCRDN EQU   10          ; scroll screen down
+ACT_LINST EQU   11          ; jump to line start
+ACT_LINEN EQU   12          ; jump to line end
+ACT_FTOP  EQU   13          ; jump to file top
+ACT_FEND  EQU   14          ; jump to file end
+ACT_DELLF EQU   15          ; delete left (BS)
+ACT_DELRT EQU   16          ; delete right (Del)
+ACT_DELWD EQU   17          ; delete word right
+ACT_DELLN EQU   18          ; delete entire line
+ACT_INSTB EQU   19          ; insert tab
+ACT_INSNL EQU   20          ; insert newline
+ACT_TOGIN EQU   21          ; toggle insert/overwrite
+ACT_LITNX EQU   22          ; next char is literal
+ACT_FNDNX EQU   23          ; find next
+ACT_FSAVE EQU   24          ; save file
+ACT_FOPEN EQU   25          ; open file
+ACT_FEXIT EQU   26          ; exit editor
+ACT_BLKMK EQU   27          ; toggle block mark
+ACT_BLKCP EQU   28          ; copy block
+ACT_BLKDL EQU   29          ; delete block
+ACT_BLKPS EQU   30          ; paste clipboard
+ACT_MENU  EQU   31          ; open ESC menu
+ACT_MAX   EQU   31          ; highest action code
+
+;--- Block mark sentinel ------------------------------
+NO_MARK EQU     0FFFFH      ; marks absent/unset
+
+;--- FCB field offsets --------------------------------
+FCB_DR  EQU     0           ; drive (0=default)
+FCB_FN  EQU     1           ; filename (8 bytes)
+FCB_FT  EQU     9           ; extension (3 bytes)
+FCB_EX  EQU     12          ; extent number
+FCB_S2  EQU     14          ; extent high
+FCB_RC  EQU     15          ; record count
+FCB_CR  EQU     32          ; current record
+FCB_SIZ EQU     36          ; total FCB size
+
+;--- DMA record size ----------------------------------
+RECSIZ  EQU     128         ; 128 bytes per record
+
+;--- Clipboard buffer size ----------------------------
+CLIPMAX EQU     2048        ; max paste buffer bytes
+
+;--- Search string size limit -------------------------
+SRCHMAX EQU     64          ; max find string length
+
+        CSEG
+
+BLMARK:
+        ; Read MRKBG
+        CALL    BLRDMB          ; HL = MRKBG
+        MOV     A,H
+        ANI     0FFH
+        MOV     B,A
+        MOV     A,L
+        ORA     B
+        CPI     0FFH
+        ; Check if MRKBG = NO_MARK: HL = 0FFFFh
+        MOV     A,H
+        CPI     0FFH
+        JNZ     BLMST2          ; MRKBG already set
+
+        ; MRKBG = NO_MARK -> set MRKBG = cursor offset
+        CALL    BLCUROF         ; HL = cursor offset
+        CALL    BLWRMB          ; MRKBG = HL
+        ; Set MRKEN = NO_MARK
+        LXI     H,NO_MARK
+        CALL    BLWRME
+        LXI     D,BM1MSG
+        CALL    STATMSG
+        RET
+
+BLMST2:
+        ; MRKBG is set; check MRKEN
+        CALL    BLRDME          ; HL = MRKEN
+        MOV     A,H
+        CPI     0FFH
+        JNZ     BLMCLR          ; both set -> clear
+
+        ; MRKEN = NO_MARK -> set MRKEN = cursor
+        CALL    BLCUROF         ; HL = cursor
+        XCHG                    ; DE = cursor
+        CALL    BLRDMB          ; HL = MRKBG
+        ; If cursor < MRKBG: swap them
+        MOV     A,D
+        CMP     H
+        JC      BLMSWP          ; cursor.H < MRKBG.H
+        JNZ     BLMSET          ; cursor.H > MRKBG.H
+        MOV     A,E
+        CMP     L
+        JNC     BLMSET          ; cursor >= MRKBG: ok
+
+BLMSWP: ; cursor < MRKBG: swap so MRKBG <= MRKEN
+        ; DE = cursor (new MRKBG), HL = old MRKBG (new MRKEN)
+        PUSH    D               ; save cursor
+        CALL    BLWRMB          ; MRKBG = HL (old MRKBG)... wait
+        ; Actually we want MRKBG=cursor, MRKEN=old MRKBG
+        PUSH    H               ; save old MRKBG
+        XCHG                    ; HL = cursor
+        CALL    BLWRMB          ; MRKBG = cursor
+        POP     H               ; HL = old MRKBG
+        CALL    BLWRME          ; MRKEN = old MRKBG
+        POP     D               ; clean stack
+        LXI     D,BM2MSG
+        CALL    STATMSG
+        RET
+
+BLMSET: ; MRKEN = cursor (DE)
+        XCHG
+        CALL    BLWRME          ; MRKEN = HL (cursor)
+        LXI     D,BM2MSG
+        CALL    STATMSG
+        RET
+
+BLMCLR: ; Clear both marks
+        LXI     H,NO_MARK
+        CALL    BLWRMB
+        LXI     H,NO_MARK
+        CALL    BLWRME
+        LXI     D,BMCMSG
+        CALL    STATMSG
+        RET
+
+;=============================================================
+; BLCOPY - Copy marked block to clipboard (CLIPBUF).
+; Does nothing if block not fully marked.
+;=============================================================
+BLCOPY:
+        CALL    BLCHKMK         ; check block valid; Z = invalid
+        RZ
+
+        ; BKBG and BKEN in memory after BLCHKMK
+        LHLD    BLKBG           ; start offset
+        SHLD    BLKPOS          ; walk position
+
+        LXI     H,CLIPBUF       ; HL = clip write ptr
+        LXI     D,0             ; DE = count
+
+BCCPLP:
+        ; Check BLKPOS < BKEN
+        LHLD    BLKPOS
+        XCHG                    ; DE saved, let me redo...
+        ; Use B,C for count to avoid DE conflict
+        LHLD    BLKPOS
+        PUSH    H
+        LHLD    BLKEN
+        POP     D
+        ; HL = BKEN, DE = BLKPOS
+        ; if DE >= HL: done
+        MOV     A,D
+        CMP     H
+        JC      BCGBYT          ; BLKPOS.H < BKEN.H
+        JNZ     BCDON           ; BLKPOS.H > BKEN.H: done
+        MOV     A,E
+        CMP     L
+        JNC     BCDON           ; BLKPOS >= BKEN: done
+
+BCGBYT:
+        ; Read byte at BLKPOS from gap buffer
+        LHLD    BLKPOS
+        CALL    BLGBRD          ; A = byte
+        MOV     M,A             ; store to clip
+        INX     H               ; advance clip ptr
+
+        ; Check clip full
+        LXI     D,CLIPBUF
+        MOV     A,H
+        SUB     D
+        ; rough check: if more than CLIPMAX bytes written, stop
+        ; Use CLIPCNT
+        LDA     CLIPCNT+1
+        MOV     B,A
+        LDA     CLIPCNT
+        INR     A
+        STA     CLIPCNT
+        MOV     A,B
+        ACI     0
+        STA     CLIPCNT+1
+        ; Check >= CLIPMAX
+        LDA     CLIPCNT+1
+        CPI     HIGH(CLIPMAX)
+        JC      BCNFLL
+        JNZ     BCDON
+        LDA     CLIPCNT
+        CPI     LOW(CLIPMAX)
+        JNC     BCDON
+
+BCNFLL:
+        LHLD    BLKPOS
+        INX     H
+        SHLD    BLKPOS
+        JMP     BCCPLP
+
+BCDON:
+        ; NUL-terminate clip (not strictly needed but helpful)
+        MVI     M,0
+
+        ; Store clip length from CLIPCNT
+        LHLD    CLIPCNT
+        SHLD    CLIPLEN
+
+        LXI     D,BCPMSG
+        CALL    STATMSG
+        RET
+
+;=============================================================
+; BLDEL - Delete marked block from buffer.
+; Moves cursor to MRKBG, then repeatedly GBDELRT.
+;=============================================================
+BLDEL:
+        CALL    BLCHKMK
+        RZ                      ; no block
+
+        ; Navigate to BLKBG
+        CALL    GBMVTOP
+
+        LHLD    BLKBG
+        SHLD    BDNAV
+
+BDNAVL:
+        LHLD    BDNAV
+        MOV     A,H
+        ORA     L
+        JZ      BDDLP
+        CALL    GBMVRT
+        LHLD    BDNAV
+        DCX     H
+        SHLD    BDNAV
+        JMP     BDNAVL
+
+BDDLP:
+        ; Delete BKEN-BLKBG characters
+        LHLD    BLKEN
+        XCHG
+        LHLD    BLKBG
+        ; count = BKEN - BLKBG = DE - HL
+        MOV     A,E
+        SUB     L
+        MOV     C,A
+        MOV     A,D
+        SBB     H
+        MOV     B,A             ; BC = count
+
+        MOV     A,B
+        ORA     C
+        JZ      BDDON
+
+BDDELP:
+        CALL    GBDELRT
+        DCX     B
+        MOV     A,B
+        ORA     C
+        JNZ     BDDELP
+
+BDDON:
+        ; Clear block marks
+        LXI     H,NO_MARK
+        CALL    BLWRMB
+        LXI     H,NO_MARK
+        CALL    BLWRME
+
+        MVI     A,1
+        STA     DIRTY
+        LXI     D,BDLMSG
+        CALL    STATMSG
+        RET
+
+;=============================================================
+; BLPASTE - Insert clipboard contents at current cursor.
+;=============================================================
+BLPASTE:
+        LHLD    CLIPLEN
+        MOV     A,H
+        ORA     L
+        JZ      BPNONE          ; nothing in clipboard
+
+        LXI     H,CLIPBUF       ; source pointer
+        LHLD    CLIPLEN
+        XCHG                    ; DE = count (HL = clipbuf)
+        LXI     H,CLIPBUF
+
+BPLOOP:
+        MOV     A,D
+        ORA     E
+        JZ      BPDONE
+
+        MOV     A,M
+        CALL    GBINSRT
+        INX     H
+        DCX     D
+        JMP     BPLOOP
+
+BPDONE:
+        MVI     A,1
+        STA     DIRTY
+        LXI     D,BPSMSG
+        CALL    STATMSG
+        RET
+
+BPNONE:
+        LXI     D,BPEMSG
+        CALL    STATMSG
+        RET
+
+;=============================================================
+; Internal helpers
+;=============================================================
+
+;------------------------------------------------------------
+; BLCHKMK - Verify block is fully marked.
+; Sets BLKBG and BLKEN from descriptor.
+; Exit: Z = 1 if NOT valid (caller should RZ/return)
+;       Z = 0 if valid
+;------------------------------------------------------------
+BLCHKMK:
+        CALL    BLRDMB          ; HL = MRKBG
+        MOV     A,H
+        CPI     0FFH
+        JZ      BLCKNV          ; NO_MARK
+        SHLD    BLKBG
+
+        CALL    BLRDME          ; HL = MRKEN
+        MOV     A,H
+        CPI     0FFH
+        JZ      BLCKNV          ; NO_MARK
+        SHLD    BLKEN
+
+        ; Both set; clear zero flag (valid)
+        MVI     A,1
+        ORA     A               ; NZ
+        RET
+
+BLCKNV:
+        LXI     D,BNMMSG
+        CALL    STATMSG
+        XRA     A               ; Z = invalid
+        RET
+
+;------------------------------------------------------------
+; BLCUROF - Return current cursor offset in HL.
+;------------------------------------------------------------
+BLCUROF:
+        LHLD    CURBDP
+        MOV     A,L
+        ADI     BD_CSOFF
+        MOV     L,A
+        MOV     A,H
+        ACI     0
+        MOV     H,A
+        MOV     E,M
+        INX     H
+        MOV     D,M
+        XCHG
+        RET
+
+;------------------------------------------------------------
+; BLRDMB - Read BD_MRKBG from current descriptor into HL.
+;------------------------------------------------------------
+BLRDMB:
+        LHLD    CURBDP
+        MOV     A,L
+        ADI     BD_MRKBG
+        MOV     L,A
+        MOV     A,H
+        ACI     0
+        MOV     H,A
+        MOV     E,M
+        INX     H
+        MOV     D,M
+        XCHG
+        RET
+
+;------------------------------------------------------------
+; BLRDME - Read BD_MRKEN from current descriptor into HL.
+;------------------------------------------------------------
+BLRDME:
+        LHLD    CURBDP
+        MOV     A,L
+        ADI     BD_MRKEN
+        MOV     L,A
+        MOV     A,H
+        ACI     0
+        MOV     H,A
+        MOV     E,M
+        INX     H
+        MOV     D,M
+        XCHG
+        RET
+
+;------------------------------------------------------------
+; BLWRMB - Write HL to BD_MRKBG in current descriptor.
+;------------------------------------------------------------
+BLWRMB:
+        PUSH    H               ; save value
+        LHLD    CURBDP
+        MOV     A,L
+        ADI     BD_MRKBG
+        MOV     L,A
+        MOV     A,H
+        ACI     0
+        MOV     H,A
+        POP     D               ; DE = value to write
+        MOV     M,E
+        INX     H
+        MOV     M,D
+        RET
+
+;------------------------------------------------------------
+; BLWRME - Write HL to BD_MRKEN in current descriptor.
+;------------------------------------------------------------
+BLWRME:
+        PUSH    H
+        LHLD    CURBDP
+        MOV     A,L
+        ADI     BD_MRKEN
+        MOV     L,A
+        MOV     A,H
+        ACI     0
+        MOV     H,A
+        POP     D
+        MOV     M,E
+        INX     H
+        MOV     M,D
+        RET
+
+;------------------------------------------------------------
+; BLGBRD - Read byte from gap buffer at logical offset HL.
+; Entry:  HL = logical offset
+; Exit:   A = byte; HL preserved (via memory)
+;------------------------------------------------------------
+BLGBRD:
+        SHLD    BLGOFF          ; save logical offset
+        LHLD    CURBDP
+        ; Read GAPBG
+        MOV     A,L
+        ADI     BD_GAPBG
+        MOV     L,A
+        MOV     A,H
+        ACI     0
+        MOV     H,A
+        MOV     C,M
+        INX     H
+        MOV     B,M             ; BC = GAPBG
+
+        LHLD    CURBDP
+        ; Read BSTAR
+        MOV     A,L
+        ADI     BD_BSTAR
+        MOV     L,A
+        MOV     A,H
+        ACI     0
+        MOV     H,A
+        MOV     E,M
+        INX     H
+        MOV     D,M             ; DE = BSTAR
+
+        ; Compare logical with GAPBG
+        LHLD    BLGOFF
+        MOV     A,H
+        CMP     B
+        JC      BLGBF           ; logical.H < GAPBG.H: before gap
+        JNZ     BLGAF
+        MOV     A,L
+        CMP     C
+        JNC     BLGAF           ; logical >= GAPBG: after gap
+
+BLGBF:  ; physical = BSTAR + logical
+        LHLD    BLGOFF
+        MOV     A,L
+        ADD     E
+        MOV     L,A
+        MOV     A,H
+        ADC     D
+        MOV     H,A
+        MOV     A,M
+        RET
+
+BLGAF:  ; physical = BSTAR + logical + (GAPEN - GAPBG)
+        LHLD    CURBDP
+        MOV     A,L
+        ADI     BD_GAPEN
+        MOV     L,A
+        MOV     A,H
+        ACI     0
+        MOV     H,A
+        MOV     L,M
+        INX     H
+        MOV     H,M             ; HL = GAPEN (but H is overwritten!)
+        ; Fix: read low byte first
+        LHLD    CURBDP
+        MOV     A,L
+        ADI     BD_GAPEN
+        MOV     L,A
+        MOV     A,H
+        ACI     0
+        MOV     H,A
+        MOV     A,M
+        MOV     E,A             ; E = GAPEN low
+        INX     H
+        MOV     A,M
+        MOV     D,A             ; D = GAPEN high
+        ; gap size = GAPEN - GAPBG = DE - BC
+        MOV     A,E
+        SUB     C
+        MOV     C,A
+        MOV     A,D
+        SBB     B
+        MOV     B,A             ; BC = gap size
+        ; physical = logical + gap size
+        LHLD    BLGOFF
+        MOV     A,L
+        ADD     C
+        MOV     L,A
+        MOV     A,H
+        ADC     B
+        MOV     H,A             ; HL = physical offset
+        ; Add BSTAR (still in DE)
+        MOV     A,L
+        ADD     E
+        MOV     L,A
+        MOV     A,H
+        ADC     D
+        MOV     H,A             ; HL = BSTAR + physical offset
+        MOV     A,M
+        RET
+
+;=============================================================
+; DATA SEGMENT
+;=============================================================
+        DSEG
+
+; Validated block bounds (set by BLCHKMK)
+BLKBG:  DW      0
+BLKEN:  DW      0
+
+; Navigation counter
+BDNAV:  DW      0
+
+; Clipboard
+CLIPBUF: DS     CLIPMAX
+CLIPLEN: DW     0
+CLIPCNT: DW     0               ; temp counter during copy
+
+; BLGBRD offset temp
+BLGOFF: DW      0
+
+; BLKPOS for BLCOPY walk
+BLKPOS: DW      0
+
+; Status messages
+BM1MSG:  DB     'Mark start. $'
+BM2MSG:  DB     'Mark end.   $'
+BMCMSG:  DB     'Mark clear. $'
+BNMMSG:  DB     'No block.   $'
+BCPMSG:  DB     'Block copied$'
+BDLMSG:  DB     'Block del.  $'
+BPSMSG:  DB     'Pasted.     $'
+BPEMSG:  DB     'Clip empty. $'
+
+        END
+

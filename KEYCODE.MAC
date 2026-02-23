@@ -1,0 +1,123 @@
+;============================================================
+; FILE:    KEYCODE.MAC
+; PROJECT: SEDIT - Screen Editor for CP/M 2.2
+; VERSION: 1.0
+;------------------------------------------------------------
+; DESCRIPTION:
+;   Diagnostic tool: displays the hex code of every byte
+;   received from the console.  Uses BDOS function 6
+;   (direct console I/O) so that control characters like
+;   Ctrl-Q and Ctrl-S are NOT intercepted by CP/M.
+;
+;   Press Ctrl-C to exit.
+;
+; BUILD:
+;   M80 =KEYCODE
+;   L80 KEYCODE,KEYCODE/N/E
+;------------------------------------------------------------
+
+BDOS    EQU     5
+BF_RAW  EQU     6               ; direct console I/O
+CTRLC   EQU     3               ; exit key
+
+CR      EQU     0DH
+LF      EQU     0AH
+
+        CSEG
+
+;------------------------------------------------------------
+; Print banner
+;------------------------------------------------------------
+START:
+        LXI     D,BANNER
+        MVI     C,9             ; BDOS print string
+        CALL    BDOS
+
+;------------------------------------------------------------
+; Main polling loop - read one raw byte at a time
+;------------------------------------------------------------
+POLL:
+        MVI     E,0FFH          ; request input
+        MVI     C,BF_RAW
+        CALL    BDOS
+        ORA     A
+        JZ      POLL            ; no char yet
+
+        ; Check for Ctrl-C exit
+        CPI     CTRLC
+        JZ      EXIT
+
+        ; Display "0x" prefix
+        PUSH    PSW             ; save the byte
+        MVI     A,'0'
+        CALL    CONOUT
+        MVI     A,'x'
+        CALL    CONOUT
+        POP     PSW             ; restore the byte
+
+        ; Print high nybble then low nybble
+        PUSH    PSW
+        RRC
+        RRC
+        RRC
+        RRC
+        CALL    PRNNYB          ; high nybble
+        POP     PSW
+        CALL    PRNNYB          ; low nybble
+
+        ; Newline
+        MVI     A,CR
+        CALL    CONOUT
+        MVI     A,LF
+        CALL    CONOUT
+
+        JMP     POLL
+
+;------------------------------------------------------------
+; EXIT - print goodbye, return to CP/M
+;------------------------------------------------------------
+EXIT:
+        LXI     D,BYEMSG
+        MVI     C,9
+        CALL    BDOS
+        JMP     0               ; warm boot
+
+;------------------------------------------------------------
+; PRNNYB - print low 4 bits of A as a hex digit
+;------------------------------------------------------------
+PRNNYB:
+        ANI     0FH
+        CPI     10
+        JC      PRNDEC          ; 0-9
+        ADI     'A'-10          ; A-F
+        JMP     PRNOUT
+PRNDEC: ADI     '0'
+PRNOUT: CALL    CONOUT
+        RET
+
+;------------------------------------------------------------
+; CONOUT - output character in A via BDOS function 6
+;   (avoids function 2 which interprets control chars)
+;------------------------------------------------------------
+CONOUT:
+        PUSH    B
+        PUSH    PSW
+        MOV     E,A
+        MVI     C,BF_RAW        ; direct console output
+        CALL    BDOS
+        POP     PSW
+        POP     B
+        RET
+
+;------------------------------------------------------------
+; Data
+;------------------------------------------------------------
+BANNER: DB      'KEYCODE - Raw key byte display',CR,LF
+        DB      'Press keys to see hex codes.',CR,LF
+        DB      'Press Ctrl-C to exit.',CR,LF
+        DB      CR,LF,'$'
+
+BYEMSG: DB      CR,LF,'Done.',CR,LF,'$'
+
+        END
+

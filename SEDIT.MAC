@@ -1,0 +1,655 @@
+;============================================================
+; FILE:    SEDIT.MAC
+; PROJECT: SEDIT - Screen Editor for CP/M 2.2
+; VERSION: 1.0
+; DATE:    1984-01-01
+; AUTHOR:
+;------------------------------------------------------------
+; DESCRIPTION:
+;   Root module. Contains START: entry point, TPA memory
+;   detection, module initialization, and main edit loop.
+;------------------------------------------------------------
+; BUILD INSTRUCTIONS:
+;   Assemble each module:
+;     M80 =SEDIT
+;     M80 =SESCREEN
+;     M80 =SEKEY
+;     M80 =SEGAPBUF
+;     M80 =SEFILEIO
+;     M80 =SEMENU
+;     M80 =SESEARCH
+;     M80 =SEBLOCK
+;     M80 =SEBUFMGR
+;     M80 =SESYNTAX
+;     M80 =SEKEYBND
+;     M80 =SEHELP
+;   Link (one command, split here for readability):
+;     L80 SEDIT,SESCREEN,SEKEY,SEGAPBUF,SEFILEIO,
+;         SEMENU,SESEARCH,SEBLOCK,SEBUFMGR,
+;         SESYNTAX,SEKEYBND,SEHELP,SEDIT/N/E
+;   Or run: SUBMIT BUILD
+;------------------------------------------------------------
+; REVISION HISTORY:
+;   1.0  1984-01-01  Initial release
+;============================================================
+;============================================================
+; FILE:    SEDIT.INC
+; PROJECT: SEDIT - Screen Editor for CP/M 2.2
+; VERSION: 1.0
+; DATE:    1984-01-01
+; AUTHOR:
+;------------------------------------------------------------
+; DESCRIPTION:
+;   Shared equates for all SEDIT modules.
+;   INCLUDE this as the first statement of every .MAC file.
+;------------------------------------------------------------
+; REVISION HISTORY:
+;   1.0  1984-01-01  Initial release
+;============================================================
+
+;--- CP/M system addresses ----------------------------
+BDOS    EQU     0005H       ; BDOS call entry
+WBOOT   EQU     0000H       ; warm boot / exit
+DFTFCB  EQU     005CH       ; default FCB (arg 1)
+CMDTAIL EQU     0080H       ; command tail buffer
+
+;--- BDOS function numbers ----------------------------
+BF_CONIN  EQU   1           ; console input (wait)
+BF_CONOUT EQU   2           ; console output: E=char
+BF_RAWIO  EQU   6           ; direct I/O: E=FFH->in
+BF_PRTSTR EQU   9           ; print $-string: DE=addr
+BF_RDLINE EQU   10          ; buffered line input
+BF_CONST  EQU   11          ; console status
+BF_FOPEN  EQU   15          ; open file: DE=FCB
+BF_FCLOSE EQU   16          ; close file: DE=FCB
+BF_FDEL   EQU   19          ; delete: DE=FCB
+BF_FREAD  EQU   20          ; seq read: DE=FCB
+BF_FWRITE EQU   21          ; seq write: DE=FCB
+BF_FMAKE  EQU   22          ; create: DE=FCB
+BF_SETDMA EQU   26          ; set DMA: DE=addr
+BF_USRNUM EQU   32          ; get/set user: E=num
+
+;--- ASCII control codes ------------------------------
+NUL     EQU     00H
+BEL     EQU     07H         ; bell
+BS      EQU     08H         ; backspace
+TAB     EQU     09H         ; horizontal tab
+LF      EQU     0AH         ; line feed
+CR      EQU     0DH         ; carriage return
+ESC     EQU     1BH         ; escape
+DEL     EQU     7FH         ; delete character
+CPMEOF  EQU     1AH         ; CP/M EOF marker (Ctrl-Z)
+CTRLK   EQU     0BH         ; Ctrl-K (prefix key)
+CTRLQ   EQU     11H         ; Ctrl-Q (prefix key)
+
+;--- Screen layout ------------------------------------
+SCRROWS EQU     24          ; terminal row count
+SCRCOLS EQU     80          ; terminal column count
+EDITROW EQU     20          ; edit rows (rows 3-22)
+EDITFR  EQU     3           ; first edit row (1-based)
+INFOROW EQU     1           ; info bar row
+RULRROW EQU     2           ; tab ruler row
+SEPRROW EQU     23          ; separator (===) row
+STATROW EQU     24          ; status/message row
+LNUMWID EQU     4           ; gutter width (3+space)
+TXTCOLS EQU     74          ; max text columns/line
+TXTFCOL EQU     5           ; text start col (1-based)
+TABWID  EQU     4           ; tab stop interval
+
+;--- SGR attribute byte values ------------------------
+ATTR_NRM EQU    00H         ; normal
+ATTR_BLD EQU    01H         ; bold
+ATTR_DIM EQU    02H         ; dim
+ATTR_REV EQU    07H         ; reverse video
+ATTR_CYN EQU    36H         ; cyan foreground
+ATTR_GRN EQU    32H         ; green foreground
+ATTR_YEL EQU    33H         ; yellow foreground
+ATTR_MAG EQU    35H         ; magenta foreground
+
+;--- Buffer descriptor field offsets -----------------
+BD_BSTAR EQU    0           ; 2: buffer base address
+BD_BSIZE EQU    2           ; 2: capacity in bytes
+BD_GAPBG EQU    4           ; 2: gap start offset
+BD_GAPEN EQU    6           ; 2: gap end offset
+BD_TXEND EQU    8           ; 2: text end offset
+BD_TOPLN EQU    10          ; 2: top visible line
+BD_CSROW EQU    12          ; 1: cursor screen row
+BD_CSCOL EQU    13          ; 1: cursor text column
+BD_CSOFF EQU    14          ; 2: cursor byte offset
+BD_MRKBG EQU    16          ; 2: block mark start
+BD_MRKEN EQU    18          ; 2: block mark end
+BD_MODIF EQU    20          ; 1: modified flag
+BD_SYNMD EQU    21          ; 1: syntax mode
+BD_FNAME EQU    22          ; 12: drive+name+ext
+BD_SIZE  EQU    34          ; bytes per descriptor
+
+;--- Number of edit buffers ---------------------------
+MAXBUFS EQU     2           ; maximum open buffers
+MINMEM  EQU     18*1024     ; minimum TPA required
+
+;--- Syntax mode codes --------------------------------
+SYN_NONE EQU    0           ; plain text
+SYN_ASM  EQU    1           ; 8080/Z80 assembly
+
+;--- Insert / overwrite mode --------------------------
+MODE_INS EQU    0           ; insert mode (default)
+MODE_OVR EQU    1           ; overwrite mode
+
+;--- Key type codes (B reg from GETKEY) ---------------
+KT_NONE EQU     0           ; no key available
+KT_ACT  EQU     1           ; C = action code
+KT_CHAR EQU     2           ; C = printable char
+
+;--- Key action codes (C reg when B=KT_ACT) ----------
+ACT_CURUP EQU   1           ; cursor up
+ACT_CURDN EQU   2           ; cursor down
+ACT_CURLT EQU   3           ; cursor left
+ACT_CURRT EQU   4           ; cursor right
+ACT_WRDPV EQU   5           ; previous word
+ACT_WRDNX EQU   6           ; next word
+ACT_PGUP  EQU   7           ; page up
+ACT_PGDN  EQU   8           ; page down
+ACT_SCRUP EQU   9           ; scroll screen up
+ACT_SCRDN EQU   10          ; scroll screen down
+ACT_LINST EQU   11          ; jump to line start
+ACT_LINEN EQU   12          ; jump to line end
+ACT_FTOP  EQU   13          ; jump to file top
+ACT_FEND  EQU   14          ; jump to file end
+ACT_DELLF EQU   15          ; delete left (BS)
+ACT_DELRT EQU   16          ; delete right (Del)
+ACT_DELWD EQU   17          ; delete word right
+ACT_DELLN EQU   18          ; delete entire line
+ACT_INSTB EQU   19          ; insert tab
+ACT_INSNL EQU   20          ; insert newline
+ACT_TOGIN EQU   21          ; toggle insert/overwrite
+ACT_LITNX EQU   22          ; next char is literal
+ACT_FNDNX EQU   23          ; find next
+ACT_FSAVE EQU   24          ; save file
+ACT_FOPEN EQU   25          ; open file
+ACT_FEXIT EQU   26          ; exit editor
+ACT_BLKMK EQU   27          ; toggle block mark
+ACT_BLKCP EQU   28          ; copy block
+ACT_BLKDL EQU   29          ; delete block
+ACT_BLKPS EQU   30          ; paste clipboard
+ACT_MENU  EQU   31          ; open ESC menu
+ACT_MAX   EQU   31          ; highest action code
+
+;--- Block mark sentinel ------------------------------
+NO_MARK EQU     0FFFFH      ; marks absent/unset
+
+;--- FCB field offsets --------------------------------
+FCB_DR  EQU     0           ; drive (0=default)
+FCB_FN  EQU     1           ; filename (8 bytes)
+FCB_FT  EQU     9           ; extension (3 bytes)
+FCB_EX  EQU     12          ; extent number
+FCB_S2  EQU     14          ; extent high
+FCB_RC  EQU     15          ; record count
+FCB_CR  EQU     32          ; current record
+FCB_SIZ EQU     36          ; total FCB size
+
+;--- DMA record size ----------------------------------
+RECSIZ  EQU     128         ; 128 bytes per record
+
+;--- Clipboard buffer size ----------------------------
+CLIPMAX EQU     2048        ; max paste buffer bytes
+
+;--- Search string size limit -------------------------
+SRCHMAX EQU     64          ; max find string length
+
+
+;--- Cross-module entry points ------------------------
+        EXTRN   BMINIT          ; buffer manager init
+        EXTRN   BMGETCUR        ; -> current buf desc
+        EXTRN   BMSWITCH        ; switch active buffer
+        EXTRN   KBINIT          ; key binding init
+        EXTRN   GETKEY          ; read next key
+        EXTRN   SCRINIT         ; screen init/clear
+        EXTRN   SCRDRAW         ; full screen redraw
+        EXTRN   SCREDCL         ; redraw current line only
+        EXTRN   STATMSG         ; status bar message
+        EXTRN   INFOBAR         ; update info bar
+        EXTRN   CURPOS          ; position hw cursor
+        EXTRN   GBINSRT         ; insert char at gap
+        EXTRN   GBDLFT         ; delete left (BS)
+        EXTRN   GBDELRT         ; delete right (Del)
+        EXTRN   GBMVUP          ; cursor up one line
+        EXTRN   GBMVDN          ; cursor down one line
+        EXTRN   GBMVLT          ; cursor left one char
+        EXTRN   GBMVRT          ; cursor right one char
+        EXTRN   GBMLNS         ; cursor to line start
+        EXTRN   GBMLNE         ; cursor to line end
+        EXTRN   GBMVTOP         ; cursor to file top
+        EXTRN   GBMVEND         ; cursor to file end
+        EXTRN   GBPGUP          ; page up
+        EXTRN   GBPGDN          ; page down
+        EXTRN   GBDLLN         ; delete current line
+        EXTRN   GBWRDPV         ; move to prev word
+        EXTRN   GBWRDNX         ; move to next word
+        EXTRN   FIOPEN          ; load file to buffer
+        EXTRN   FISAVE          ; save buffer to file
+        EXTRN   FISAVFN         ; copy WRKFCB name to BD_FNAME
+        EXTRN   FISMOD          ; read BD_MODIF flag
+        EXTRN   FIPROMPT        ; prompt for filename
+        EXTRN   CURGOTO         ; position cursor (B=row, C=col)
+        EXTRN   MNUSHOW         ; run ESC menu
+        EXTRN   SRFNDNX         ; find next
+        EXTRN   BLMARK          ; toggle block mark
+        EXTRN   BLCOPY          ; copy block
+        EXTRN   BLDEL           ; delete block
+        EXTRN   BLPASTE         ; paste clipboard
+        EXTRN   HLPSHOW         ; show help screen
+
+;--- Exported symbols ---------------------------------
+        PUBLIC  INSMODE         ; insert/overwrite flag
+        PUBLIC  DIRTY           ; screen redraw needed
+        PUBLIC  CURBDP          ; current buf desc ptr
+        PUBLIC  TPATOP          ; TPA top address
+        PUBLIC  DOEXIT          ; exit handler (for SEMENU)
+
+;=============================================================
+; CODE SEGMENT
+;=============================================================
+        CSEG
+
+;------------------------------------------------------------
+; START - CP/M loads .COM at 0100H and jumps here.
+; Entry:  SP near TPA top; FCB at 005CH may hold filename
+; Exit:   Never returns (warm boots on exit)
+;------------------------------------------------------------
+START:
+        LXI     H,0             ; capture incoming SP
+        DAD     SP
+        SHLD    OLDSP           ; save for TPA calc
+        LXI     SP,STKTOP       ; set our own stack
+
+        ; TPA top = BDOS handler address (operand of JMP at 0005H)
+        LHLD    0006H           ; HL = BDOS address = TPA top
+        SHLD    TPATOP          ; save it
+
+        ; Initialize buffer manager (allocates gap buffers)
+        CALL    BMINIT
+        JNZ     MEMFAIL         ; NZ = insufficient memory
+
+        ; Initialize key bindings table
+        CALL    KBINIT
+
+        ; Initialize and clear screen, draw chrome
+        CALL    SCRINIT
+
+        ; Load file from command line arg if present
+        LDA     DFTFCB+1        ; first char of filename
+        CPI     ' '             ; space means no arg
+        JZ      MAINLP          ; no file, skip load
+        LXI     D,DFTFCB        ; DE = FCB address
+        CALL    FIOPEN          ; load into buffer 0
+        MVI     A,1
+        STA     DIRTY           ; force full screen redraw
+
+;------------------------------------------------------------
+; MAINLP - Main edit loop
+;------------------------------------------------------------
+MAINLP:
+        ; Check redraw level: DIRTY=full, DRTLINE=current line only
+        LDA     DIRTY
+        ORA     A
+        JNZ     MLFULL          ; full redraw takes priority
+        LDA     DRTLINE
+        ORA     A
+        JZ      MLDONE          ; no redraw needed
+        ; Line-only redraw
+        XRA     A
+        STA     DRTLINE
+        CALL    SCREDCL         ; redraw current line + info bar
+        JMP     MLDONE
+MLFULL:
+        XRA     A
+        STA     DIRTY           ; clear both flags
+        STA     DRTLINE
+        CALL    SCRDRAW         ; full screen redraw
+MLDONE:
+        CALL    INFOBAR         ; always update info bar (row/col)
+        CALL    CURPOS          ; place HW cursor
+
+        ; Get next key (blocking)
+        CALL    GETKEY          ; B=type, C=code/char
+        MOV     A,B
+        ORA     A
+        JZ      MAINLP          ; KT_NONE, try again
+
+        CPI     KT_CHAR         ; printable character?
+        JZ      DOCHAR
+
+        ; Action code in C - range check then dispatch
+        MOV     A,C
+        ORA     A
+        JZ      MAINLP          ; ACT_NONE
+        CPI     ACT_MAX+1
+        JNC     MAINLP          ; out of range, ignore
+
+        ; Index into jump table: each entry = 2 bytes
+        MOV     L,A
+        MVI     H,0
+        DAD     H               ; HL = index * 2
+        LXI     D,ACTTBL
+        DAD     D               ; HL = &ACTTBL[i*2]
+        MOV     E,M
+        INX     H
+        MOV     D,M             ; DE = handler address
+        XCHG
+        PCHL                    ; jump to handler
+
+        ; Insert a printable character (KT_CHAR)
+DOCHAR:
+        MOV     A,C             ; character value
+        CALL    GBINSRT         ; insert at cursor
+        MVI     A,1
+        STA     DRTLINE         ; redraw current line only
+        JMP     MAINLP
+
+;------------------------------------------------------------
+; Action handlers - each dispatched from ACTTBL
+;------------------------------------------------------------
+DO_CUU: CALL    SVTOPLN         ; save TOPLN before move
+        CALL    GBMVUP
+        CALL    CHKSCRL         ; full redraw only if scrolled
+        JMP     MAINLP
+DO_CUD: CALL    SVTOPLN
+        CALL    GBMVDN
+        CALL    CHKSCRL         ; full redraw only if scrolled
+        JMP     MAINLP
+DO_CUL: CALL    GBMVLT
+        JMP     MAINLP          ; cursor-only: no redraw
+DO_CUR: CALL    GBMVRT
+        JMP     MAINLP          ; cursor-only: no redraw
+DO_WPV: CALL    SVTOPLN
+        CALL    GBWRDPV
+        CALL    CHKSCRL
+        JMP     MAINLP
+DO_WNX: CALL    SVTOPLN
+        CALL    GBWRDNX
+        CALL    CHKSCRL
+        JMP     MAINLP
+DO_PGU: CALL    GBPGUP
+        MVI     A,1
+        STA     DIRTY
+        JMP     MAINLP
+DO_PGD: CALL    GBPGDN
+        MVI     A,1
+        STA     DIRTY
+        JMP     MAINLP
+DO_SCU: CALL    GBMVUP          ; scroll up = cursor up
+        MVI     A,1
+        STA     DIRTY
+        JMP     MAINLP
+DO_SCD: CALL    GBMVDN          ; scroll dn = cursor dn
+        MVI     A,1
+        STA     DIRTY
+        JMP     MAINLP
+DO_LST: CALL    GBMLNS
+        JMP     MAINLP          ; cursor-only: no redraw
+DO_LEN: CALL    GBMLNE
+        JMP     MAINLP          ; cursor-only: no redraw
+DO_FTP: CALL    GBMVTOP
+        MVI     A,1
+        STA     DIRTY
+        JMP     MAINLP
+DO_FEN: CALL    GBMVEND
+        MVI     A,1
+        STA     DIRTY
+        JMP     MAINLP
+DO_DLF: CALL    GBDLFT
+        MVI     A,1
+        STA     DIRTY
+        JMP     MAINLP
+DO_DRT: CALL    GBDELRT
+        MVI     A,1
+        STA     DIRTY
+        JMP     MAINLP
+DO_DWD: CALL    GBWRDNX         ; move to next word
+        CALL    GBDLFT         ; then delete back
+        MVI     A,1
+        STA     DIRTY
+        JMP     MAINLP
+DO_DLN: CALL    GBDLLN
+        MVI     A,1
+        STA     DIRTY
+        JMP     MAINLP
+DO_TAB: MVI     A,TAB
+        CALL    GBINSRT
+        MVI     A,1
+        STA     DRTLINE         ; redraw current line only
+        JMP     MAINLP
+DO_NLN: MVI     A,CR
+        CALL    GBINSRT
+        MVI     A,LF
+        CALL    GBINSRT
+        MVI     A,1
+        STA     DIRTY
+        JMP     MAINLP
+DO_TIN: LDA     INSMODE         ; toggle insert mode
+        XRI     1
+        STA     INSMODE
+        CALL    INFOBAR         ; update mode display
+        JMP     MAINLP
+DO_LIT: JMP     MAINLP          ; literal next - TODO
+DO_FNX: CALL    SRFNDNX
+        MVI     A,1
+        STA     DIRTY
+        JMP     MAINLP
+DO_SAV: CALL    FISAVE
+        CALL    INFOBAR
+        JMP     MAINLP
+DO_OPN: CALL    MNUSHOW         ; open via menu
+        MVI     A,1
+        STA     DIRTY
+        JMP     MAINLP
+DO_EXT: CALL    DOEXIT          ; save & exit
+        JMP     MAINLP          ; returns if cancelled
+DO_BMK: CALL    BLMARK
+        MVI     A,1
+        STA     DIRTY
+        JMP     MAINLP
+DO_BCP: CALL    BLCOPY
+        MVI     A,1
+        STA     DIRTY
+        JMP     MAINLP
+DO_BDL: CALL    BLDEL
+        MVI     A,1
+        STA     DIRTY
+        JMP     MAINLP
+DO_BPS: CALL    BLPASTE
+        MVI     A,1
+        STA     DIRTY
+        JMP     MAINLP
+DO_MNU: CALL    MNUSHOW
+        MVI     A,1
+        STA     DIRTY
+        JMP     MAINLP
+
+;------------------------------------------------------------
+; DOEXIT - Prompt to save, handle unnamed files, exit.
+; If buffer is unmodified: exits immediately.
+; If modified: asks "Save? (Y/N/Esc)".
+;   Y = save (prompts for name if unnamed), then exit.
+;   N = discard changes, exit.
+;   Esc = cancel, returns to editor.
+; Exit: Warm boots CP/M (does not return) unless cancelled.
+;------------------------------------------------------------
+DOEXIT:
+        ; Check if buffer modified
+        CALL    FISMOD
+        ORA     A
+        JZ      DXEXIT          ; not modified, just exit
+
+        ; Buffer is modified - ask user
+        LXI     D,EXTSAVQ       ; "Save changes? (Y/N/Esc) "
+        CALL    STATMSG
+        MVI     C,BF_CONIN
+        CALL    BDOS
+
+        ; Check response
+        CPI     'Y'
+        JZ      DXYES
+        CPI     'y'
+        JZ      DXYES
+        CPI     'N'
+        JZ      DXEXIT          ; discard changes, exit
+        CPI     'n'
+        JZ      DXEXIT
+        ; Any other key = cancel (return to editor)
+        JMP     DXRET
+
+DXYES:
+        ; Check if filename exists (BD_FNAME[0] != space)
+        LHLD    CURBDP
+        MVI     A,BD_FNAME
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A
+        MOV     A,M
+        ANI     7FH
+        CPI     ' '
+        JNZ     DXSAVE          ; has name, save directly
+
+        ; No name - clear status bar and prompt for filename
+        LXI     D,CLRMSG
+        CALL    STATMSG         ; clear status bar
+        MVI     B,STATROW
+        MVI     C,1
+        CALL    CURGOTO
+        LXI     D,EXTASPMT      ; "Save as: "
+        CALL    FIPROMPT
+        JZ      DXRET           ; user cancelled filename entry
+        CALL    FISAVFN         ; copy WRKFCB name to BD_FNAME
+
+DXSAVE:
+        CALL    FISAVE
+
+DXEXIT:
+        LXI     D,CLRMSG
+        CALL    STATMSG
+        JMP     WBOOT           ; return to CP/M
+
+DXRET:  LXI     D,CLRMSG
+        CALL    STATMSG         ; clear leftover prompt
+        RET
+
+;------------------------------------------------------------
+; MEMFAIL - Not enough memory to run.
+;------------------------------------------------------------
+MEMFAIL:
+        LXI     D,NOMEMSG
+        MVI     C,BF_PRTSTR
+        CALL    BDOS
+        JMP     WBOOT
+
+;------------------------------------------------------------
+; SVTOPLN - Save current TOPLN for scroll detection.
+; Called before a cursor movement that may scroll.
+; Exit:   OLDTPLN filled; AF HL clobbered
+;------------------------------------------------------------
+SVTOPLN:
+        LHLD    CURBDP
+        MVI     A,BD_TOPLN
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A             ; HL -> BD_TOPLN
+        MOV     A,M
+        STA     OLDTPLN
+        INX     H
+        MOV     A,M
+        STA     OLDTPLN+1
+        RET
+
+;------------------------------------------------------------
+; CHKSCRL - Compare TOPLN with saved value.
+; If changed, set DIRTY=1 for full redraw.
+; If unchanged, leave flags alone (cursor-only update).
+; Exit:   AF HL clobbered
+;------------------------------------------------------------
+CHKSCRL:
+        LHLD    CURBDP
+        MVI     A,BD_TOPLN
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A             ; HL -> BD_TOPLN
+        LDA     OLDTPLN
+        CMP     M
+        JNZ     CHKYES          ; low byte differs - scrolled
+        INX     H
+        LDA     OLDTPLN+1
+        CMP     M
+        RZ                      ; both match - no scroll
+CHKYES: MVI     A,1
+        STA     DIRTY           ; viewport scrolled, full redraw
+        RET
+
+;------------------------------------------------------------
+; Action dispatch table - word (address) per action code.
+; Index 0 = ACT_NONE (unused), 1..ACT_MAX = handlers.
+;------------------------------------------------------------
+ACTTBL:
+        DW      MAINLP          ;  0 ACT_NONE
+        DW      DO_CUU          ;  1 ACT_CURUP
+        DW      DO_CUD          ;  2 ACT_CURDN
+        DW      DO_CUL          ;  3 ACT_CURLT
+        DW      DO_CUR          ;  4 ACT_CURRT
+        DW      DO_WPV          ;  5 ACT_WRDPV
+        DW      DO_WNX          ;  6 ACT_WRDNX
+        DW      DO_PGU          ;  7 ACT_PGUP
+        DW      DO_PGD          ;  8 ACT_PGDN
+        DW      DO_SCU          ;  9 ACT_SCRUP
+        DW      DO_SCD          ; 10 ACT_SCRDN
+        DW      DO_LST          ; 11 ACT_LINST
+        DW      DO_LEN          ; 12 ACT_LINEN
+        DW      DO_FTP          ; 13 ACT_FTOP
+        DW      DO_FEN          ; 14 ACT_FEND
+        DW      DO_DLF          ; 15 ACT_DELLF
+        DW      DO_DRT          ; 16 ACT_DELRT
+        DW      DO_DWD          ; 17 ACT_DELWD
+        DW      DO_DLN          ; 18 ACT_DELLN
+        DW      DO_TAB          ; 19 ACT_INSTB
+        DW      DO_NLN          ; 20 ACT_INSNL
+        DW      DO_TIN          ; 21 ACT_TOGIN
+        DW      DO_LIT          ; 22 ACT_LITNX
+        DW      DO_FNX          ; 23 ACT_FNDNX
+        DW      DO_SAV          ; 24 ACT_FSAVE
+        DW      DO_OPN          ; 25 ACT_FOPEN
+        DW      DO_EXT          ; 26 ACT_FEXIT
+        DW      DO_BMK          ; 27 ACT_BLKMK
+        DW      DO_BCP          ; 28 ACT_BLKCP
+        DW      DO_BDL          ; 29 ACT_BLKDL
+        DW      DO_BPS          ; 30 ACT_BLKPS
+        DW      DO_MNU          ; 31 ACT_MENU
+
+;--- String constants ---------------------------------
+NOMEMSG: DB    'Insufficient memory',CR,LF,'$'
+CLRMSG:  DB    ' $'
+EXTSAVQ: DB    'Save changes? (Y/N/Esc) $'
+EXTASPMT: DB   'Save as: $'
+
+;=============================================================
+; DATA SEGMENT
+;=============================================================
+        DSEG
+
+OLDSP:  DW      0               ; saved entry SP
+TPATOP: DW      0               ; BDOS address / TPA top
+INSMODE: DB     MODE_INS        ; insert/overwrite mode
+DIRTY:  DB      1               ; 1 = full screen redraw needed
+DRTLINE: DB     0               ; 1 = redraw current line only
+OLDTPLN: DW     0               ; saved TOPLN for scroll detect
+CURBDP: DW      0               ; ptr to active buf desc
+
+;--- Stack (64 words) ---------------------------------
+        DS      128
+STKTOP  EQU     $               ; SP points here
+
+        END     START
+

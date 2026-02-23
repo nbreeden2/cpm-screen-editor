@@ -1,0 +1,15 @@
+# Windows
+desktop.ini
+Thumbs.db
+
+# Build artifacts
+*.REL
+*.COM
+*.SYM
+*.PRN
+*.BAK
+*.LST
+
+# Python
+__pycache__/
+*.pyc

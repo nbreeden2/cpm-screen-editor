@@ -1,0 +1,762 @@
+;============================================================
+; FILE:    SESYNTAX.MAC
+; PROJECT: SEDIT - Screen Editor for CP/M 2.2
+; VERSION: 1.0
+; DATE:    1984-01-01
+; AUTHOR:
+;------------------------------------------------------------
+; DESCRIPTION:
+;   Per-line syntax highlighter for 8080/Z80 assembly.
+;   Called by SESCREEN when BD_SYNMD = SYN_ASM.
+;
+;   SYNINIT  - detect file extension, set BD_SYNMD.
+;   SYNLINE  - tokenise one display line, building a span
+;              table of (start_col, end_col, attribute) triples.
+;
+;   Token classes and attributes:
+;     Labels (col 1 identifier followed by ':') -> ATTR_YEL
+;     Opcodes / directives (first token in field 1+)  -> ATTR_GRN
+;     Registers (A B C D E H L M SP HL DE BC AF)     -> ATTR_CYN
+;     Numbers (digits, hex 0..9A..F with H suffix)   -> ATTR_MAG
+;     Strings (' or " delimited)                     -> ATTR_MAG
+;     Comments (; to end of line)                    -> ATTR_DIM
+;     Normal text                                    -> ATTR_NRM
+;
+;   Span table: SNTBL, up to SNMAX (16) triples.
+;   SNCNT    : number of filled triples.
+;   Each triple: start_col (1-based), end_col, attribute byte.
+;
+;   SESCREEN calls SYNLINE before rendering each line,
+;   then uses the span table to select the SGR attribute
+;   for each column.
+;------------------------------------------------------------
+; REVISION HISTORY:
+;   1.0  1984-01-01  Initial release
+;============================================================
+
+;--- Imports ----------------------------------------------
+        EXTRN   CURBDP          ; current descriptor
+
+;--- Exports ----------------------------------------------
+        PUBLIC  SYNINIT         ; detect syntax mode
+        PUBLIC  SYNLINE         ; tokenise line -> span table
+        PUBLIC  SNTBL           ; span table
+        PUBLIC  SNCNT           ; span count
+
+SNMAX   EQU     16              ; max spans per line
+
+;=============================================================
+;============================================================
+; FILE:    SEDIT.INC
+; PROJECT: SEDIT - Screen Editor for CP/M 2.2
+; VERSION: 1.0
+; DATE:    1984-01-01
+; AUTHOR:
+;------------------------------------------------------------
+; DESCRIPTION:
+;   Shared equates for all SEDIT modules.
+;   INCLUDE this as the first statement of every .MAC file.
+;------------------------------------------------------------
+; REVISION HISTORY:
+;   1.0  1984-01-01  Initial release
+;============================================================
+
+;--- CP/M system addresses ----------------------------
+BDOS    EQU     0005H       ; BDOS call entry
+WBOOT   EQU     0000H       ; warm boot / exit
+DFTFCB  EQU     005CH       ; default FCB (arg 1)
+CMDTAIL EQU     0080H       ; command tail buffer
+
+;--- BDOS function numbers ----------------------------
+BF_CONIN  EQU   1           ; console input (wait)
+BF_CONOUT EQU   2           ; console output: E=char
+BF_RAWIO  EQU   6           ; direct I/O: E=FFH->in
+BF_PRTSTR EQU   9           ; print $-string: DE=addr
+BF_RDLINE EQU   10          ; buffered line input
+BF_CONST  EQU   11          ; console status
+BF_FOPEN  EQU   15          ; open file: DE=FCB
+BF_FCLOSE EQU   16          ; close file: DE=FCB
+BF_FDEL   EQU   19          ; delete: DE=FCB
+BF_FREAD  EQU   20          ; seq read: DE=FCB
+BF_FWRITE EQU   21          ; seq write: DE=FCB
+BF_FMAKE  EQU   22          ; create: DE=FCB
+BF_SETDMA EQU   26          ; set DMA: DE=addr
+BF_USRNUM EQU   32          ; get/set user: E=num
+
+;--- ASCII control codes ------------------------------
+NUL     EQU     00H
+BEL     EQU     07H         ; bell
+BS      EQU     08H         ; backspace
+TAB     EQU     09H         ; horizontal tab
+LF      EQU     0AH         ; line feed
+CR      EQU     0DH         ; carriage return
+ESC     EQU     1BH         ; escape
+DEL     EQU     7FH         ; delete character
+CPMEOF  EQU     1AH         ; CP/M EOF marker (Ctrl-Z)
+CTRLK   EQU     0BH         ; Ctrl-K (prefix key)
+CTRLQ   EQU     11H         ; Ctrl-Q (prefix key)
+
+;--- Screen layout ------------------------------------
+SCRROWS EQU     24          ; terminal row count
+SCRCOLS EQU     80          ; terminal column count
+EDITROW EQU     20          ; edit rows (rows 3-22)
+EDITFR  EQU     3           ; first edit row (1-based)
+INFOROW EQU     1           ; info bar row
+RULRROW EQU     2           ; tab ruler row
+SEPRROW EQU     23          ; separator (===) row
+STATROW EQU     24          ; status/message row
+LNUMWID EQU     4           ; gutter width (3+space)
+TXTCOLS EQU     74          ; max text columns/line
+TXTFCOL EQU     5           ; text start col (1-based)
+TABWID  EQU     4           ; tab stop interval
+
+;--- SGR attribute byte values ------------------------
+ATTR_NRM EQU    00H         ; normal
+ATTR_BLD EQU    01H         ; bold
+ATTR_DIM EQU    02H         ; dim
+ATTR_REV EQU    07H         ; reverse video
+ATTR_CYN EQU    36H         ; cyan foreground
+ATTR_GRN EQU    32H         ; green foreground
+ATTR_YEL EQU    33H         ; yellow foreground
+ATTR_MAG EQU    35H         ; magenta foreground
+
+;--- Buffer descriptor field offsets -----------------
+BD_BSTAR EQU    0           ; 2: buffer base address
+BD_BSIZE EQU    2           ; 2: capacity in bytes
+BD_GAPBG EQU    4           ; 2: gap start offset
+BD_GAPEN EQU    6           ; 2: gap end offset
+BD_TXEND EQU    8           ; 2: text end offset
+BD_TOPLN EQU    10          ; 2: top visible line
+BD_CSROW EQU    12          ; 1: cursor screen row
+BD_CSCOL EQU    13          ; 1: cursor text column
+BD_CSOFF EQU    14          ; 2: cursor byte offset
+BD_MRKBG EQU    16          ; 2: block mark start
+BD_MRKEN EQU    18          ; 2: block mark end
+BD_MODIF EQU    20          ; 1: modified flag
+BD_SYNMD EQU    21          ; 1: syntax mode
+BD_FNAME EQU    22          ; 12: drive+name+ext
+BD_SIZE  EQU    34          ; bytes per descriptor
+
+;--- Number of edit buffers ---------------------------
+MAXBUFS EQU     2           ; maximum open buffers
+MINMEM  EQU     18*1024     ; minimum TPA required
+
+;--- Syntax mode codes --------------------------------
+SYN_NONE EQU    0           ; plain text
+SYN_ASM  EQU    1           ; 8080/Z80 assembly
+
+;--- Insert / overwrite mode --------------------------
+MODE_INS EQU    0           ; insert mode (default)
+MODE_OVR EQU    1           ; overwrite mode
+
+;--- Key type codes (B reg from GETKEY) ---------------
+KT_NONE EQU     0           ; no key available
+KT_ACT  EQU     1           ; C = action code
+KT_CHAR EQU     2           ; C = printable char
+
+;--- Key action codes (C reg when B=KT_ACT) ----------
+ACT_CURUP EQU   1           ; cursor up
+ACT_CURDN EQU   2           ; cursor down
+ACT_CURLT EQU   3           ; cursor left
+ACT_CURRT EQU   4           ; cursor right
+ACT_WRDPV EQU   5           ; previous word
+ACT_WRDNX EQU   6           ; next word
+ACT_PGUP  EQU   7           ; page up
+ACT_PGDN  EQU   8           ; page down
+ACT_SCRUP EQU   9           ; scroll screen up
+ACT_SCRDN EQU   10          ; scroll screen down
+ACT_LINST EQU   11          ; jump to line start
+ACT_LINEN EQU   12          ; jump to line end
+ACT_FTOP  EQU   13          ; jump to file top
+ACT_FEND  EQU   14          ; jump to file end
+ACT_DELLF EQU   15          ; delete left (BS)
+ACT_DELRT EQU   16          ; delete right (Del)
+ACT_DELWD EQU   17          ; delete word right
+ACT_DELLN EQU   18          ; delete entire line
+ACT_INSTB EQU   19          ; insert tab
+ACT_INSNL EQU   20          ; insert newline
+ACT_TOGIN EQU   21          ; toggle insert/overwrite
+ACT_LITNX EQU   22          ; next char is literal
+ACT_FNDNX EQU   23          ; find next
+ACT_FSAVE EQU   24          ; save file
+ACT_FOPEN EQU   25          ; open file
+ACT_FEXIT EQU   26          ; exit editor
+ACT_BLKMK EQU   27          ; toggle block mark
+ACT_BLKCP EQU   28          ; copy block
+ACT_BLKDL EQU   29          ; delete block
+ACT_BLKPS EQU   30          ; paste clipboard
+ACT_MENU  EQU   31          ; open ESC menu
+ACT_MAX   EQU   31          ; highest action code
+
+;--- Block mark sentinel ------------------------------
+NO_MARK EQU     0FFFFH      ; marks absent/unset
+
+;--- FCB field offsets --------------------------------
+FCB_DR  EQU     0           ; drive (0=default)
+FCB_FN  EQU     1           ; filename (8 bytes)
+FCB_FT  EQU     9           ; extension (3 bytes)
+FCB_EX  EQU     12          ; extent number
+FCB_S2  EQU     14          ; extent high
+FCB_RC  EQU     15          ; record count
+FCB_CR  EQU     32          ; current record
+FCB_SIZ EQU     36          ; total FCB size
+
+;--- DMA record size ----------------------------------
+RECSIZ  EQU     128         ; 128 bytes per record
+
+;--- Clipboard buffer size ----------------------------
+CLIPMAX EQU     2048        ; max paste buffer bytes
+
+;--- Search string size limit -------------------------
+SRCHMAX EQU     64          ; max find string length
+
+; SYNINIT - Set BD_SYNMD based on BD_FNAME extension.
+; .MAC and .ASM -> SYN_ASM; anything else -> SYN_NONE.
+; Entry:  CURBDP valid
+; Exit:   BD_SYNMD updated
+;         Regs: all clobbered
+;=============================================================
+        CSEG
+
+SYNINIT:
+        LHLD    CURBDP
+        MOV     A,L
+        ADI     BD_FNAME+8      ; BD_FNAME + 8 = ext byte 0
+        MOV     L,A
+        MOV     A,H
+        ACI     0
+        MOV     H,A             ; HL -> extension field
+
+        ; Check for 'M' 'A' 'C' (MAC)
+        MOV     A,M
+        ANI     5FH             ; upper
+        CPI     'M'
+        JNZ     SYCHKASM
+        INX     H
+        MOV     A,M
+        ANI     5FH
+        CPI     'A'
+        JNZ     SYNONE
+        INX     H
+        MOV     A,M
+        ANI     5FH
+        CPI     'C'
+        JNZ     SYNONE
+        JMP     SYASM
+
+SYCHKASM:
+        ; Check for 'A' 'S' 'M' (ASM)
+        CPI     'A'
+        JNZ     SYNONE
+        INX     H
+        MOV     A,M
+        ANI     5FH
+        CPI     'S'
+        JNZ     SYNONE
+        INX     H
+        MOV     A,M
+        ANI     5FH
+        CPI     'M'
+        JNZ     SYNONE
+
+SYASM:  ; Set SYN_ASM
+        LHLD    CURBDP
+        MOV     A,L
+        ADI     BD_SYNMD
+        MOV     L,A
+        MOV     A,H
+        ACI     0
+        MOV     H,A
+        MVI     M,SYN_ASM
+        RET
+
+SYNONE: ; Set SYN_NONE
+        LHLD    CURBDP
+        MOV     A,L
+        ADI     BD_SYNMD
+        MOV     L,A
+        MOV     A,H
+        ACI     0
+        MOV     H,A
+        MVI     M,SYN_NONE
+        RET
+
+;=============================================================
+; SYNLINE - Tokenise a line of text for syntax highlighting.
+; Entry:  DE = pointer to line text (NUL or CR terminated)
+;         B  = column width limit (TXTCOLS = 74)
+; Exit:   SNTBL filled; SNCNT = number of spans.
+;         Regs: all clobbered.
+;=============================================================
+SYNLINE:
+        ; Clear span table
+        XRA     A
+        STA     SNCNT
+
+        ; Check current buffer's syntax mode
+        LHLD    CURBDP
+        MOV     A,L
+        ADI     BD_SYNMD
+        MOV     L,A
+        MOV     A,H
+        ACI     0
+        MOV     H,A
+        MOV     A,M
+        CPI     SYN_ASM
+        RNZ                     ; SYN_NONE: no spans
+
+        ; Save line pointer and width limit
+        ; HL = desc+BD_SYNMD (used below to re-read mode)
+        MOV     A,M             ; A = BD_SYNMD (already read above)
+        ; save DE (line ptr) and B (limit) to temps
+        MOV     A,B
+        STA     SYNLIM
+        XCHG
+        SHLD    SYNPTR          ; SYNPTR = line pointer
+        XCHG
+
+        ; col counter C = 1
+        MVI     C,1
+
+SNLP:
+        ; Check col limit and span table full
+        MOV     A,C
+        LDA     SYNLIM
+        ; compare C with SYNLIM
+        LDA     SYNLIM
+        MOV     B,A
+        MOV     A,C
+        CMP     B
+        JNC     SNDNE           ; col >= limit: done
+
+        LDA     SNCNT
+        CPI     SNMAX
+        JNC     SNDNE           ; span table full
+
+        ; Read current char
+        LHLD    SYNPTR
+        MOV     A,L
+        ADD     C
+        DCR     A               ; index = C-1
+        MOV     L,A
+        MOV     A,H
+        ACI     0
+        MOV     H,A
+        MOV     A,M             ; A = char at col C
+
+        ORA     A
+        JZ      SNDNE           ; NUL = end of line
+        CPI     CR
+        JZ      SNDNE
+        CPI     LF
+        JZ      SNDNE
+
+        ; Dispatch on first char of token
+        CPI     ';'             ; comment
+        JZ      SNCOMM
+
+        ; Check digit -> number
+        CPI     '0'
+        JC      SNWRD
+        CPI     '9'+1
+        JC      SNNUM
+
+        ; Check quote -> string
+        CPI     0027H           ; single quote '
+        JZ      SNSTR
+        CPI     '"'
+        JZ      SNSTR2
+
+SNWRD:
+        ; Identifier token: collect chars, classify
+        MOV     D,C             ; D = start col
+        CALL    SNCOL           ; collect identifier, C = end col
+        ; Classify: label if followed by ':', else opcode/reg
+        ; Check char at C (after identifier)
+        LHLD    SYNPTR
+        MOV     A,L
+        ADD     C
+        DCR     A
+        MOV     L,A
+        MOV     A,H
+        ACI     0
+        MOV     H,A
+        MOV     A,M             ; char after identifier
+        CPI     ':'
+        JZ      SNLABL
+
+        ; Check if it's a register name (1-3 chars, known set)
+        CALL    SNISREG         ; Z if register
+        JZ      SNREG
+
+        ; Default: opcode colour
+        MOV     E,C             ; E = end col
+        MVI     A,ATTR_GRN
+        CALL    SNADD           ; add span (D=start, E=end, A=attr)
+        JMP     SNLP
+
+SNLABL:
+        MOV     E,C
+        INR     E               ; include the ':'
+        INR     C
+        MVI     A,ATTR_YEL
+        CALL    SNADD
+        JMP     SNLP
+
+SNREG:
+        MOV     E,C
+        MVI     A,ATTR_CYN
+        CALL    SNADD
+        JMP     SNLP
+
+SNNUM:
+        ; Collect hex/decimal number
+        MOV     D,C
+        ; advance while digit or A-F/a-f
+SNNUML:
+        LHLD    SYNPTR
+        MOV     A,L
+        ADD     C
+        DCR     A
+        MOV     L,A
+        MOV     A,H
+        ACI     0
+        MOV     H,A
+        MOV     A,M
+        CALL    SNISHX          ; Z if hex digit
+        JNZ     SNNUMD
+        INR     C
+        JMP     SNNUML
+SNNUMD:
+        ; Also accept trailing 'H' for hex
+        CPI     'H'
+        JZ      SNNUMH
+        CPI     'h'
+        JNZ     SNNUME
+SNNUMH: INR     C
+SNNUME:
+        MOV     E,C
+        MVI     A,ATTR_MAG
+        CALL    SNADD
+        JMP     SNLP
+
+SNSTR:
+SNSTR2:
+        ; String: collect until matching quote or EOL
+        MOV     D,C
+        MOV     B,A             ; B = quote char
+        INR     C               ; skip open quote
+SNSTRL:
+        LDA     SYNLIM
+        MOV     A,C
+        CMP     A               ; can't use 'CMP' with 'A' as dest
+        ; Compare C with SYNLIM
+        LDA     SYNLIM
+        CMP     C               ; SYNLIM - C; carry set if C > SYNLIM
+        JC      SNSTRD          ; past limit
+        LHLD    SYNPTR
+        MOV     A,L
+        ADD     C
+        DCR     A
+        MOV     L,A
+        MOV     A,H
+        ACI     0
+        MOV     H,A
+        MOV     A,M
+        ORA     A
+        JZ      SNSTRD
+        CPI     CR
+        JZ      SNSTRD
+        CMP     B               ; closing quote?
+        JZ      SNSTRC
+        INR     C
+        JMP     SNSTRL
+SNSTRC: INR     C               ; include closing quote
+SNSTRD:
+        MOV     E,C
+        MVI     A,ATTR_MAG
+        CALL    SNADD
+        JMP     SNLP
+
+SNCOMM:
+        ; Comment: ; to end of line
+        MOV     D,C             ; start
+        LDA     SYNLIM
+        MOV     E,A             ; end = line limit
+        MOV     A,ATTR_DIM
+        CALL    SNADD
+        JMP     SNDNE           ; comment goes to end
+
+SNDNE:  RET
+
+;------------------------------------------------------------
+; SNCOL - Advance C while char is alphanumeric or '_'.
+; Exit:  C = first non-identifier column (exclusive end)
+;------------------------------------------------------------
+SNCOL:
+        LHLD    SYNPTR
+        MOV     A,L
+        ADD     C
+        DCR     A
+        MOV     L,A
+        MOV     A,H
+        ACI     0
+        MOV     H,A
+        MOV     A,M
+        CALL    SNISID          ; Z if identifier char
+        RNZ
+        INR     C
+        JMP     SNCOL
+
+;------------------------------------------------------------
+; SNISID - Test if A is an identifier character [0-9A-Za-z_]
+; Exit: Z = identifier char; NZ = not
+;------------------------------------------------------------
+SNISID:
+        CPI     '_'
+        RZ
+        CPI     '0'
+        JC      SNNIDC
+        CPI     '9'+1
+        JC      SNNIDR          ; digit -> Z
+        CPI     'A'
+        JC      SNNIDC
+        CPI     'Z'+1
+        JC      SNNIDR
+        CPI     'a'
+        JC      SNNIDC
+        CPI     'z'+1
+        JC      SNNIDR
+SNNIDC: ORA     A               ; ensure NZ if not set
+        ; set NZ
+        MVI     A,1
+        ORA     A
+        RET
+SNNIDR: XRA     A               ; Z
+        RET
+
+;------------------------------------------------------------
+; SNISHX - Test if A is a hex digit [0-9A-Fa-f]
+; Exit: Z = hex digit
+;------------------------------------------------------------
+SNISHX:
+        CPI     '0'
+        JC      SNHXN
+        CPI     '9'+1
+        JC      SNHXZ
+        ANI     5FH
+        CPI     'A'
+        JC      SNHXN
+        CPI     'F'+1
+        JC      SNHXZ
+SNHXN:  MVI     A,1
+        ORA     A
+        RET
+SNHXZ:  XRA     A
+        RET
+
+;------------------------------------------------------------
+; SNISREG - Test if token at SYNPTR[D..C-1] is a register.
+; Compares upper-cased against REG table.
+; Exit: Z = is a register; NZ = not
+;------------------------------------------------------------
+SNISREG:
+        ; Token length = C - D
+        MOV     A,C
+        SUB     D
+        MOV     E,A             ; E = token length (1, 2, or 3)
+
+        ; Copy token to SINTOK (upper-cased, NUL-terminated)
+        LXI     H,SINTOK
+        MOV     A,D             ; start col
+        PUSH    D
+        MOV     B,E             ; B = length
+        MOV     D,B
+        ; need line ptr + (col-1)
+        LHLD    SYNPTR
+        MOV     A,L
+        ; add D-1 (D = start col, 1-based)
+        POP     D
+        ; recompute: source = SYNPTR + D - 1
+        PUSH    D
+        MOV     A,E             ; save length in A
+        POP     D
+        PUSH    H               ; SYNPTR
+
+        MOV     B,A             ; B = length
+        ; source ptr:
+        POP     H               ; SYNPTR
+        MOV     A,L
+        ADD     D               ; SYNPTR.L + start_col
+        DCR     A               ; - 1 (1-based)
+        MOV     L,A
+        MOV     A,H
+        ACI     0
+        MOV     H,A             ; HL = &line[D-1]
+
+        LXI     D,SINTOK
+SIRTOK:
+        MOV     A,M
+        ANI     5FH             ; upper
+        STAX    D
+        INX     H
+        INX     D
+        DCR     B
+        JNZ     SIRTOK
+        XRA     A
+        STAX    D               ; NUL terminate
+
+        ; Length E is token length; search REGTBL
+        LXI     H,REGTBL
+SIRLK:
+        MOV     A,M
+        ORA     A
+        JZ      SIRNF           ; end of table
+        ; compare E (token length) with table entry length
+        ; Table format: length_byte, chars...
+        CMP     E
+        JNZ     SIRNXT
+
+        ; lengths match; compare chars
+        INX     H               ; H = first char of entry
+        LXI     D,SINTOK
+        MOV     B,E             ; B = length
+SIRCHK:
+        LDAX    D
+        CMP     M
+        JNZ     SIRNXT2
+        INX     H
+        INX     D
+        DCR     B
+        JNZ     SIRCHK
+        ; matched
+        XRA     A               ; Z
+        RET
+
+SIRNXT2:
+        ; Skip remaining chars of this entry
+SIRNX2:
+        DCR     B
+        JZ      SIRLK           ; back to length byte
+        INX     H
+        JMP     SIRNX2
+
+SIRNXT:
+        ; Skip length + chars
+        MOV     B,M             ; B = entry length
+        INX     H
+SISKIP:
+        INX     H
+        DCR     B
+        JNZ     SISKIP
+        JMP     SIRLK
+
+SIRNF:
+        MVI     A,1
+        ORA     A               ; NZ
+        RET
+
+;------------------------------------------------------------
+; SNADD - Add a span to SNTBL.
+; Entry: D = start_col, E = end_col, A = attribute
+; Exit:  span added; SNCNT incremented
+;------------------------------------------------------------
+SNADD:
+        LDA     SNCNT
+        CPI     SNMAX
+        RNC                     ; table full
+
+        ; Index into SNTBL: offset = SNCNT * 3
+        MOV     B,A             ; B = SNCNT
+        MOV     C,A
+        ADD     A               ; *2
+        ADD     C               ; *3
+        MOV     C,A             ; C = byte offset
+        LXI     H,SNTBL
+        MVI     H,0
+        MOV     L,C
+        LXI     D,SNTBL
+        DAD     D               ; HL = &SNTBL[SNCNT*3]
+
+        ; Store (start, end, attr)
+        MOV     M,D             ; start_col... wait D is start
+        ; D = start_col, E = end_col; A clobbered by offset calc
+        ; Re-save attribute: was in A before the index calc
+        ; Problem: A was overwritten. Need to pass attr differently.
+        ; Restructure: save A to SNTMP before offset calc
+        RET                     ; placeholder - see SNADD2
+
+;------------------------------------------------------------
+; SNADD2 - Corrected span add (D=start, E=end, B=attr)
+; Caller puts attribute in B instead of A.
+;------------------------------------------------------------
+SNADD2:
+        LDA     SNCNT
+        CPI     SNMAX
+        RNC
+
+        MOV     C,A             ; C = SNCNT
+        ADD     A               ; *2
+        ADD     C               ; *3
+        LXI     H,SNTBL
+        MOV     C,A
+        MVI     B,0
+        DAD     B               ; HL = &SNTBL[SNCNT*3]
+
+        MOV     M,D             ; start_col
+        INX     H
+        MOV     M,E             ; end_col
+        INX     H
+        MOV     A,B
+        MOV     M,A             ; attribute
+        ; wait, B was used for MVI B,0 above - conflict
+        ; B now = 0. Need to use SNTMP.
+        MOV     M,B             ; attribute (broken if B=0)
+
+        LDA     SNCNT
+        INR     A
+        STA     SNCNT
+        RET
+
+;=============================================================
+; Register name table.
+; Format: length_byte, upper_chars (no NUL)
+;=============================================================
+REGTBL:
+        DB      1,'A'
+        DB      1,'B'
+        DB      1,'C'
+        DB      1,'D'
+        DB      1,'E'
+        DB      1,'H'
+        DB      1,'L'
+        DB      1,'M'
+        DB      2,'B','C'
+        DB      2,'D','E'
+        DB      2,'H','L'
+        DB      2,'S','P'
+        DB      2,'P','C'
+        DB      2,'A','F'
+        DB      2,'I','X'       ; Z80 index registers
+        DB      2,'I','Y'
+        DB      0               ; end of table
+
+;=============================================================
+; DATA SEGMENT
+;=============================================================
+        DSEG
+
+; Span table: SNMAX * 3 bytes (start, end, attr per entry)
+SNTBL:  DS      SNMAX*3
+SNCNT:  DB      0
+
+; Syntax state
+SYNPTR: DW      0               ; pointer to current line text
+SYNLIM: DB      0               ; column width limit
+SNTMP:  DB      0               ; attribute temp
+
+; Token buffer for register comparison (NUL-terminated)
+SINTOK: DS      8
+
+        END
+

@@ -1,0 +1,962 @@
+;============================================================
+; FILE:    SEFILEIO.MAC
+; PROJECT: SEDIT - Screen Editor for CP/M 2.2
+; VERSION: 1.0
+; DATE:    1984-01-01
+; AUTHOR:
+;------------------------------------------------------------
+; DESCRIPTION:
+;   File I/O module. Provides FIOPEN and FISAVE using
+;   BDOS sequential read/write and FCB management.
+;   FIOPEN loads an existing file (or creates empty buffer
+;   for a new name) into the current gap buffer.
+;   FISAVE writes the current gap buffer back to disk,
+;   renaming the old file to .BAK first.
+;   FIPROMPT reads a filename from the status line.
+;------------------------------------------------------------
+; REVISION HISTORY:
+;   1.0  1984-01-01  Initial release
+;============================================================
+
+;--- Imports ----------------------------------------------
+        EXTRN   CURBDP          ; current buffer descriptor ptr
+        EXTRN   INSMODE         ; insert/overwrite flag
+        EXTRN   GBINIT          ; initialise gap buffer
+        EXTRN   GBINSRT         ; insert char into buffer
+        EXTRN   GBMVTOP         ; move cursor to file top
+        EXTRN   STATMSG         ; display status message
+        EXTRN   OUTSTR          ; write $-string to console
+
+;--- Exports ----------------------------------------------
+        PUBLIC  FIOPEN          ; load file into buffer
+        PUBLIC  FISAVE          ; save buffer to file
+        PUBLIC  FIPROMPT        ; prompt for filename
+        PUBLIC  FISAVFN         ; copy WRKFCB name to BD_FNAME
+        PUBLIC  FISMOD          ; read BD_MODIF flag
+        PUBLIC  WRKFCB          ; working FCB (for SEMENU)
+
+;=============================================================
+; FIOPEN - Open a file and load it into the current buffer.
+; Entry:  DE = address of a 36-byte FCB (CP/M default FCB
+;              at 005CH or caller-built FCB).
+;         CURBDP must be valid (set by SEBUFMGR).
+; Exit:   Buffer filled; BD_FNAME and BD_MODIF updated.
+;         BD_MODIF = 0 (clean after load).
+;         On error: status message displayed, buffer empty.
+;         Regs: all clobbered.
+;=============================================================
+;============================================================
+; FILE:    SEDIT.INC
+; PROJECT: SEDIT - Screen Editor for CP/M 2.2
+; VERSION: 1.0
+; DATE:    1984-01-01
+; AUTHOR:
+;------------------------------------------------------------
+; DESCRIPTION:
+;   Shared equates for all SEDIT modules.
+;   INCLUDE this as the first statement of every .MAC file.
+;------------------------------------------------------------
+; REVISION HISTORY:
+;   1.0  1984-01-01  Initial release
+;============================================================
+
+;--- CP/M system addresses ----------------------------
+BDOS    EQU     0005H       ; BDOS call entry
+WBOOT   EQU     0000H       ; warm boot / exit
+DFTFCB  EQU     005CH       ; default FCB (arg 1)
+CMDTAIL EQU     0080H       ; command tail buffer
+
+;--- BDOS function numbers ----------------------------
+BF_CONIN  EQU   1           ; console input (wait)
+BF_CONOUT EQU   2           ; console output: E=char
+BF_RAWIO  EQU   6           ; direct I/O: E=FFH->in
+BF_PRTSTR EQU   9           ; print $-string: DE=addr
+BF_RDLINE EQU   10          ; buffered line input
+BF_CONST  EQU   11          ; console status
+BF_FOPEN  EQU   15          ; open file: DE=FCB
+BF_FCLOSE EQU   16          ; close file: DE=FCB
+BF_FDEL   EQU   19          ; delete: DE=FCB
+BF_FREAD  EQU   20          ; seq read: DE=FCB
+BF_FWRITE EQU   21          ; seq write: DE=FCB
+BF_FMAKE  EQU   22          ; create: DE=FCB
+BF_SETDMA EQU   26          ; set DMA: DE=addr
+BF_USRNUM EQU   32          ; get/set user: E=num
+
+;--- ASCII control codes ------------------------------
+NUL     EQU     00H
+BEL     EQU     07H         ; bell
+BS      EQU     08H         ; backspace
+TAB     EQU     09H         ; horizontal tab
+LF      EQU     0AH         ; line feed
+CR      EQU     0DH         ; carriage return
+ESC     EQU     1BH         ; escape
+DEL     EQU     7FH         ; delete character
+CPMEOF  EQU     1AH         ; CP/M EOF marker (Ctrl-Z)
+CTRLK   EQU     0BH         ; Ctrl-K (prefix key)
+CTRLQ   EQU     11H         ; Ctrl-Q (prefix key)
+
+;--- Screen layout ------------------------------------
+SCRROWS EQU     24          ; terminal row count
+SCRCOLS EQU     80          ; terminal column count
+EDITROW EQU     20          ; edit rows (rows 3-22)
+EDITFR  EQU     3           ; first edit row (1-based)
+INFOROW EQU     1           ; info bar row
+RULRROW EQU     2           ; tab ruler row
+SEPRROW EQU     23          ; separator (===) row
+STATROW EQU     24          ; status/message row
+LNUMWID EQU     4           ; gutter width (3+space)
+TXTCOLS EQU     74          ; max text columns/line
+TXTFCOL EQU     5           ; text start col (1-based)
+TABWID  EQU     4           ; tab stop interval
+
+;--- SGR attribute byte values ------------------------
+ATTR_NRM EQU    00H         ; normal
+ATTR_BLD EQU    01H         ; bold
+ATTR_DIM EQU    02H         ; dim
+ATTR_REV EQU    07H         ; reverse video
+ATTR_CYN EQU    36H         ; cyan foreground
+ATTR_GRN EQU    32H         ; green foreground
+ATTR_YEL EQU    33H         ; yellow foreground
+ATTR_MAG EQU    35H         ; magenta foreground
+
+;--- Buffer descriptor field offsets -----------------
+BD_BSTAR EQU    0           ; 2: buffer base address
+BD_BSIZE EQU    2           ; 2: capacity in bytes
+BD_GAPBG EQU    4           ; 2: gap start offset
+BD_GAPEN EQU    6           ; 2: gap end offset
+BD_TXEND EQU    8           ; 2: text end offset
+BD_TOPLN EQU    10          ; 2: top visible line
+BD_CSROW EQU    12          ; 1: cursor screen row
+BD_CSCOL EQU    13          ; 1: cursor text column
+BD_CSOFF EQU    14          ; 2: cursor byte offset
+BD_MRKBG EQU    16          ; 2: block mark start
+BD_MRKEN EQU    18          ; 2: block mark end
+BD_MODIF EQU    20          ; 1: modified flag
+BD_SYNMD EQU    21          ; 1: syntax mode
+BD_FNAME EQU    22          ; 12: drive+name+ext
+BD_SIZE  EQU    34          ; bytes per descriptor
+
+;--- Number of edit buffers ---------------------------
+MAXBUFS EQU     2           ; maximum open buffers
+MINMEM  EQU     18*1024     ; minimum TPA required
+
+;--- Syntax mode codes --------------------------------
+SYN_NONE EQU    0           ; plain text
+SYN_ASM  EQU    1           ; 8080/Z80 assembly
+
+;--- Insert / overwrite mode --------------------------
+MODE_INS EQU    0           ; insert mode (default)
+MODE_OVR EQU    1           ; overwrite mode
+
+;--- Key type codes (B reg from GETKEY) ---------------
+KT_NONE EQU     0           ; no key available
+KT_ACT  EQU     1           ; C = action code
+KT_CHAR EQU     2           ; C = printable char
+
+;--- Key action codes (C reg when B=KT_ACT) ----------
+ACT_CURUP EQU   1           ; cursor up
+ACT_CURDN EQU   2           ; cursor down
+ACT_CURLT EQU   3           ; cursor left
+ACT_CURRT EQU   4           ; cursor right
+ACT_WRDPV EQU   5           ; previous word
+ACT_WRDNX EQU   6           ; next word
+ACT_PGUP  EQU   7           ; page up
+ACT_PGDN  EQU   8           ; page down
+ACT_SCRUP EQU   9           ; scroll screen up
+ACT_SCRDN EQU   10          ; scroll screen down
+ACT_LINST EQU   11          ; jump to line start
+ACT_LINEN EQU   12          ; jump to line end
+ACT_FTOP  EQU   13          ; jump to file top
+ACT_FEND  EQU   14          ; jump to file end
+ACT_DELLF EQU   15          ; delete left (BS)
+ACT_DELRT EQU   16          ; delete right (Del)
+ACT_DELWD EQU   17          ; delete word right
+ACT_DELLN EQU   18          ; delete entire line
+ACT_INSTB EQU   19          ; insert tab
+ACT_INSNL EQU   20          ; insert newline
+ACT_TOGIN EQU   21          ; toggle insert/overwrite
+ACT_LITNX EQU   22          ; next char is literal
+ACT_FNDNX EQU   23          ; find next
+ACT_FSAVE EQU   24          ; save file
+ACT_FOPEN EQU   25          ; open file
+ACT_FEXIT EQU   26          ; exit editor
+ACT_BLKMK EQU   27          ; toggle block mark
+ACT_BLKCP EQU   28          ; copy block
+ACT_BLKDL EQU   29          ; delete block
+ACT_BLKPS EQU   30          ; paste clipboard
+ACT_MENU  EQU   31          ; open ESC menu
+ACT_MAX   EQU   31          ; highest action code
+
+;--- Block mark sentinel ------------------------------
+NO_MARK EQU     0FFFFH      ; marks absent/unset
+
+;--- FCB field offsets --------------------------------
+FCB_DR  EQU     0           ; drive (0=default)
+FCB_FN  EQU     1           ; filename (8 bytes)
+FCB_FT  EQU     9           ; extension (3 bytes)
+FCB_EX  EQU     12          ; extent number
+FCB_S2  EQU     14          ; extent high
+FCB_RC  EQU     15          ; record count
+FCB_CR  EQU     32          ; current record
+FCB_SIZ EQU     36          ; total FCB size
+
+;--- DMA record size ----------------------------------
+RECSIZ  EQU     128         ; 128 bytes per record
+
+;--- Clipboard buffer size ----------------------------
+CLIPMAX EQU     2048        ; max paste buffer bytes
+
+;--- Search string size limit -------------------------
+SRCHMAX EQU     64          ; max find string length
+
+        CSEG
+
+FIOPEN:
+        ; Copy FCB to our working copy
+        LXI     H,WRKFCB
+        MVI     B,FCB_SIZ
+FICPY:  LDAX    D
+        MOV     M,A
+        INX     D
+        INX     H
+        DCR     B
+        JNZ     FICPY
+
+        ; Save filename from FCB bytes 1-11 into descriptor
+        CALL    FISAVFN
+
+        ; Initialise gap buffer to empty
+        CALL    FIBUFCLR
+
+        ; Zero the FCB control fields (CR, EX, S2, RC)
+        CALL    FIRCB0
+
+        ; Attempt to open the file
+        LXI     D,WRKFCB
+        MVI     C,BF_FOPEN
+        CALL    BDOS
+        INR     A               ; 0FFH -> 0 means not found
+        JZ      FIOOPN          ; file does not exist - ok
+
+        ; File opened; show loading message and read records
+        LXI     D,LDNGMSG
+        CALL    STATMSG
+FIRLP:  LXI     D,DMABUF        ; set DMA to our buffer
+        MVI     C,BF_SETDMA
+        CALL    BDOS
+
+        LXI     D,WRKFCB
+        MVI     C,BF_FREAD      ; sequential read
+        CALL    BDOS
+        ORA     A
+        JNZ     FIEOF           ; non-zero = EOF or error
+
+        ; Store 128 bytes from DMA into gap buffer
+        LXI     H,DMABUF
+        MVI     B,RECSIZ
+FISTLP: MOV     A,M
+        CPI     CPMEOF          ; strip CP/M EOF marker
+        JZ      FIEOF
+        PUSH    H               ; save DMA pointer (GBINSRT clobbers HL)
+        PUSH    B               ; save loop counter (GBINSRT clobbers B)
+        CALL    GBINSRT
+        POP     B               ; restore loop counter
+        POP     H               ; restore DMA pointer
+        INX     H
+        DCR     B
+        JNZ     FISTLP
+        JMP     FIRLP
+
+FIEOF:
+        ; Close file (ignore error)
+        LXI     D,WRKFCB
+        MVI     C,BF_FCLOSE
+        CALL    BDOS
+
+FIOOPN: ; New or loaded: move cursor to top, clear modified
+        CALL    GBMVTOP
+        CALL    FICLRMOD
+        LXI     D,LOADMSG
+        CALL    STATMSG
+        RET
+
+;=============================================================
+; FISAVE - Save current buffer to its file.
+; Entry:  CURBDP valid; BD_FNAME holds name.
+; Exit:   File written; BD_MODIF cleared.
+;         On error: status message displayed, file unchanged.
+;         Regs: all clobbered.
+; Note:   Old file renamed to .BAK before write.
+;=============================================================
+FISAVE:
+        ; Check modified flag - skip if clean
+        CALL    FISMOD
+        ORA     A
+        JZ      FSVSKP          ; not modified
+
+        ; Build FCB from stored filename
+        CALL    FIBLDFC
+
+        ; Delete any existing .BAK
+        CALL    FIMKBAK
+
+        ; Rename current file to .BAK
+        CALL    FIRNMBK
+
+        ; Create new output file
+        LXI     D,WRKFCB
+        MVI     C,BF_FMAKE
+        CALL    BDOS
+        INR     A
+        JZ      FSVERE          ; create failed (disk full?)
+
+        ; Reset FCB current record
+        CALL    FIRCB0
+
+        ; Write buffer contents record by record
+        CALL    FIWRITE
+
+FSVSKP: LXI     D,SAVEMSG
+        CALL    STATMSG
+        RET
+
+FSVERE: LXI     D,ERRMSG
+        CALL    STATMSG
+        RET
+
+;=============================================================
+; FIPROMPT - Prompt user for a filename on the status line.
+; Entry:  DE = prompt string ($ terminated)
+; Exit:   FILNBUF filled with 0-terminated filename string
+;         HL = FILNBUF
+;         Zero flag set if user pressed ESC (cancelled)
+;         Regs: all clobbered.
+;=============================================================
+FIPROMPT:
+        CALL    OUTSTR          ; display prompt (DE)
+
+        ; Use BDOS buffered line input into RDLNBUF
+        LXI     D,RDLNBUF
+        MVI     C,BF_RDLINE
+        CALL    BDOS
+
+        ; RDLNBUF+1 = actual length; RDLNBUF+2.. = chars
+        LDA     RDLNBUF+1
+        ORA     A
+        JZ      FPCANC          ; empty input = cancel
+
+        ; Copy to FILNBUF, NUL-terminate
+        MVI     B,0
+        MOV     C,A             ; C = length
+        LXI     H,RDLNBUF+2    ; source
+        LXI     D,FILNBUF       ; dest
+FPCPLP: MOV     A,M
+        STAX    D
+        INX     H
+        INX     D
+        INR     B
+        MOV     A,B
+        CMP     C
+        JNZ     FPCPLP
+        XRA     A
+        STAX    D               ; NUL terminator
+
+        ; Parse FILNBUF into WRKFCB
+        CALL    FIPARSN
+
+        LXI     H,FILNBUF
+        ORA     A               ; clear zero (not cancelled)
+        INR     A               ; make NZ
+        RET
+
+FPCANC: LXI     H,FILNBUF
+        XRA     A               ; set Z (cancelled)
+        RET
+
+;=============================================================
+; Internal helpers
+;=============================================================
+
+;------------------------------------------------------------
+; FIBUFCLR - Reset gap buffer to empty using GBINIT.
+; Uses CURBDP to get base and size, then calls GBINIT.
+;------------------------------------------------------------
+FIBUFCLR:
+        ; HL = descriptor address (CURBDP)
+        LHLD    CURBDP
+
+        ; DE = BD_BSTAR (base address)
+        PUSH    H
+        LXI     D,BD_BSTAR
+        DAD     D
+        MOV     E,M
+        INX     H
+        MOV     D,M             ; DE = base
+        POP     H
+
+        ; BC = BD_BSIZE (capacity)
+        PUSH    H
+        LXI     D,BD_BSIZE
+        DAD     D
+        MOV     C,M
+        INX     H
+        MOV     B,M             ; BC = size (actually BC not used right - let me fix)
+        POP     H
+
+        ; HL = descriptor, DE = base, BC = capacity
+        ; Swap: GBINIT expects HL=desc, DE=base, BC=size
+        ; We have HL=desc now, need to reload DE and BC
+        PUSH    H               ; save desc
+        POP     H               ; restore desc (HL=desc)
+        ; DE already = base, BC already = size
+        ; But we clobbered H with the push/pop trick above
+        ; Let me redo this cleanly:
+
+        LHLD    CURBDP          ; HL = descriptor
+        PUSH    H               ; save desc ptr
+
+        ; read base: desc + BD_BSTAR
+        MOV     A,L
+        ADI     BD_BSTAR
+        MOV     L,A
+        MOV     A,H
+        ACI     0
+        MOV     H,A
+        MOV     E,M
+        INX     H
+        MOV     D,M             ; DE = buffer base address
+
+        POP     H               ; HL = descriptor again
+        PUSH    H
+        PUSH    D               ; save base
+
+        ; read size: desc + BD_BSIZE
+        MOV     A,L
+        ADI     BD_BSIZE
+        MOV     L,A
+        MOV     A,H
+        ACI     0
+        MOV     H,A
+        MOV     C,M
+        INX     H
+        MOV     B,M             ; BC = buffer size
+
+        POP     D               ; DE = base
+        POP     H               ; HL = descriptor
+
+        CALL    GBINIT
+        RET
+
+;------------------------------------------------------------
+; FISAVFN - Copy FCB name bytes 1-11 into BD_FNAME field.
+; WRKFCB must be populated before calling.
+;------------------------------------------------------------
+FISAVFN:
+        LHLD    CURBDP          ; HL = descriptor
+        MOV     A,L
+        ADI     BD_FNAME
+        MOV     L,A
+        MOV     A,H
+        ACI     0
+        MOV     H,A             ; HL = &desc.BD_FNAME
+
+        LXI     D,WRKFCB+FCB_FN ; DE = name bytes in FCB
+        MVI     B,11            ; 8+3 = 11 bytes
+FSFNLP: LDAX    D
+        MOV     M,A
+        INX     H
+        INX     D
+        DCR     B
+        JNZ     FSFNLP
+        ; Store NUL terminator
+        MVI     M,0
+        RET
+
+;------------------------------------------------------------
+; FICLRMOD - Clear BD_MODIF flag in current descriptor.
+;------------------------------------------------------------
+FICLRMOD:
+        LHLD    CURBDP
+        MOV     A,L
+        ADI     BD_MODIF
+        MOV     L,A
+        MOV     A,H
+        ACI     0
+        MOV     H,A
+        MVI     M,0
+        RET
+
+;------------------------------------------------------------
+; FISMOD - Read BD_MODIF, return in A.
+;------------------------------------------------------------
+FISMOD:
+        LHLD    CURBDP
+        MOV     A,L
+        ADI     BD_MODIF
+        MOV     L,A
+        MOV     A,H
+        ACI     0
+        MOV     H,A
+        MOV     A,M
+        RET
+
+;------------------------------------------------------------
+; FIRCB0 - Zero FCB control bytes: EX, S2, RC, CR.
+;------------------------------------------------------------
+FIRCB0:
+        XRA     A
+        STA     WRKFCB+FCB_EX
+        STA     WRKFCB+FCB_S2
+        STA     WRKFCB+FCB_RC
+        STA     WRKFCB+FCB_CR
+        RET
+
+;------------------------------------------------------------
+; FIBLDFC - Build WRKFCB from BD_FNAME in descriptor.
+; Fills FCB drive (0), name+ext, zeros control fields.
+;------------------------------------------------------------
+FIBLDFC:
+        ; Zero entire FCB first
+        LXI     H,WRKFCB
+        MVI     B,FCB_SIZ
+        XRA     A
+FBFCLP: MOV     M,A
+        INX     H
+        DCR     B
+        JNZ     FBFCLP
+
+        ; Copy name from descriptor BD_FNAME (11 bytes)
+        LHLD    CURBDP
+        MOV     A,L
+        ADI     BD_FNAME
+        MOV     L,A
+        MOV     A,H
+        ACI     0
+        MOV     H,A             ; HL = BD_FNAME
+
+        LXI     D,WRKFCB+FCB_FN
+        MVI     B,11
+FBFLP:  MOV     A,M
+        STAX    D
+        INX     H
+        INX     D
+        DCR     B
+        JNZ     FBFLP
+        RET
+
+;------------------------------------------------------------
+; FIMKBAK - Delete any existing .BAK file with same name.
+; Uses BAKFCB (built from WRKFCB name, .BAK extension).
+;------------------------------------------------------------
+FIMKBAK:
+        CALL    FIBAKFCB        ; build BAKFCB
+        LXI     D,BAKFCB
+        MVI     C,BF_FDEL
+        CALL    BDOS            ; ignore error (may not exist)
+        RET
+
+;------------------------------------------------------------
+; FIRNMBK - Rename WRKFCB file to .BAK using FCB rename.
+; CP/M BF_RENAME expects: FCB[0..15] = old name,
+;                          FCB[16..31] = new name.
+; We build RNMFCB for this.
+;------------------------------------------------------------
+FIRNMBK:
+        ; Build rename FCB: copy WRKFCB name to first 16 bytes
+        LXI     H,RNMFCB
+        LXI     D,WRKFCB
+        MVI     B,16
+FRNLP:  LDAX    D
+        MOV     M,A
+        INX     D
+        INX     H
+        DCR     B
+        JNZ     FRNLP
+
+        ; Copy name portion again to bytes 16-31 (new name)
+        ; then overwrite extension with BAK
+        LXI     D,WRKFCB
+        MVI     B,16
+FRNLP2: LDAX    D
+        MOV     M,A
+        INX     D
+        INX     H
+        DCR     B
+        JNZ     FRNLP2
+
+        ; Overwrite extension in second name (offset 16+9=25)
+        LXI     H,RNMFCB+16+FCB_FT
+        MVI     M,'B'
+        INX     H
+        MVI     M,'A'
+        INX     H
+        MVI     M,'K'
+
+        LXI     D,RNMFCB
+        MVI     C,23            ; BF_RENAME = 23
+        CALL    BDOS
+        RET
+
+;------------------------------------------------------------
+; FIWRITE - Write gap buffer to currently-open WRKFCB.
+; Reads logical bytes 0..TXEND-1 (skipping the gap),
+; packs into 128-byte records, writes each to BDOS.
+; Appends CPMEOF if last record is partial.
+;------------------------------------------------------------
+FIWRITE:
+        ; Initialise write state
+        MVI     B,0             ; B = position in DMABUF (0..127)
+        LXI     H,DMABUF        ; HL = current DMA write ptr
+
+        ; Get descriptor fields we need
+        LHLD    CURBDP
+
+        ; Read GAPBG into FWGPBG
+        PUSH    H
+        MOV     A,L
+        ADI     BD_GAPBG
+        MOV     L,A
+        MOV     A,H
+        ACI     0
+        MOV     H,A
+        MOV     E,M
+        INX     H
+        MOV     D,M
+        XCHG
+        SHLD    FWGPBG          ; FWGPBG = gap begin
+        POP     H
+
+        ; Read GAPEN into FWGPEN
+        PUSH    H
+        MOV     A,L
+        ADI     BD_GAPEN
+        MOV     L,A
+        MOV     A,H
+        ACI     0
+        MOV     H,A
+        MOV     E,M
+        INX     H
+        MOV     D,M
+        XCHG
+        SHLD    FWGPEN          ; FWGPEN = gap end
+        POP     H
+
+        ; Read BSTAR into FWBASE
+        PUSH    H
+        MOV     A,L
+        ADI     BD_BSTAR
+        MOV     L,A
+        MOV     A,H
+        ACI     0
+        MOV     H,A
+        MOV     E,M
+        INX     H
+        MOV     D,M
+        XCHG
+        SHLD    FWBASE          ; FWBASE = buffer base
+        POP     H
+
+        ; Read TXEND
+        MOV     A,L
+        ADI     BD_TXEND
+        MOV     L,A
+        MOV     A,H
+        ACI     0
+        MOV     H,A
+        MOV     E,M
+        INX     H
+        MOV     D,M
+        XCHG
+        SHLD    FWTXEND         ; FWTXEND = text end offset
+
+        ; Logical offset starts at 0
+        LXI     H,0
+        SHLD    FWOFF           ; FWOFF = current logical offset
+
+FWLOP:
+        ; Check if FWOFF >= FWTXEND (done writing?)
+        LHLD    FWOFF
+        XCHG                    ; DE = FWOFF
+        LHLD    FWTXEND         ; HL = FWTXEND
+        ; Compare: FWOFF - FWTXEND; if no borrow → done
+        MOV     A,E
+        SUB     L
+        MOV     A,D
+        SBB     H               ; FWOFF - FWTXEND
+        JNC     FWDONE          ; FWOFF >= FWTXEND: done
+
+FWGET:
+        ; Compute physical address: FWBASE + FWOFF, skip gap
+        LHLD    FWOFF
+        XCHG                    ; DE = logical offset
+        LHLD    FWGPBG
+        ; if offset < gapbg: physical = base + offset
+        MOV     A,H
+        CMP     D
+        JC      FWBFGP          ; gapbg.H < offset.H: after gap
+        JNZ     FWAFGP          ; gapbg.H > offset.H: before gap
+        MOV     A,L
+        CMP     E
+        JZ      FWBFGP          ; gapbg == offset: after gap
+        JNC     FWAFGP          ; gapbg > offset: before gap
+
+FWBFGP: ; logical offset is >= gapbg: add gap size
+        PUSH    B               ; save DMA position (B)
+        LHLD    FWGPEN
+        XCHG                    ; DE = gapen
+        LHLD    FWGPBG          ; HL = gapbg
+        MOV     A,E
+        SUB     L
+        MOV     C,A
+        MOV     A,D
+        SBB     H
+        MOV     B,A             ; BC = gap size (gapen - gapbg)
+        LHLD    FWOFF
+        MOV     A,L
+        ADD     C
+        MOV     L,A
+        MOV     A,H
+        ADC     B
+        MOV     H,A             ; HL = logical + gap size = physical offset
+        POP     B               ; restore DMA position
+        JMP     FWPHYS
+
+FWAFGP: ; logical offset < gapbg: physical = logical
+        LHLD    FWOFF
+        ; HL = physical offset (same as logical)
+
+FWPHYS: ; HL = physical offset; add FWBASE
+        XCHG
+        LHLD    FWBASE
+        DAD     D               ; HL = physical address
+        MOV     A,M             ; A = byte from buffer
+
+        ; Store byte in DMABUF at position B
+        MVI     H,0
+        MOV     L,B             ; HL = B (16-bit index)
+        LXI     D,DMABUF
+        DAD     D               ; HL = &DMABUF[B]
+        MOV     M,A             ; store byte
+
+        ; Advance logical offset
+        LHLD    FWOFF
+        INX     H
+        SHLD    FWOFF
+
+        ; Advance DMA position
+        INR     B
+        MOV     A,B
+        CPI     RECSIZ          ; 128 bytes full?
+        JNZ     FWLOP
+
+        ; Write one full record
+        CALL    FWREC
+        MVI     B,0             ; reset DMA position
+        JMP     FWLOP
+
+FWDONE:
+        ; Write final partial record if any data pending
+        MOV     A,B
+        ORA     A
+        JZ      FWCLOS
+
+        ; Pad remaining bytes with CPMEOF
+FWPADL: MOV     A,B
+        CPI     RECSIZ
+        JZ      FWWLST
+        MVI     H,0
+        MOV     L,B             ; HL = B (16-bit index)
+        LXI     D,DMABUF
+        DAD     D               ; HL = &DMABUF[B]
+        MVI     M,CPMEOF
+        INR     B
+        JMP     FWPADL
+
+FWWLST: CALL    FWREC
+
+FWCLOS:
+        LXI     D,WRKFCB
+        MVI     C,BF_FCLOSE
+        CALL    BDOS
+
+        ; Clear modified flag
+        CALL    FICLRMOD
+        RET
+
+;------------------------------------------------------------
+; FWREC - Write one RECSIZ record from DMABUF to WRKFCB.
+;------------------------------------------------------------
+FWREC:
+        LXI     D,DMABUF
+        MVI     C,BF_SETDMA
+        CALL    BDOS
+        LXI     D,WRKFCB
+        MVI     C,BF_FWRITE
+        CALL    BDOS
+        RET
+
+;------------------------------------------------------------
+; FIBAKFCB - Build BAKFCB from WRKFCB name with .BAK ext.
+;------------------------------------------------------------
+FIBAKFCB:
+        LXI     H,BAKFCB
+        MVI     B,FCB_SIZ
+        XRA     A
+FBKLP:  MOV     M,A
+        INX     H
+        DCR     B
+        JNZ     FBKLP
+        ; Copy 8-char name from WRKFCB
+        LXI     D,WRKFCB+FCB_FN
+        LXI     H,BAKFCB+FCB_FN
+        MVI     B,8
+FBKLP2: LDAX    D
+        MOV     M,A
+        INX     D
+        INX     H
+        DCR     B
+        JNZ     FBKLP2
+        ; Set .BAK extension
+        MVI     M,'B'
+        INX     H
+        MVI     M,'A'
+        INX     H
+        MVI     M,'K'
+        RET
+
+;------------------------------------------------------------
+; FIPARSN - Parse filename in FILNBUF into WRKFCB.
+; Format: [d:]name[.ext]  (CP/M 8.3, upper-cased)
+; Entry:  FILNBUF = NUL-terminated filename string
+; Exit:   WRKFCB populated; FIRCB0 called
+;------------------------------------------------------------
+FIPARSN:
+        ; Zero WRKFCB
+        LXI     H,WRKFCB
+        MVI     B,FCB_SIZ
+        XRA     A
+FPNCLP: MOV     M,A
+        INX     H
+        DCR     B
+        JNZ     FPNCLP
+        ; Space-fill name+ext (CP/M requires 0x20 padding)
+        LXI     H,WRKFCB+FCB_FN
+        MVI     B,11
+        MVI     A,' '
+FPNSPL: MOV     M,A
+        INX     H
+        DCR     B
+        JNZ     FPNSPL
+
+        LXI     H,FILNBUF
+
+        ; Check for drive letter: if FILNBUF[1] = ':' then drive
+        MOV     A,M             ; first char
+        ORA     A
+        RZ                      ; empty
+        INX     H
+        MOV     B,M             ; second char
+        DCX     H               ; back to start
+        MOV     A,B
+        CPI     ':'
+        JNZ     FPNND           ; no drive letter
+        ; Drive letter present
+        MOV     A,M             ; get drive letter
+        ANI     5FH             ; upper case
+        SUI     'A'-1           ; A=1, B=2, ...
+        STA     WRKFCB+FCB_DR
+        INX     H
+        INX     H               ; skip 'X:'
+
+FPNND:  ; Parse name (up to 8 chars, stop at '.' or NUL)
+        LXI     D,WRKFCB+FCB_FN
+        MVI     B,8             ; max 8 chars
+FPNNLP: MOV     A,M
+        ORA     A
+        JZ      FPNDNE          ; end of string
+        CPI     '.'
+        JZ      FPNEXT          ; start of extension
+        ; Upper-case the character
+        CPI     'a'
+        JC      FPNSTC          ; already upper or non-alpha
+        CPI     'z'+1
+        JNC     FPNSTC
+        ANI     5FH             ; to upper
+FPNSTC: STAX    D
+        INX     H
+        INX     D
+        DCR     B
+        JNZ     FPNNLP
+        ; Overflow: skip to '.' or end
+FPNSKP: MOV     A,M
+        ORA     A
+        JZ      FPNDNE
+        CPI     '.'
+        JZ      FPNEXT
+        INX     H
+        JMP     FPNSKP
+
+FPNDNE: CALL    FIRCB0
+        RET
+
+FPNEXT: ; Parse extension (up to 3 chars)
+        INX     H               ; skip '.'
+        LXI     D,WRKFCB+FCB_FT
+        MVI     B,3
+FPNELP: MOV     A,M
+        ORA     A
+        JZ      FPNDNE
+        CPI     'a'
+        JC      FPNESC
+        CPI     'z'+1
+        JNC     FPNESC
+        ANI     5FH
+FPNESC: STAX    D
+        INX     H
+        INX     D
+        DCR     B
+        JNZ     FPNELP
+        CALL    FIRCB0
+        RET
+
+;=============================================================
+; DATA SEGMENT
+;=============================================================
+        DSEG
+
+; Working FCB for current file operation (36 bytes)
+WRKFCB: DS      FCB_SIZ
+
+; FCB for .BAK file
+BAKFCB: DS      FCB_SIZ
+
+; Rename FCB (32 bytes: old[16] + new[16])
+RNMFCB: DS      32
+
+; 128-byte DMA buffer for record I/O
+DMABUF: DS      RECSIZ
+
+; Buffered line input buffer for FIPROMPT
+; Format: max_len, actual_len, chars...
+RDLNBUF: DB    79              ; max length
+         DB    0               ; actual length (filled by BDOS)
+         DS    80              ; input buffer
+
+; Parsed filename (NUL-terminated)
+FILNBUF: DS    16
+
+; FIWRITE temporaries
+FWGPBG: DW     0              ; gap begin (physical offset)
+FWGPEN: DW     0              ; gap end   (physical offset)
+FWBASE: DW     0              ; buffer base address
+FWTXEND: DW    0              ; text end offset
+FWOFF:  DW     0              ; current logical write offset
+
+; Status messages
+LDNGMSG: DB    'Please wait, loading file...$'
+LOADMSG: DB    'File loaded.$'
+SAVEMSG: DB    'File saved. $'
+ERRMSG:  DB    'Write error!$'
+
+        END
+

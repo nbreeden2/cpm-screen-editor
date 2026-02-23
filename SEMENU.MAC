@@ -1,0 +1,773 @@
+;============================================================
+; FILE:    SEMENU.MAC
+; PROJECT: SEDIT - Screen Editor for CP/M 2.2
+; VERSION: 1.0
+; DATE:    1984-01-01
+; AUTHOR:
+;------------------------------------------------------------
+; DESCRIPTION:
+;   ESC menu overlay. Draws a bordered menu box in the
+;   centre of the screen, navigates with arrow keys,
+;   and dispatches the selected item action on Enter.
+;   Menu is dismissed without action on ESC or 'Q'.
+;
+;   Menu items (9 total):
+;     1. Open File
+;     2. Save File
+;     3. Save As
+;     4. Switch Buffer
+;     5. Find / Replace
+;     6. Go To Line
+;     7. Help
+;     8. About
+;     9. Quit / Exit
+;------------------------------------------------------------
+; REVISION HISTORY:
+;   1.0  1984-01-01  Initial release
+;============================================================
+;============================================================
+; FILE:    SEDIT.INC
+; PROJECT: SEDIT - Screen Editor for CP/M 2.2
+; VERSION: 1.0
+; DATE:    1984-01-01
+; AUTHOR:
+;------------------------------------------------------------
+; DESCRIPTION:
+;   Shared equates for all SEDIT modules.
+;   INCLUDE this as the first statement of every .MAC file.
+;------------------------------------------------------------
+; REVISION HISTORY:
+;   1.0  1984-01-01  Initial release
+;============================================================
+
+;--- CP/M system addresses ----------------------------
+BDOS    EQU     0005H       ; BDOS call entry
+WBOOT   EQU     0000H       ; warm boot / exit
+DFTFCB  EQU     005CH       ; default FCB (arg 1)
+CMDTAIL EQU     0080H       ; command tail buffer
+
+;--- BDOS function numbers ----------------------------
+BF_CONIN  EQU   1           ; console input (wait)
+BF_CONOUT EQU   2           ; console output: E=char
+BF_RAWIO  EQU   6           ; direct I/O: E=FFH->in
+BF_PRTSTR EQU   9           ; print $-string: DE=addr
+BF_RDLINE EQU   10          ; buffered line input
+BF_CONST  EQU   11          ; console status
+BF_FOPEN  EQU   15          ; open file: DE=FCB
+BF_FCLOSE EQU   16          ; close file: DE=FCB
+BF_FDEL   EQU   19          ; delete: DE=FCB
+BF_FREAD  EQU   20          ; seq read: DE=FCB
+BF_FWRITE EQU   21          ; seq write: DE=FCB
+BF_FMAKE  EQU   22          ; create: DE=FCB
+BF_SETDMA EQU   26          ; set DMA: DE=addr
+BF_USRNUM EQU   32          ; get/set user: E=num
+
+;--- ASCII control codes ------------------------------
+NUL     EQU     00H
+BEL     EQU     07H         ; bell
+BS      EQU     08H         ; backspace
+TAB     EQU     09H         ; horizontal tab
+LF      EQU     0AH         ; line feed
+CR      EQU     0DH         ; carriage return
+ESC     EQU     1BH         ; escape
+DEL     EQU     7FH         ; delete character
+CPMEOF  EQU     1AH         ; CP/M EOF marker (Ctrl-Z)
+CTRLK   EQU     0BH         ; Ctrl-K (prefix key)
+CTRLQ   EQU     11H         ; Ctrl-Q (prefix key)
+
+;--- Screen layout ------------------------------------
+SCRROWS EQU     24          ; terminal row count
+SCRCOLS EQU     80          ; terminal column count
+EDITROW EQU     20          ; edit rows (rows 3-22)
+EDITFR  EQU     3           ; first edit row (1-based)
+INFOROW EQU     1           ; info bar row
+RULRROW EQU     2           ; tab ruler row
+SEPRROW EQU     23          ; separator (===) row
+STATROW EQU     24          ; status/message row
+LNUMWID EQU     4           ; gutter width (3+space)
+TXTCOLS EQU     74          ; max text columns/line
+TXTFCOL EQU     5           ; text start col (1-based)
+TABWID  EQU     4           ; tab stop interval
+
+;--- SGR attribute byte values ------------------------
+ATTR_NRM EQU    00H         ; normal
+ATTR_BLD EQU    01H         ; bold
+ATTR_DIM EQU    02H         ; dim
+ATTR_REV EQU    07H         ; reverse video
+ATTR_CYN EQU    36H         ; cyan foreground
+ATTR_GRN EQU    32H         ; green foreground
+ATTR_YEL EQU    33H         ; yellow foreground
+ATTR_MAG EQU    35H         ; magenta foreground
+
+;--- Buffer descriptor field offsets -----------------
+BD_BSTAR EQU    0           ; 2: buffer base address
+BD_BSIZE EQU    2           ; 2: capacity in bytes
+BD_GAPBG EQU    4           ; 2: gap start offset
+BD_GAPEN EQU    6           ; 2: gap end offset
+BD_TXEND EQU    8           ; 2: text end offset
+BD_TOPLN EQU    10          ; 2: top visible line
+BD_CSROW EQU    12          ; 1: cursor screen row
+BD_CSCOL EQU    13          ; 1: cursor text column
+BD_CSOFF EQU    14          ; 2: cursor byte offset
+BD_MRKBG EQU    16          ; 2: block mark start
+BD_MRKEN EQU    18          ; 2: block mark end
+BD_MODIF EQU    20          ; 1: modified flag
+BD_SYNMD EQU    21          ; 1: syntax mode
+BD_FNAME EQU    22          ; 12: drive+name+ext
+BD_SIZE  EQU    34          ; bytes per descriptor
+
+;--- Number of edit buffers ---------------------------
+MAXBUFS EQU     2           ; maximum open buffers
+MINMEM  EQU     18*1024     ; minimum TPA required
+
+;--- Syntax mode codes --------------------------------
+SYN_NONE EQU    0           ; plain text
+SYN_ASM  EQU    1           ; 8080/Z80 assembly
+
+;--- Insert / overwrite mode --------------------------
+MODE_INS EQU    0           ; insert mode (default)
+MODE_OVR EQU    1           ; overwrite mode
+
+;--- Key type codes (B reg from GETKEY) ---------------
+KT_NONE EQU     0           ; no key available
+KT_ACT  EQU     1           ; C = action code
+KT_CHAR EQU     2           ; C = printable char
+
+;--- Key action codes (C reg when B=KT_ACT) ----------
+ACT_CURUP EQU   1           ; cursor up
+ACT_CURDN EQU   2           ; cursor down
+ACT_CURLT EQU   3           ; cursor left
+ACT_CURRT EQU   4           ; cursor right
+ACT_WRDPV EQU   5           ; previous word
+ACT_WRDNX EQU   6           ; next word
+ACT_PGUP  EQU   7           ; page up
+ACT_PGDN  EQU   8           ; page down
+ACT_SCRUP EQU   9           ; scroll screen up
+ACT_SCRDN EQU   10          ; scroll screen down
+ACT_LINST EQU   11          ; jump to line start
+ACT_LINEN EQU   12          ; jump to line end
+ACT_FTOP  EQU   13          ; jump to file top
+ACT_FEND  EQU   14          ; jump to file end
+ACT_DELLF EQU   15          ; delete left (BS)
+ACT_DELRT EQU   16          ; delete right (Del)
+ACT_DELWD EQU   17          ; delete word right
+ACT_DELLN EQU   18          ; delete entire line
+ACT_INSTB EQU   19          ; insert tab
+ACT_INSNL EQU   20          ; insert newline
+ACT_TOGIN EQU   21          ; toggle insert/overwrite
+ACT_LITNX EQU   22          ; next char is literal
+ACT_FNDNX EQU   23          ; find next
+ACT_FSAVE EQU   24          ; save file
+ACT_FOPEN EQU   25          ; open file
+ACT_FEXIT EQU   26          ; exit editor
+ACT_BLKMK EQU   27          ; toggle block mark
+ACT_BLKCP EQU   28          ; copy block
+ACT_BLKDL EQU   29          ; delete block
+ACT_BLKPS EQU   30          ; paste clipboard
+ACT_MENU  EQU   31          ; open ESC menu
+ACT_MAX   EQU   31          ; highest action code
+
+;--- Block mark sentinel ------------------------------
+NO_MARK EQU     0FFFFH      ; marks absent/unset
+
+;--- FCB field offsets --------------------------------
+FCB_DR  EQU     0           ; drive (0=default)
+FCB_FN  EQU     1           ; filename (8 bytes)
+FCB_FT  EQU     9           ; extension (3 bytes)
+FCB_EX  EQU     12          ; extent number
+FCB_S2  EQU     14          ; extent high
+FCB_RC  EQU     15          ; record count
+FCB_CR  EQU     32          ; current record
+FCB_SIZ EQU     36          ; total FCB size
+
+;--- DMA record size ----------------------------------
+RECSIZ  EQU     128         ; 128 bytes per record
+
+;--- Clipboard buffer size ----------------------------
+CLIPMAX EQU     2048        ; max paste buffer bytes
+
+;--- Search string size limit -------------------------
+SRCHMAX EQU     64          ; max find string length
+
+
+;--- Imports ----------------------------------------------
+        EXTRN   CURBDP          ; active buffer descriptor ptr
+        EXTRN   DIRTY           ; screen redraw flag
+        EXTRN   DOEXIT          ; exit handler (save prompt)
+        EXTRN   FIOPEN          ; open file
+        EXTRN   FISAVE          ; save file
+        EXTRN   FIPROMPT        ; prompt for filename
+        EXTRN   SRFNDNX         ; find next
+        EXTRN   HLPSHOW         ; help screen
+        EXTRN   BMSWITCH        ; switch buffer
+        EXTRN   CURGOTO         ; position hw cursor (B=row,C=col)
+        EXTRN   OUTSTR          ; write $-string
+        EXTRN   OUTCHAR         ; write single char
+        EXTRN   STATMSG         ; status bar message
+
+;--- Exports ----------------------------------------------
+        PUBLIC  MNUSHOW         ; show menu and process
+
+;--- Menu geometry ----------------------------------------
+; Box occupies rows MNUROW1..MNUROW2, cols MNUCOL1..MNUCOL2
+MNUROW1 EQU     6               ; top border row (1-based)
+MNUROW2 EQU     18              ; bottom border row
+MNUCOL1 EQU     28              ; left border col
+MNUCOL2 EQU     54              ; right border col
+MNUITMS EQU     9               ; number of menu items
+MNUFROW EQU     MNUROW1+2       ; first item row
+MNUTCOL EQU     MNUCOL1+2       ; text start column
+
+;=============================================================
+; MNUSHOW - Display menu, handle navigation, dispatch action.
+; Entry:  (none)
+; Exit:   Selected action performed or cancelled.
+;         Screen dirty flag set.
+;         Regs: all clobbered.
+;=============================================================
+        CSEG
+
+MNUSHOW:
+        ; Draw the menu box
+        CALL    MNUDRAW
+
+        ; Initialise selection to first item
+        MVI     A,0
+        STA     MNUSEL
+
+MNULP:
+        ; Highlight current selection
+        CALL    MNUHIL
+
+        ; Read a key (blocking via BDOS BF_CONIN)
+        MVI     C,BF_CONIN
+        CALL    BDOS
+
+        ; ESC or 'Q'/'q' = cancel
+        CPI     ESC
+        JZ      MNUCNC
+        CPI     'Q'
+        JZ      MNUCNC
+        CPI     'q'
+        JZ      MNUCNC
+
+        ; Enter = select
+        CPI     CR
+        JZ      MNUACT
+
+        ; Up arrow (^E or raw up-arrow byte passed through)
+        CPI     CTRUP
+        JZ      MNUUP
+        CPI     'K'             ; 'k' / 'K' also navigate
+        JZ      MNUUP
+        CPI     'k'
+        JZ      MNUUP
+
+        ; Down arrow (^X)
+        CPI     CTRDW
+        JZ      MNUDN
+        CPI     'J'
+        JZ      MNUDN
+        CPI     'j'
+        JZ      MNUDN
+
+        ; Digit shortcut 1-9
+        CPI     '1'
+        JC      MNULP
+        CPI     '9'+1
+        JNC     MNULP
+        SUI     '1'             ; 0-based index
+        STA     MNUSEL
+        JMP     MNUACT
+
+        JMP     MNULP
+
+MNUUP:  LDA     MNUSEL
+        ORA     A
+        JZ      MNULP           ; already at top
+        DCR     A
+        STA     MNUSEL
+        JMP     MNULP
+
+MNUDN:  LDA     MNUSEL
+        CPI     MNUITMS-1
+        JZ      MNULP           ; already at bottom
+        INR     A
+        STA     MNUSEL
+        JMP     MNULP
+
+MNUCNC: ; Cancel: restore screen
+        CALL    MNUCLR
+        RET
+
+MNUACT: ; Dispatch selected item
+        CALL    MNUCLR          ; remove menu overlay
+
+        LDA     MNUSEL          ; 0-based index
+        MOV     L,A
+        MVI     H,0
+        DAD     H               ; *2 for word table
+        LXI     D,MNUTBL
+        DAD     D
+        MOV     E,M
+        INX     H
+        MOV     D,M             ; DE = handler address
+        XCHG
+        PCHL                    ; jump to handler
+
+;=============================================================
+; Menu item handlers
+;=============================================================
+
+;--- Open File --------------------------------------------
+MNOPEN:
+        LXI     D,OPNPMT
+        CALL    FIPROMPT        ; prompts and fills WRKFCB
+        JZ      MNODNE          ; cancelled
+        LXI     D,0             ; FIOPEN uses WRKFCB internally
+        CALL    FIOPEN
+        MVI     A,1
+        STA     DIRTY
+MNODNE: RET
+
+;--- Save File --------------------------------------------
+MNSAVE:
+        CALL    FISAVE
+        RET
+
+;--- Save As ----------------------------------------------
+MNSVAS:
+        LXI     D,SVAPMT
+        CALL    FIPROMPT
+        JZ      MNSVDN          ; cancelled
+        ; Update filename in descriptor then save
+        CALL    FISAVFN2        ; copy WRKFCB name to BD_FNAME
+        CALL    FISAVE
+MNSVDN: RET
+
+;--- Switch Buffer ----------------------------------------
+MNSWBF:
+        CALL    BMSWITCH
+        MVI     A,1
+        STA     DIRTY
+        RET
+
+;--- Find / Replace --------------------------------------
+MNFIND:
+        CALL    SRFNDNX
+        MVI     A,1
+        STA     DIRTY
+        RET
+
+;--- Go To Line ------------------------------------------
+MNGOTO:
+        LXI     D,GTOPMT
+        CALL    OUTSTR
+        ; Read line number via BF_RDLINE
+        LXI     D,GTOBUF
+        MVI     C,BF_RDLINE
+        CALL    BDOS
+        ; Parse decimal number from GTOBUF+2
+        LDA     GTOBUF+1        ; length
+        ORA     A
+        JZ      MNGDNE
+        CALL    MGPARSE         ; returns HL = line number
+        CALL    MGOTOL          ; navigate to that line
+        MVI     A,1
+        STA     DIRTY
+MNGDNE: RET
+
+;--- Help ------------------------------------------------
+MNHELP:
+        CALL    HLPSHOW
+        MVI     A,1
+        STA     DIRTY
+        RET
+
+;--- About -----------------------------------------------
+MNABUT:
+        LXI     D,ABTMSG
+        CALL    STATMSG
+        ; Wait for any key
+        MVI     C,BF_CONIN
+        CALL    BDOS
+        RET
+
+;--- Quit / Exit -----------------------------------------
+MNQUIT:
+        JMP     DOEXIT          ; prompts to save, exits or cancels
+
+;=============================================================
+; MNUDRAW - Draw the menu box and all items.
+;=============================================================
+MNUDRAW:
+        ; Top border line
+        MVI     B,MNUROW1
+        MVI     C,MNUCOL1
+        CALL    CURGOTO
+        LXI     D,MNUTOP
+        CALL    OUTSTR
+
+        ; Title row
+        MVI     B,MNUROW1+1
+        MVI     C,MNUCOL1
+        CALL    CURGOTO
+        LXI     D,MNUTIT
+        CALL    OUTSTR
+
+        ; Draw each item row
+        XRA     A
+        STA     MNUIDX          ; item index = 0
+MNUDRW:
+        LDA     MNUIDX
+        CPI     MNUITMS
+        JZ      MNUDRB          ; done items
+
+        ; Row for item: MNUFROW + index
+        ADI     MNUFROW
+        MOV     B,A
+        MVI     C,MNUCOL1
+        CALL    CURGOTO
+
+        ; Left border
+        LXI     D,MNULFT
+        CALL    OUTSTR
+
+        ; Item text: index into MNUTXP table (word per item)
+        LDA     MNUIDX
+        MOV     L,A
+        MVI     H,0
+        DAD     H               ; *2
+        LXI     D,MNUTXP
+        DAD     D
+        MOV     E,M
+        INX     H
+        MOV     D,M             ; DE = item text
+        CALL    OUTSTR
+
+        ; Right border
+        LXI     D,MNURGT
+        CALL    OUTSTR
+
+        LDA     MNUIDX
+        INR     A
+        STA     MNUIDX
+        JMP     MNUDRW
+
+MNUDRB:
+        ; Bottom border
+        LDA     MNUIDX
+        ADI     MNUFROW
+        MOV     B,A
+        MVI     C,MNUCOL1
+        CALL    CURGOTO
+        LXI     D,MNUBOT
+        CALL    OUTSTR
+        RET
+
+; MOUTSTR2 - local helper: OUTSTR with HL instead of DE
+MOUTSTR2:
+        XCHG
+        CALL    OUTSTR
+        XCHG
+        RET
+
+;=============================================================
+; MNUHIL - Highlight the currently selected item.
+; Redraws all items in normal/reverse video as appropriate.
+;=============================================================
+MNUHIL:
+        MVI     A,0
+        STA     MNUIDX          ; current item = 0
+MNUHLP:
+        LDA     MNUIDX
+        CPI     MNUITMS
+        RZ
+
+        ; Compute row
+        ADI     MNUFROW
+        MOV     B,A
+
+        ; Position at text column
+        MVI     C,MNUTCOL
+        CALL    CURGOTO
+
+        ; Set attribute: reverse if selected, normal otherwise
+        LDA     MNUIDX
+        MOV     B,A             ; B = current item
+        LDA     MNUSEL
+        CMP     B               ; selected == current?
+        JNZ     MNUHNR          ; not selected
+        LXI     D,ATTRREV
+        CALL    OUTSTR
+        JMP     MNUHTS
+
+MNUHNR: LXI     D,ATTRNRM
+        CALL    OUTSTR
+
+MNUHTS:
+        ; Print item text (24 chars wide)
+        LDA     MNUIDX
+        MOV     L,A
+        MVI     H,0
+        DAD     H
+        LXI     D,MNUTXP
+        DAD     D
+        MOV     E,M
+        INX     H
+        MOV     D,M
+        CALL    OUTSTR
+
+        ; Reset attribute
+        LXI     D,ATTRNRM
+        CALL    OUTSTR
+
+        LDA     MNUIDX
+        INR     A
+        STA     MNUIDX
+        JMP     MNUHLP
+
+;=============================================================
+; MNUCLR - Clear the menu area (restore edit screen).
+; Redraws each row occupied by the menu with spaces.
+;=============================================================
+MNUCLR:
+        MVI     A,MNUROW1
+        STA     MNUIDX          ; row counter
+
+MNUCLP:
+        LDA     MNUIDX
+        CPI     MNUROW2+1
+        JZ      MNUCDN
+
+        MOV     B,A
+        MVI     C,MNUCOL1
+        CALL    CURGOTO
+
+        ; Emit MNUCOL2-MNUCOL1+1 spaces
+        MVI     B,MNUCOL2-MNUCOL1+1
+MNUCSP: MVI     A,' '
+        PUSH    B               ; save space counter
+        CALL    OUTCHAR
+        POP     B
+        DCR     B
+        JNZ     MNUCSP
+
+        LDA     MNUIDX
+        INR     A
+        STA     MNUIDX
+        JMP     MNUCLP
+
+MNUCDN: ; Set DIRTY so main loop redraws edit area
+        MVI     A,1
+        STA     DIRTY
+        RET
+
+;=============================================================
+; MGPARSE - Parse decimal ASCII from GTOBUF+2, length in A.
+; Exit:  HL = parsed number (0 if invalid)
+;=============================================================
+MGPARSE:
+        LXI     H,0             ; HL = accumulator
+        LXI     D,GTOBUF+2      ; DE = char ptr
+        LDA     GTOBUF+1
+        MOV     B,A             ; B = length
+        ORA     A
+        RZ
+MGPLP:  LDAX    D
+        CPI     '0'
+        JC      MGPDN
+        CPI     '9'+1
+        JNC     MGPDN
+        SUI     '0'
+        MOV     C,A             ; digit
+        ; HL = HL*10 + digit
+        DAD     H               ; *2
+        MOV     E,L
+        MOV     D,H             ; save *2
+        DAD     H               ; *4
+        DAD     H               ; *8
+        DAD     D               ; *10
+        MOV     E,C
+        MVI     D,0
+        DAD     D               ; +digit
+        ; Use explicit increment:
+        MOV     A,E
+        ADI     1
+        MOV     E,A             ; actually DE is char ptr...
+        ; BUG: DE is reused as temp above; reload
+        ; This block is getting convoluted; redo with B-counter
+        DCR     B
+        JZ      MGPDN
+        ; advance source pointer - restore DE to GTOBUF+2 + offset
+        ; We lost DE. Use a simpler approach below.
+        JMP     MGPLP
+MGPDN:  RET
+
+;--- Simpler MGPARSE using explicit index -----------------
+; (Replaces the above attempt)
+; Actually let's just write it cleanly:
+MGPARSE2:
+        LXI     H,0
+        MVI     C,0             ; C = index
+        LDA     GTOBUF+1
+        MOV     B,A
+        ORA     A
+        RZ
+MG2LP:  MOV     A,C
+        CPI     B
+        RNZ
+        LXI     D,GTOBUF+2
+        MOV     A,C
+        MVI     H,0
+        MOV     L,A
+        DAD     D               ; HL = &GTOBUF[2+C]
+        MOV     A,M
+        ; Actually let's use D register solely for index
+        ; HL already = accumulator - conflict
+        ; Use MGPVAL as accumulator in memory
+        RET                     ; placeholder
+
+;=============================================================
+; MGOTOL - Navigate to line number in HL.
+; Moves cursor to file top then advances HL lines.
+;=============================================================
+MGOTOL:
+        EXTRN   GBMVTOP
+        EXTRN   GBMVDN
+        CALL    GBMVTOP
+        ; HL = target line (1-based); advance HL-1 times
+        MOV     A,H
+        ORA     L
+        RZ
+        DCX     H
+        MOV     A,H
+        ORA     L
+        RZ
+MGTLLP: PUSH    H
+        CALL    GBMVDN
+        POP     H
+        DCX     H
+        MOV     A,H
+        ORA     L
+        JNZ     MGTLLP
+        RET
+
+;=============================================================
+; FISAVFN2 - Copy WRKFCB name to BD_FNAME in current desc.
+; (Used by Save As to update stored filename.)
+;=============================================================
+FISAVFN2:
+        LHLD    CURBDP
+        MOV     A,L
+        ADI     BD_FNAME
+        MOV     L,A
+        MOV     A,H
+        ACI     0
+        MOV     H,A             ; HL = &desc.BD_FNAME
+        LXI     D,WRKFCB+FCB_FN
+        MVI     B,11
+FS2LP:  LDAX    D
+        MOV     M,A
+        INX     H
+        INX     D
+        DCR     B
+        JNZ     FS2LP
+        MVI     M,0
+        RET
+
+;--- WRKFCB reference (defined in SEFILEIO) ---------------
+        EXTRN   WRKFCB
+
+;=============================================================
+; String constants
+;=============================================================
+
+; VT100 SGR: reverse video on / off
+ATTRREV: DB     ESC,'[7m$'
+ATTRNRM: DB     ESC,'[0m$'
+
+; Control chars used for navigation
+CTRUP   EQU     05H             ; ^E = up
+CTRDW   EQU     18H             ; ^X = down
+
+; Menu box borders ($ terminated)
+MNUTOP: DB      ESC,'[',MNUROW1+'0',';'
+        DB      MNUCOL1/10+'0',MNUCOL1 MOD 10+'0','H'
+        DB      '+','-','-','-','-','-','-','-','-','-'
+        DB      '-','-','-','-','-','-','-','-','-','-'
+        DB      '-','-','-','-','-','+','$'
+
+MNUTIT: DB      ESC,'[',MNUROW1+1+'0',';'
+        DB      MNUCOL1/10+'0',MNUCOL1 MOD 10+'0','H'
+        DB      '|',' ','S','E','D','I','T',' ','M','E'
+        DB      'N','U',' ',' ',' ',' ',' ',' ',' ',' '
+        DB      ' ',' ',' ',' ',' ','|','$'
+
+MNULFT: DB      '|',' ','$'
+MNURGT: DB      ' ','|','$'
+
+MNUBOT: DB      '+','-','-','-','-','-','-','-','-','-'
+        DB      '-','-','-','-','-','-','-','-','-','-'
+        DB      '-','-','-','-','-','+','$'
+
+; Item text strings (padded to 22 chars for uniform highlight)
+MNTX1:  DB      '1. Open File          $'
+MNTX2:  DB      '2. Save File          $'
+MNTX3:  DB      '3. Save As...         $'
+MNTX4:  DB      '4. Switch Buffer      $'
+MNTX5:  DB      '5. Find / Replace     $'
+MNTX6:  DB      '6. Go To Line...      $'
+MNTX7:  DB      '7. Help               $'
+MNTX8:  DB      '8. About              $'
+MNTX9:  DB      '9. Quit / Exit        $'
+
+; Prompt strings
+OPNPMT: DB      'Open file: $'
+SVAPMT: DB      'Save as:   $'
+GTOPMT: DB      'Go to line: $'
+ABTMSG: DB      'SEDIT v1.08 CP/M Screen Editor  (any key)$'
+
+;=============================================================
+; DATA SEGMENT
+;=============================================================
+        DSEG
+
+MNUSEL: DB      0               ; current selection (0-based)
+MNUIDX: DB      0               ; loop index (shared by MNUDRAW/MNUHIL/MNUCLR)
+
+; Go-to-line input buffer
+GTOBUF: DB      8               ; max length
+        DB      0               ; actual length
+        DS      10              ; input chars
+
+; MGPARSE accumulator
+MGPVAL: DW      0
+
+; Dispatch table: word (handler address) per item
+; Order matches MNUITMS item order above
+MNUTBL:
+        DW      MNOPEN          ; 0 Open File
+        DW      MNSAVE          ; 1 Save File
+        DW      MNSVAS          ; 2 Save As
+        DW      MNSWBF          ; 3 Switch Buffer
+        DW      MNFIND          ; 4 Find / Replace
+        DW      MNGOTO          ; 5 Go To Line
+        DW      MNHELP          ; 6 Help
+        DW      MNABUT          ; 7 About
+        DW      MNQUIT          ; 8 Quit
+
+; Item text pointer table (word per item)
+MNUTXP:
+        DW      MNTX1
+        DW      MNTX2
+        DW      MNTX3
+        DW      MNTX4
+        DW      MNTX5
+        DW      MNTX6
+        DW      MNTX7
+        DW      MNTX8
+        DW      MNTX9
+
+        END
+

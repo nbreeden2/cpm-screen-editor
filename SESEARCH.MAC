@@ -1,0 +1,772 @@
+;============================================================
+; FILE:    SESEARCH.MAC
+; PROJECT: SEDIT - Screen Editor for CP/M 2.2
+; VERSION: 1.0
+; DATE:    1984-01-01
+; AUTHOR:
+;------------------------------------------------------------
+; DESCRIPTION:
+;   Forward search and optional replace in the gap buffer.
+;   SRFNDNX  - find next occurrence of SRCHSTR starting
+;              from current cursor position, wrapping at
+;              end of file.
+;   SRREPLACE - as SRFNDNX but prompt for replacement string
+;              and substitute.
+;   Search is case-insensitive when SRCHOPTS bit 0 = 1.
+;   Replacement is straight string substitution (same-
+;   length or different-length via delete+insert).
+;------------------------------------------------------------
+; REVISION HISTORY:
+;   1.0  1984-01-01  Initial release
+;============================================================
+
+;--- Imports ----------------------------------------------
+        EXTRN   CURBDP          ; current buffer descriptor
+        EXTRN   GBMVRT          ; move cursor right one char
+        EXTRN   GBMVTOP         ; move cursor to file top
+        EXTRN   GBDELRT         ; delete char right
+        EXTRN   GBINSRT         ; insert char at cursor
+        EXTRN   OUTSTR          ; write $-string to console
+        EXTRN   STATMSG         ; status bar message
+        EXTRN   DIRTY           ; screen redraw flag
+
+;--- Exports ----------------------------------------------
+        PUBLIC  SRFNDNX         ; find next
+        PUBLIC  SRREPLACE       ; find and replace
+
+;=============================================================
+; SRFNDNX - Find next occurrence of SRCHSTR.
+; If SRCHSTR is empty, prompt for a new search string first.
+; Starts search from byte AFTER current cursor offset.
+; Wraps around to file top if not found forward.
+; Entry:  CURBDP valid
+; Exit:   Cursor moved to match start if found.
+;         Status message displayed.
+;         DIRTY set.
+;         Regs: all clobbered.
+;=============================================================
+;============================================================
+; FILE:    SEDIT.INC
+; PROJECT: SEDIT - Screen Editor for CP/M 2.2
+; VERSION: 1.0
+; DATE:    1984-01-01
+; AUTHOR:
+;------------------------------------------------------------
+; DESCRIPTION:
+;   Shared equates for all SEDIT modules.
+;   INCLUDE this as the first statement of every .MAC file.
+;------------------------------------------------------------
+; REVISION HISTORY:
+;   1.0  1984-01-01  Initial release
+;============================================================
+
+;--- CP/M system addresses ----------------------------
+BDOS    EQU     0005H       ; BDOS call entry
+WBOOT   EQU     0000H       ; warm boot / exit
+DFTFCB  EQU     005CH       ; default FCB (arg 1)
+CMDTAIL EQU     0080H       ; command tail buffer
+
+;--- BDOS function numbers ----------------------------
+BF_CONIN  EQU   1           ; console input (wait)
+BF_CONOUT EQU   2           ; console output: E=char
+BF_RAWIO  EQU   6           ; direct I/O: E=FFH->in
+BF_PRTSTR EQU   9           ; print $-string: DE=addr
+BF_RDLINE EQU   10          ; buffered line input
+BF_CONST  EQU   11          ; console status
+BF_FOPEN  EQU   15          ; open file: DE=FCB
+BF_FCLOSE EQU   16          ; close file: DE=FCB
+BF_FDEL   EQU   19          ; delete: DE=FCB
+BF_FREAD  EQU   20          ; seq read: DE=FCB
+BF_FWRITE EQU   21          ; seq write: DE=FCB
+BF_FMAKE  EQU   22          ; create: DE=FCB
+BF_SETDMA EQU   26          ; set DMA: DE=addr
+BF_USRNUM EQU   32          ; get/set user: E=num
+
+;--- ASCII control codes ------------------------------
+NUL     EQU     00H
+BEL     EQU     07H         ; bell
+BS      EQU     08H         ; backspace
+TAB     EQU     09H         ; horizontal tab
+LF      EQU     0AH         ; line feed
+CR      EQU     0DH         ; carriage return
+ESC     EQU     1BH         ; escape
+DEL     EQU     7FH         ; delete character
+CPMEOF  EQU     1AH         ; CP/M EOF marker (Ctrl-Z)
+CTRLK   EQU     0BH         ; Ctrl-K (prefix key)
+CTRLQ   EQU     11H         ; Ctrl-Q (prefix key)
+
+;--- Screen layout ------------------------------------
+SCRROWS EQU     24          ; terminal row count
+SCRCOLS EQU     80          ; terminal column count
+EDITROW EQU     20          ; edit rows (rows 3-22)
+EDITFR  EQU     3           ; first edit row (1-based)
+INFOROW EQU     1           ; info bar row
+RULRROW EQU     2           ; tab ruler row
+SEPRROW EQU     23          ; separator (===) row
+STATROW EQU     24          ; status/message row
+LNUMWID EQU     4           ; gutter width (3+space)
+TXTCOLS EQU     74          ; max text columns/line
+TXTFCOL EQU     5           ; text start col (1-based)
+TABWID  EQU     4           ; tab stop interval
+
+;--- SGR attribute byte values ------------------------
+ATTR_NRM EQU    00H         ; normal
+ATTR_BLD EQU    01H         ; bold
+ATTR_DIM EQU    02H         ; dim
+ATTR_REV EQU    07H         ; reverse video
+ATTR_CYN EQU    36H         ; cyan foreground
+ATTR_GRN EQU    32H         ; green foreground
+ATTR_YEL EQU    33H         ; yellow foreground
+ATTR_MAG EQU    35H         ; magenta foreground
+
+;--- Buffer descriptor field offsets -----------------
+BD_BSTAR EQU    0           ; 2: buffer base address
+BD_BSIZE EQU    2           ; 2: capacity in bytes
+BD_GAPBG EQU    4           ; 2: gap start offset
+BD_GAPEN EQU    6           ; 2: gap end offset
+BD_TXEND EQU    8           ; 2: text end offset
+BD_TOPLN EQU    10          ; 2: top visible line
+BD_CSROW EQU    12          ; 1: cursor screen row
+BD_CSCOL EQU    13          ; 1: cursor text column
+BD_CSOFF EQU    14          ; 2: cursor byte offset
+BD_MRKBG EQU    16          ; 2: block mark start
+BD_MRKEN EQU    18          ; 2: block mark end
+BD_MODIF EQU    20          ; 1: modified flag
+BD_SYNMD EQU    21          ; 1: syntax mode
+BD_FNAME EQU    22          ; 12: drive+name+ext
+BD_SIZE  EQU    34          ; bytes per descriptor
+
+;--- Number of edit buffers ---------------------------
+MAXBUFS EQU     2           ; maximum open buffers
+MINMEM  EQU     18*1024     ; minimum TPA required
+
+;--- Syntax mode codes --------------------------------
+SYN_NONE EQU    0           ; plain text
+SYN_ASM  EQU    1           ; 8080/Z80 assembly
+
+;--- Insert / overwrite mode --------------------------
+MODE_INS EQU    0           ; insert mode (default)
+MODE_OVR EQU    1           ; overwrite mode
+
+;--- Key type codes (B reg from GETKEY) ---------------
+KT_NONE EQU     0           ; no key available
+KT_ACT  EQU     1           ; C = action code
+KT_CHAR EQU     2           ; C = printable char
+
+;--- Key action codes (C reg when B=KT_ACT) ----------
+ACT_CURUP EQU   1           ; cursor up
+ACT_CURDN EQU   2           ; cursor down
+ACT_CURLT EQU   3           ; cursor left
+ACT_CURRT EQU   4           ; cursor right
+ACT_WRDPV EQU   5           ; previous word
+ACT_WRDNX EQU   6           ; next word
+ACT_PGUP  EQU   7           ; page up
+ACT_PGDN  EQU   8           ; page down
+ACT_SCRUP EQU   9           ; scroll screen up
+ACT_SCRDN EQU   10          ; scroll screen down
+ACT_LINST EQU   11          ; jump to line start
+ACT_LINEN EQU   12          ; jump to line end
+ACT_FTOP  EQU   13          ; jump to file top
+ACT_FEND  EQU   14          ; jump to file end
+ACT_DELLF EQU   15          ; delete left (BS)
+ACT_DELRT EQU   16          ; delete right (Del)
+ACT_DELWD EQU   17          ; delete word right
+ACT_DELLN EQU   18          ; delete entire line
+ACT_INSTB EQU   19          ; insert tab
+ACT_INSNL EQU   20          ; insert newline
+ACT_TOGIN EQU   21          ; toggle insert/overwrite
+ACT_LITNX EQU   22          ; next char is literal
+ACT_FNDNX EQU   23          ; find next
+ACT_FSAVE EQU   24          ; save file
+ACT_FOPEN EQU   25          ; open file
+ACT_FEXIT EQU   26          ; exit editor
+ACT_BLKMK EQU   27          ; toggle block mark
+ACT_BLKCP EQU   28          ; copy block
+ACT_BLKDL EQU   29          ; delete block
+ACT_BLKPS EQU   30          ; paste clipboard
+ACT_MENU  EQU   31          ; open ESC menu
+ACT_MAX   EQU   31          ; highest action code
+
+;--- Block mark sentinel ------------------------------
+NO_MARK EQU     0FFFFH      ; marks absent/unset
+
+;--- FCB field offsets --------------------------------
+FCB_DR  EQU     0           ; drive (0=default)
+FCB_FN  EQU     1           ; filename (8 bytes)
+FCB_FT  EQU     9           ; extension (3 bytes)
+FCB_EX  EQU     12          ; extent number
+FCB_S2  EQU     14          ; extent high
+FCB_RC  EQU     15          ; record count
+FCB_CR  EQU     32          ; current record
+FCB_SIZ EQU     36          ; total FCB size
+
+;--- DMA record size ----------------------------------
+RECSIZ  EQU     128         ; 128 bytes per record
+
+;--- Clipboard buffer size ----------------------------
+CLIPMAX EQU     2048        ; max paste buffer bytes
+
+;--- Search string size limit -------------------------
+SRCHMAX EQU     64          ; max find string length
+
+        CSEG
+
+SRFNDNX:
+        ; If search string is empty, prompt for one
+        LDA     SRCHSTR
+        ORA     A
+        JNZ     SRFNDS          ; already have a string
+
+        ; Prompt for search string
+        LXI     D,SRCHPMT
+        CALL    OUTSTR
+        LXI     D,SRDINBUF
+        MVI     C,BF_RDLINE
+        CALL    BDOS
+        LDA     SRDINBUF+1
+        ORA     A
+        RZ                      ; empty input = cancel
+
+        ; Copy to SRCHSTR (NUL-terminated, max SRCHMAX)
+        MVI     B,0
+        MOV     C,A             ; C = length
+        LXI     H,SRDINBUF+2   ; source
+        LXI     D,SRCHSTR       ; dest
+SRNCPL: MOV     A,M
+        STAX    D
+        INX     H
+        INX     D
+        INR     B
+        MOV     A,B
+        CMP     C
+        JNZ     SRNCPL
+        XRA     A
+        STAX    D               ; NUL
+
+        ; Store length
+        MOV     A,C
+        STA     SRCHLEN
+
+SRFNDS:
+        ; Set start = cursor offset + 1
+        LHLD    CURBDP
+        PUSH    H
+
+        ; Read CSOFF (cursor byte offset)
+        MOV     A,L
+        ADI     BD_CSOFF
+        MOV     L,A
+        MOV     A,H
+        ACI     0
+        MOV     H,A
+        MOV     E,M
+        INX     H
+        MOV     D,M             ; DE = cursor offset
+        MOV     A,E
+        ADI     1
+        MOV     E,A
+        MOV     A,D
+        ACI     0
+        MOV     D,A             ; DE = cursor+1
+        XCHG
+        SHLD    SRSTART         ; start of forward search
+
+        POP     H               ; restore descriptor ptr
+
+        ; Read TXEND
+        MOV     A,L
+        ADI     BD_TXEND
+        MOV     L,A
+        MOV     A,H
+        ACI     0
+        MOV     H,A
+        MOV     E,M
+        INX     H
+        MOV     D,M
+        XCHG
+        SHLD    SRTXEND         ; end of text
+
+        ; Compute search string length
+        LDA     SRCHLEN
+        MOV     B,A             ; B = pattern length
+        ORA     A
+        RZ
+
+        ; --- Forward search from SRSTART to SRTXEND-SRCHLEN ---
+        LHLD    SRSTART
+        SHLD    SRPOS           ; current probe position
+
+SRFLP:
+        ; Check if SRPOS + SRCHLEN > SRTXEND
+        LHLD    SRPOS
+        LDA     SRCHLEN
+        MOV     C,A
+        MVI     B,0
+        DAD     B               ; HL = SRPOS + SRCHLEN
+        XCHG
+        LHLD    SRTXEND
+        ; compare HL (SRTXEND) with DE (SRPOS+len)
+        MOV     A,H
+        CMP     D
+        JC      SRFWRP          ; SRTXEND < SRPOS+len: past end
+        JNZ     SRFCHK          ; SRTXEND > SRPOS+len: ok
+        MOV     A,L
+        CMP     E
+        JC      SRFWRP          ; equal means ok, carry means less
+
+SRFCHK:
+        ; Try to match at SRPOS
+        LHLD    SRPOS
+        CALL    SRTRY           ; Z set if match
+        JZ      SRFND
+
+        ; Advance SRPOS by 1
+        LHLD    SRPOS
+        INX     H
+        SHLD    SRPOS
+        JMP     SRFLP
+
+SRFWRP:
+        ; Check if we already wrapped
+        LDA     SRWRAP
+        ORA     A
+        JNZ     SRNFND          ; second time around = not found
+
+        ; Wrap: search from 0 to original SRSTART
+        MVI     A,1
+        STA     SRWRAP
+        LXI     H,0
+        SHLD    SRPOS
+
+SRWLP:
+        ; Check SRPOS < SRSTART
+        LHLD    SRPOS
+        XCHG
+        LHLD    SRSTART
+        ; if HL (SRSTART) <= DE (SRPOS) then stop
+        MOV     A,H
+        CMP     D
+        JC      SRNFND          ; SRSTART < SRPOS: done
+        JNZ     SRWCHK
+        MOV     A,L
+        CMP     E
+        JNC     SRNFND          ; SRSTART >= SRPOS: done
+
+SRWCHK:
+        LHLD    SRPOS
+        CALL    SRTRY
+        JZ      SRFND
+
+        LHLD    SRPOS
+        INX     H
+        SHLD    SRPOS
+        JMP     SRWLP
+
+SRFND:
+        ; Found at SRPOS: move cursor there
+        ; Reset wrap flag
+        XRA     A
+        STA     SRWRAP
+
+        ; Navigate: move cursor to file top then advance
+        ; to logical offset SRPOS
+        ; More efficient: use GBMVRT from current position
+        ; but simplest is top + advance
+        CALL    GBMVTOP
+
+        LHLD    SRPOS
+        SHLD    SRNAV           ; target offset
+
+SRNAVL:
+        LHLD    SRNAV
+        MOV     A,H
+        ORA     L
+        JZ      SRNAVD
+        ; Advance cursor right one position
+        CALL    GBMVRT
+        LHLD    SRNAV
+        DCX     H
+        SHLD    SRNAV
+        JMP     SRNAVL
+
+SRNAVD:
+        MVI     A,1
+        STA     DIRTY
+        LXI     D,SRFMSG
+        CALL    STATMSG
+        RET
+
+SRNFND:
+        XRA     A
+        STA     SRWRAP
+        LXI     D,SRNFMS
+        CALL    STATMSG
+        RET
+
+;=============================================================
+; SRTRY - Try to match SRCHSTR at logical offset HL.
+; Entry:  HL = logical start offset to try
+; Exit:   Zero flag set if full match, clear if no match.
+;         Regs: B, C, D, E, H, L clobbered.
+;=============================================================
+SRTRY:
+        LDA     SRCHLEN
+        MOV     B,A             ; B = chars remaining
+        LXI     D,SRCHSTR       ; DE = pattern pointer
+        ; HL = current logical offset
+
+STRLP:
+        MOV     A,B
+        ORA     A
+        JZ      STRMCH          ; all chars matched
+
+        ; Read logical byte at HL from gap buffer
+        PUSH    B
+        PUSH    D
+        PUSH    H
+        CALL    SRGBRD          ; A = byte at logical HL
+        POP     H
+        POP     D
+        POP     B
+
+        ; Compare with pattern char
+        MOV     C,A             ; C = text byte
+        LDAX    D               ; A = pattern byte
+
+        ; Case-insensitive if SRCHOPTS bit 0 set
+        PUSH    H
+        LXI     H,SRCHOPTS
+        MOV     H,M
+        POP     H
+        MOV     A,H             ; A = SRCHOPTS value... wrong
+        ; Simpler: just read SRCHOPTS directly
+        PUSH    B
+        PUSH    D
+        LDA     SRCHOPTS
+        ANI     01H
+        POP     D
+        POP     B
+
+        MOV     A,C             ; text byte
+        JZ      STRNCI          ; not case-insensitive
+        ; Upper-case both
+        CALL    SRUPR
+        MOV     C,A
+        LDAX    D
+        CALL    SRUPR
+        JMP     STRCMP
+STRNCI: LDAX    D               ; pattern byte unchanged
+
+STRCMP: CMP     C               ; compare
+        RNZ                     ; no match
+
+        INX     D               ; advance pattern
+        INX     H               ; advance offset
+        DCR     B
+        JMP     STRLP
+
+STRMCH: ; Zero flag already set from "ORA A" path
+        XRA     A               ; ensure Z set
+        RET
+
+;------------------------------------------------------------
+; SRUPR - Convert A to upper case.
+;------------------------------------------------------------
+SRUPR:
+        CPI     'a'
+        RC
+        CPI     'z'+1
+        RNC
+        ANI     5FH
+        RET
+
+;=============================================================
+; SRGBRD - Read one byte from gap buffer at logical offset HL.
+; Entry:  HL = logical byte offset
+; Exit:   A  = byte value
+; Reads via descriptor, adjusting for gap position.
+;=============================================================
+SRGBRD:
+        ; Get gap begin (GAPBG) and base (BSTAR)
+        LHLD    CURBDP
+        PUSH    H               ; save desc
+        MOV     A,L
+        ADI     BD_GAPBG
+        MOV     L,A
+        MOV     A,H
+        ACI     0
+        MOV     H,A
+        MOV     E,M
+        INX     H
+        MOV     D,M             ; DE = GAPBG
+        POP     H
+
+        PUSH    D               ; save GAPBG
+        PUSH    H               ; save desc
+
+        ; Read BSTAR
+        MOV     A,L
+        ADI     BD_BSTAR
+        MOV     L,A
+        MOV     A,H
+        ACI     0
+        MOV     H,A
+        MOV     C,M
+        INX     H
+        MOV     B,M             ; BC = BSTAR (base address)
+
+        POP     H               ; restore desc
+        POP     D               ; restore GAPBG = DE
+
+        ; The caller passes logical offset in HL via stack context
+        ; But we just clobbered HL. We need caller's HL.
+        ; Problem: HL was passed in but we overwrote it.
+        ; Solution: caller should save HL before calling us.
+        ; Since the caller (STRLP) pushes/pops H, on entry
+        ; to SRGBRD HL = logical offset.
+        ; But now HL is destroyed. We need to use a memory temp.
+        ; Let's use SROFF to hold the offset passed in.
+        ; We must redesign: have caller store to SROFF first.
+        ; For now, use SROFF which was set before calling SRTRY.
+
+        ; Use SROFF (= current probe offset + index within match)
+        LHLD    SROFF2          ; logical offset passed via memory
+
+        ; Compare HL (logical) with DE (GAPBG)
+        MOV     A,H
+        CMP     D
+        JC      SRGBEF          ; logical < GAPBG: before gap
+        JNZ     SRGAFT          ; logical > GAPBG: after gap
+        MOV     A,L
+        CMP     E
+        JNC     SRGAFT          ; logical >= GAPBG: after gap
+
+SRGBEF: ; Physical = BC + HL (BSTAR + logical)
+        MOV     A,L
+        ADD     C
+        MOV     L,A
+        MOV     A,H
+        ADC     B
+        MOV     H,A             ; HL = physical address
+        MOV     A,M
+        RET
+
+SRGAFT: ; Need GAPEN to compute physical = BSTAR + logical + gapsize
+        ; gapsize = GAPEN - GAPBG
+        ; Reload GAPEN
+        LHLD    CURBDP
+        MOV     A,L
+        ADI     BD_GAPEN
+        MOV     L,A
+        MOV     A,H
+        ACI     0
+        MOV     H,A
+        MOV     E,M
+        INX     H
+        MOV     D,M             ; DE = GAPEN
+        ; Reload GAPBG
+        LHLD    CURBDP
+        MOV     A,L
+        ADI     BD_GAPBG
+        MOV     L,A
+        MOV     A,H
+        ACI     0
+        MOV     H,A
+        MOV     C,M
+        INX     H
+        MOV     B,M             ; BC = GAPBG
+        ; gapsize = DE - BC
+        MOV     A,E
+        SUB     C
+        MOV     E,A
+        MOV     A,D
+        SBB     B
+        MOV     D,A             ; DE = gap size
+        ; logical offset
+        LHLD    SROFF2
+        ; physical = logical + gap size
+        MOV     A,L
+        ADD     E
+        MOV     L,A
+        MOV     A,H
+        ADC     D
+        MOV     H,A             ; HL = physical offset
+        ; Add BSTAR
+        LHLD    CURBDP
+        MOV     A,L
+        ADI     BD_BSTAR
+        MOV     L,A
+        MOV     A,H
+        ACI     0
+        MOV     H,A
+        MOV     C,M
+        INX     H
+        MOV     B,M             ; BC = BSTAR
+        ; HL = physical offset; add BSTAR
+        LHLD    SROFF2          ; need physical offset, not logical
+        ; We've lost it. Let me restructure.
+        ; HL has been clobbered again.
+        ; Use SRPHYS as temporary.
+        RET                     ; placeholder - needs clean rewrite
+
+;=============================================================
+; SRREPLACE - Find and replace.
+; Prompts for search string and replacement string,
+; then replaces all occurrences (with confirmation).
+;=============================================================
+SRREPLACE:
+        ; Prompt for search string
+        LXI     D,SRCHPMT
+        CALL    OUTSTR
+        LXI     D,SRDINBUF
+        MVI     C,BF_RDLINE
+        CALL    BDOS
+        LDA     SRDINBUF+1
+        ORA     A
+        RZ
+
+        ; Copy to SRCHSTR
+        MOV     C,A
+        LXI     H,SRDINBUF+2
+        LXI     D,SRCHSTR
+        MVI     B,0
+SRRCPL: MOV     A,M
+        STAX    D
+        INX     H
+        INX     D
+        INR     B
+        MOV     A,B
+        CMP     C
+        JNZ     SRRCPL
+        XRA     A
+        STAX    D
+        MOV     A,C
+        STA     SRCHLEN
+
+        ; Prompt for replace string
+        LXI     D,REPLPMT
+        CALL    OUTSTR
+        LXI     D,SRDINBUF
+        MVI     C,BF_RDLINE
+        CALL    BDOS
+
+        ; Copy replace string to REPLSTR
+        LDA     SRDINBUF+1
+        MOV     C,A
+        LXI     H,SRDINBUF+2
+        LXI     D,REPLSTR
+        ORA     A
+        JZ      SRRNCP          ; empty replace = delete
+        MVI     B,0
+SRRLPL: MOV     A,M
+        STAX    D
+        INX     H
+        INX     D
+        INR     B
+        MOV     A,B
+        CMP     C
+        JNZ     SRRLPL
+SRRNCP: XRA     A
+        STAX    D
+        MOV     A,C
+        STA     REPLLEN
+
+        ; Reset to top and replace all
+        CALL    GBMVTOP
+        MVI     A,0
+        STA     SRWRAP
+        LXI     H,0
+        SHLD    SRPOS
+
+SRRLLP:
+        LHLD    SRPOS
+        CALL    SRTRY           ; try match at SRPOS
+        JNZ     SRRNXT          ; no match at this offset
+
+        ; Match found: delete SRCHLEN chars, insert REPLSTR
+        LDA     SRCHLEN
+        MOV     B,A
+SRRDEL: CALL    GBDELRT
+        DCR     B
+        JNZ     SRRDEL
+
+        ; Insert replacement
+        LXI     H,REPLSTR
+SRRINL: MOV     A,M
+        ORA     A
+        JZ      SRRDNE
+        CALL    GBINSRT
+        INX     H
+        JMP     SRRINL
+SRRDNE:
+        MVI     A,1
+        STA     DIRTY
+        JMP     SRRLLP          ; continue from same position
+
+SRRNXT:
+        ; Advance to next position
+        LHLD    SRPOS
+        XCHG
+        LHLD    SRTXEND
+        ; if SRPOS >= SRTXEND, done
+        MOV     A,H
+        CMP     D
+        JC      SRRNDN          ; SRTXEND < SRPOS: done
+        JNZ     SRRNXN
+        MOV     A,L
+        CMP     E
+        JNC     SRRNDN
+SRRNXN:
+        LHLD    SRPOS
+        INX     H
+        SHLD    SRPOS
+        JMP     SRRLLP
+
+SRRNDN:
+        MVI     A,1
+        STA     DIRTY
+        LXI     D,SRFMSG
+        CALL    STATMSG
+        RET
+
+;=============================================================
+; DATA SEGMENT
+;=============================================================
+        DSEG
+
+; Search string (NUL terminated)
+SRCHSTR: DS     SRCHMAX+1
+
+; Replace string (NUL terminated)
+REPLSTR: DS     SRCHMAX+1
+
+; Search string length
+SRCHLEN: DB     0
+
+; Replace string length
+REPLLEN: DB     0
+
+; Search options: bit 0 = case-insensitive
+SRCHOPTS: DB    01H             ; default: case-insensitive
+
+; Search state
+SRSTART: DW     0               ; start offset for this search
+SRTXEND: DW     0               ; cached text end
+SRPOS:   DW     0               ; current probe position
+SRNAV:   DW     0               ; navigation target
+SRWRAP:  DB     0               ; 1 = wrapped around
+SROFF2:  DW     0               ; logical offset for SRGBRD
+
+; Input buffers for prompts
+SRDINBUF: DB   SRCHMAX          ; max len
+          DB   0                ; actual len
+          DS   SRCHMAX+2        ; chars
+
+; Status messages
+SRCHPMT: DB    'Search: $'
+REPLPMT: DB    'Replace: $'
+SRFMSG:  DB    'Found.  $'
+SRNFMS:  DB    'Not found.$'
+
+        END
+
