@@ -747,14 +747,66 @@ GLEDN:  RET
 ; Exit:   Cursor at offset 0; all regs clobbered
 ;=============================================================
 GBMVTOP:
-        ; Move left until at beginning of buffer
-GVTLP:  CALL    GBGAPBG
+        ; Bulk move: copy entire R1 to end of gap (backward copy)
+        CALL    GBGAPBG
         MOV     A,H
         ORA     L
-        JZ      GVTDN
-        CALL    GBMVLT
-        JMP     GVTLP
-GVTDN:
+        JZ      GVTPOS          ; GAPBG=0, already at top
+        ; N = GAPBG (entire pre-gap region)
+        SHLD    GPGCNT
+        ; Save base address
+        CALL    GBBASE
+        XCHG
+        SHLD    GPGBAS
+        ; Dest end: base + GAPEN - 1
+        CALL    GBGAPEN
+        XCHG
+        LHLD    GPGBAS
+        DAD     D
+        DCX     H               ; HL = dest end
+        PUSH    H
+        ; Src end: base + GAPBG - 1
+        CALL    GBGAPBG
+        XCHG
+        LHLD    GPGBAS
+        DAD     D
+        DCX     H               ; HL = src end
+        PUSH    H
+        ; Load BC = N
+        LHLD    GPGCNT
+        MOV     B,H
+        MOV     C,L
+        POP     H               ; HL = src end
+        POP     D               ; DE = dest end
+        ; Copy backward (dest > src, safe)
+GVTCLP: MOV     A,M
+        STAX    D
+        DCX     H
+        DCX     D
+        DCX     B
+        MOV     A,B
+        ORA     C
+        JNZ     GVTCLP
+        ; --- Update descriptor fields ---
+        LHLD    GPGCNT
+        MOV     B,H
+        MOV     C,L             ; BC = N
+        ; GAPEN -= N (gap slides left)
+        CALL    GBGAPEN
+        MOV     A,L
+        SUB     C
+        MOV     L,A
+        MOV     A,H
+        SBB     B
+        MOV     H,A
+        CALL    GBSETGAPEN
+        ; GAPBG = 0
+        LXI     H,0
+        CALL    GBSETGAPBG
+        ; CSOFF = 0
+        LXI     H,0
+        CALL    GBSETCSOFF
+GVTPOS: ; Set cursor to top of file
         LXI     H,0
         CALL    GBSETTOPLN
         LXI     H,0
@@ -765,23 +817,104 @@ GVTDN:
 
 ;=============================================================
 ; GBMVEND - Move cursor to end of file.
+; Uses bulk gap move: copies entire R2 region forward in one
+; tight loop instead of calling GBMVRT per character.
 ; Entry:  (none)
 ; Exit:   Cursor at last char; all regs clobbered
 ;=============================================================
 GBMVEND:
-GVELPG: CALL    GBGAPEN         ; HL = GAPEN
-        PUSH    H               ; save GAPEN (GBBSIZ clobbers HL)
+        ; Compute N = BSIZE - GAPEN (entire R2 region)
+        CALL    GBGAPEN
+        PUSH    H
         CALL    GBBSIZ          ; DE = BSIZE
-        POP     H               ; HL = GAPEN restored
-        ; Check GAPEN >= BSIZE (at end of buffer)
-        MOV     A,L
-        SUB     E
+        POP     H               ; HL = GAPEN
+        MOV     A,E
+        SUB     L
+        MOV     C,A
+        MOV     A,D
+        SBB     H
+        MOV     B,A             ; BC = N = BSIZE - GAPEN
+        MOV     A,B
+        ORA     C
+        JZ      GVEPOS          ; N=0, already at end
+        MOV     H,B
+        MOV     L,C
+        SHLD    GPGCNT
+        ; Save base address
+        CALL    GBBASE
+        XCHG
+        SHLD    GPGBAS
+        ; Dest: base + GAPBG
+        CALL    GBGAPBG
+        XCHG
+        LHLD    GPGBAS
+        DAD     D               ; HL = dest
+        PUSH    H
+        ; Src: base + GAPEN
+        CALL    GBGAPEN
+        XCHG
+        LHLD    GPGBAS
+        DAD     D               ; HL = src
+        PUSH    H
+        ; Load BC = N
+        LHLD    GPGCNT
+        MOV     B,H
+        MOV     C,L
+        POP     H               ; HL = src
+        POP     D               ; DE = dest
+        ; Copy forward (dest < src, safe)
+GVECLP: MOV     A,M
+        STAX    D
+        INX     H
+        INX     D
+        DCX     B
+        MOV     A,B
+        ORA     C
+        JNZ     GVECLP
+        ; --- Update descriptor fields ---
+        LHLD    GPGCNT
+        MOV     B,H
+        MOV     C,L             ; BC = N
+        ; GAPBG += N
+        CALL    GBGAPBG
+        DAD     B
+        CALL    GBSETGAPBG
+        ; GAPEN += N (= BSIZE)
+        CALL    GBGAPEN
+        DAD     B
+        CALL    GBSETGAPEN
+        ; CSOFF += N
+        CALL    GBCSOFF
+        DAD     B
+        CALL    GBSETCSOFF
+GVEPOS: ; Compute TOPLN and CSROW from total line count
+        CALL    GBCNTLN         ; HL = total lines
+        ; Is total_lines <= EDITROW?
         MOV     A,H
-        SBB     D
-        JNC     GVELP2          ; GAPEN >= BSIZE, at end
-        CALL    GBMVRT
-        JMP     GVELPG
-GVELP2: RET
+        ORA     A
+        JNZ     GVESCR          ; > 255 lines, must scroll
+        MOV     A,L
+        CPI     EDITROW+1
+        JNC     GVESCR          ; > EDITROW lines
+        ; total_lines <= EDITROW: TOPLN=0, CSROW=lines-1
+        DCX     H
+        CALL    GBSETCSROW
+        LXI     H,0
+        CALL    GBSETTOPLN
+        JMP     GVECOL
+GVESCR: ; total_lines > EDITROW: TOPLN = lines - EDITROW
+        MOV     A,L
+        SUI     EDITROW
+        MOV     L,A
+        MOV     A,H
+        SBI     0
+        MOV     H,A
+        CALL    GBSETTOPLN
+        LXI     H,EDITROW-1
+        CALL    GBSETCSROW
+GVECOL: CALL    GBCURLNL
+        CALL    GBSETCSCOL
+        RET
 
 ;=============================================================
 ; GBPGUP - Scroll up one page (EDITROW lines).

@@ -495,10 +495,10 @@ KBDTBL:
         DB      0               ; 20 ^T  - unused
         DB      0               ; 21 ^U  - unused
         DB      ACT_TOGIN       ; 22 ^V  - toggle insert
-        DB      0               ; 23 ^W  - unused
+        DB      ACT_SCRUP       ; 23 ^W  - scroll up
         DB      ACT_CURDN       ; 24 ^X  - cursor down
         DB      ACT_DELLN       ; 25 ^Y  - delete line
-        DB      0               ; 26 ^Z  - unused
+        DB      ACT_SCRDN       ; 26 ^Z  - scroll down
         DB      ACT_MENU        ; 27 ESC - menu
         DB      0               ; 28 FS  - unused
         DB      0               ; 29 GS  - unused

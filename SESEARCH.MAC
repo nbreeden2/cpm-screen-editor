@@ -507,9 +507,11 @@ SRUPR:
 ; Reads via descriptor, adjusting for gap position.
 ;=============================================================
 SRGBRD:
-        ; Get gap begin (GAPBG) and base (BSTAR)
+        ; Save logical offset (HL) before we clobber it
+        SHLD    SROFF2
+
+        ; Read GAPBG from descriptor
         LHLD    CURBDP
-        PUSH    H               ; save desc
         MOV     A,L
         ADI     BD_GAPBG
         MOV     L,A
@@ -519,99 +521,18 @@ SRGBRD:
         MOV     E,M
         INX     H
         MOV     D,M             ; DE = GAPBG
-        POP     H
 
-        PUSH    D               ; save GAPBG
-        PUSH    H               ; save desc
-
-        ; Read BSTAR
-        MOV     A,L
-        ADI     BD_BSTAR
-        MOV     L,A
-        MOV     A,H
-        ACI     0
-        MOV     H,A
-        MOV     C,M
-        INX     H
-        MOV     B,M             ; BC = BSTAR (base address)
-
-        POP     H               ; restore desc
-        POP     D               ; restore GAPBG = DE
-
-        ; The caller passes logical offset in HL via stack context
-        ; But we just clobbered HL. We need caller's HL.
-        ; Problem: HL was passed in but we overwrote it.
-        ; Solution: caller should save HL before calling us.
-        ; Since the caller (STRLP) pushes/pops H, on entry
-        ; to SRGBRD HL = logical offset.
-        ; But now HL is destroyed. We need to use a memory temp.
-        ; Let's use SROFF to hold the offset passed in.
-        ; We must redesign: have caller store to SROFF first.
-        ; For now, use SROFF which was set before calling SRTRY.
-
-        ; Use SROFF (= current probe offset + index within match)
-        LHLD    SROFF2          ; logical offset passed via memory
-
-        ; Compare HL (logical) with DE (GAPBG)
+        ; Compare logical offset with GAPBG
+        LHLD    SROFF2          ; HL = logical offset
         MOV     A,H
         CMP     D
-        JC      SRGBEF          ; logical < GAPBG: before gap
-        JNZ     SRGAFT          ; logical > GAPBG: after gap
+        JC      SRGBEF          ; high byte less: before gap
+        JNZ     SRGAFT          ; high byte greater: after gap
         MOV     A,L
         CMP     E
         JNC     SRGAFT          ; logical >= GAPBG: after gap
 
-SRGBEF: ; Physical = BC + HL (BSTAR + logical)
-        MOV     A,L
-        ADD     C
-        MOV     L,A
-        MOV     A,H
-        ADC     B
-        MOV     H,A             ; HL = physical address
-        MOV     A,M
-        RET
-
-SRGAFT: ; Need GAPEN to compute physical = BSTAR + logical + gapsize
-        ; gapsize = GAPEN - GAPBG
-        ; Reload GAPEN
-        LHLD    CURBDP
-        MOV     A,L
-        ADI     BD_GAPEN
-        MOV     L,A
-        MOV     A,H
-        ACI     0
-        MOV     H,A
-        MOV     E,M
-        INX     H
-        MOV     D,M             ; DE = GAPEN
-        ; Reload GAPBG
-        LHLD    CURBDP
-        MOV     A,L
-        ADI     BD_GAPBG
-        MOV     L,A
-        MOV     A,H
-        ACI     0
-        MOV     H,A
-        MOV     C,M
-        INX     H
-        MOV     B,M             ; BC = GAPBG
-        ; gapsize = DE - BC
-        MOV     A,E
-        SUB     C
-        MOV     E,A
-        MOV     A,D
-        SBB     B
-        MOV     D,A             ; DE = gap size
-        ; logical offset
-        LHLD    SROFF2
-        ; physical = logical + gap size
-        MOV     A,L
-        ADD     E
-        MOV     L,A
-        MOV     A,H
-        ADC     D
-        MOV     H,A             ; HL = physical offset
-        ; Add BSTAR
+SRGBEF: ; Before gap: physical addr = BSTAR + logical
         LHLD    CURBDP
         MOV     A,L
         ADI     BD_BSTAR
@@ -622,12 +543,50 @@ SRGAFT: ; Need GAPEN to compute physical = BSTAR + logical + gapsize
         MOV     C,M
         INX     H
         MOV     B,M             ; BC = BSTAR
-        ; HL = physical offset; add BSTAR
-        LHLD    SROFF2          ; need physical offset, not logical
-        ; We've lost it. Let me restructure.
-        ; HL has been clobbered again.
-        ; Use SRPHYS as temporary.
-        RET                     ; placeholder - needs clean rewrite
+        LHLD    SROFF2          ; HL = logical offset
+        DAD     B               ; HL = BSTAR + logical
+        MOV     A,M             ; read byte
+        RET
+
+SRGAFT: ; After gap: physical addr = BSTAR + logical + (GAPEN - GAPBG)
+        ; DE still = GAPBG from above
+        PUSH    D               ; save GAPBG on stack
+        ; Read GAPEN
+        LHLD    CURBDP
+        MOV     A,L
+        ADI     BD_GAPEN
+        MOV     L,A
+        MOV     A,H
+        ACI     0
+        MOV     H,A
+        MOV     E,M
+        INX     H
+        MOV     D,M             ; DE = GAPEN
+        ; gapsize = GAPEN(DE) - GAPBG(stack)
+        POP     H               ; HL = GAPBG
+        MOV     A,E
+        SUB     L
+        MOV     C,A
+        MOV     A,D
+        SBB     H
+        MOV     B,A             ; BC = gap size
+        ; Read BSTAR
+        LHLD    CURBDP
+        MOV     A,L
+        ADI     BD_BSTAR
+        MOV     L,A
+        MOV     A,H
+        ACI     0
+        MOV     H,A
+        MOV     E,M
+        INX     H
+        MOV     D,M             ; DE = BSTAR
+        ; addr = BSTAR + logical + gapsize
+        LHLD    SROFF2          ; HL = logical offset
+        DAD     B               ; HL = logical + gapsize
+        DAD     D               ; HL = logical + gapsize + BSTAR
+        MOV     A,M             ; read byte
+        RET
 
 ;=============================================================
 ; SRREPLACE - Find and replace.
