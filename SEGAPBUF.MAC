@@ -200,6 +200,7 @@ SRCHMAX EQU     64          ; max find string length
         PUBLIC  GBINSRT         ; insert char at cursor
         PUBLIC  GBDLFT         ; delete char left (BS)
         PUBLIC  GBDELRT         ; delete char right
+        PUBLIC  GBTMP           ; last deleted/inserted char
         PUBLIC  GBMVUP          ; cursor up one line
         PUBLIC  GBMVDN          ; cursor down one line
         PUBLIC  GBMVLT          ; cursor left one char

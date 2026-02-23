@@ -212,6 +212,7 @@ SRCHMAX EQU     64          ; max find string length
         EXTRN   GBINSRT         ; insert char at gap
         EXTRN   GBDLFT         ; delete left (BS)
         EXTRN   GBDELRT         ; delete right (Del)
+        EXTRN   GBTMP           ; last deleted/inserted char
         EXTRN   GBMVUP          ; cursor up one line
         EXTRN   GBMVDN          ; cursor down one line
         EXTRN   GBMVLT          ; cursor left one char
@@ -398,12 +399,28 @@ DO_FEN: CALL    GBMVEND
         STA     DIRTY
         JMP     MAINLP
 DO_DLF: CALL    GBDLFT
+        ORA     A
+        JNZ     MAINLP          ; at BOF, nothing deleted
+        LDA     GBTMP
+        CPI     LF
+        JZ      DODLFL          ; LF deleted: lines merged
         MVI     A,1
-        STA     DIRTY
+        STA     DRTLINE         ; same line: redraw current only
+        JMP     MAINLP
+DODLFL: MVI     A,1
+        STA     DIRTY           ; full redraw needed
         JMP     MAINLP
 DO_DRT: CALL    GBDELRT
+        ORA     A
+        JNZ     MAINLP          ; at EOF, nothing deleted
+        LDA     GBTMP
+        CPI     LF
+        JZ      DODRTL          ; LF deleted: lines merged
         MVI     A,1
-        STA     DIRTY
+        STA     DRTLINE         ; same line: redraw current only
+        JMP     MAINLP
+DODRTL: MVI     A,1
+        STA     DIRTY           ; full redraw needed
         JMP     MAINLP
 DO_DWD: CALL    GBWRDNX         ; move to next word
         CALL    GBDLFT         ; then delete back
