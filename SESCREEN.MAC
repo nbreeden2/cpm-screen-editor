@@ -282,6 +282,92 @@ SCRDRAW:
         XRA     A               ; not found
 SDRNF:  STA     SDFND           ; 1=lines exist, 0=past end
 
+        ; --- Compute highlight range if marking ---
+        ; Marking mode = MRKEN==FFFF && MRKBG!=FFFF
+        LHLD    CURBDP
+        MVI     A,BD_MRKEN
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A
+        MOV     A,M
+        INX     H
+        ANA     M               ; A = low AND high
+        INR     A               ; Z if word was FFFF
+        JNZ     SDHLNO          ; MRKEN != FFFF -> not marking
+        ; MRKEN == FFFF; check MRKBG
+        LHLD    CURBDP
+        MVI     A,BD_MRKBG
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A
+        MOV     A,M
+        INX     H
+        ANA     M
+        INR     A
+        JZ      SDHLNO          ; MRKBG == FFFF -> no mark
+        ; Read MRKBG into DE
+        LHLD    CURBDP
+        MVI     A,BD_MRKBG
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A
+        MOV     E,M
+        INX     H
+        MOV     D,M             ; DE = MRKBG
+        ; Read CSOFF into HL
+        LHLD    CURBDP
+        MVI     A,BD_CSOFF
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A
+        MOV     C,M
+        INX     H
+        MOV     B,M
+        MOV     H,B
+        MOV     L,C             ; HL = CSOFF
+        ; min/max: SDHLBG = min(HL,DE), SDHLEN = max(HL,DE)
+        MOV     A,H
+        CMP     D
+        JC      SDHLCS          ; CSOFF < MRKBG
+        JNZ     SDHLMK          ; CSOFF > MRKBG
+        MOV     A,L
+        CMP     E
+        JC      SDHLCS          ; CSOFF < MRKBG
+SDHLMK: ; MRKBG <= CSOFF: SDHLBG=MRKBG, SDHLEN=CSOFF
+        XCHG
+        SHLD    SDHLBG          ; MRKBG (was DE, now HL)
+        XCHG
+        SHLD    SDHLEN          ; CSOFF (back in HL)
+        JMP     SDHLOK
+SDHLCS: ; CSOFF < MRKBG: SDHLBG=CSOFF, SDHLEN=MRKBG
+        SHLD    SDHLBG          ; CSOFF (in HL)
+        XCHG
+        SHLD    SDHLEN          ; MRKBG (was DE, now HL)
+SDHLOK: ; Check for zero-length selection
+        LHLD    SDHLBG
+        XCHG
+        LHLD    SDHLEN
+        MOV     A,H
+        CMP     D
+        JNZ     SDHLYS          ; different -> nonzero
+        MOV     A,L
+        CMP     E
+        JZ      SDHLNO          ; equal -> zero-length, no highlight
+SDHLYS: MVI     A,1
+        STA     SDHLMD
+        JMP     SDHLDN
+SDHLNO: XRA     A
+        STA     SDHLMD
+SDHLDN:
+
         MVI     A,0
         STA     SDROW           ; row counter
 
@@ -316,6 +402,7 @@ SDRWLP: LDA     SDROW
 
         ; Read line text via GBRDLNO
         LHLD    SDLOFF
+        SHLD    SDLNST          ; save this line's start for highlight
         CALL    GBRDLNO         ; HL=next offset, DE=text, NZ=ok
         SHLD    SDLOFF          ; save next line offset
         JNZ     SDTEXT          ; line exists, draw it
@@ -326,7 +413,70 @@ SDRWLP: LDA     SDROW
         JMP     SDCLR
 
 SDTEXT: ; Output text from DE (GGLBUF), NUL-terminated
+        PUSH    D               ; save text pointer across highlight calc
+        ; --- Per-line highlight computation ---
+        LDA     SDHLMD
+        ORA     A
+        JZ      SDHNHL          ; no highlight mode active
+        ; Compute SDHLS = max(0, SDHLBG - SDLNST) clamped 8-bit
+        LHLD    SDHLBG
+        XCHG                    ; DE = SDHLBG
+        LHLD    SDLNST          ; HL = line start
+        MOV     A,E
+        SUB     L
+        MOV     C,A
+        MOV     A,D
+        SBB     H
+        MOV     B,A             ; BC = SDHLBG - SDLNST (signed)
+        JNC     SDHLS1          ; no borrow -> positive
+        MVI     A,0             ; negative -> clamp to 0
+        STA     SDHLS
+        JMP     SDHLEC
+SDHLS1: MOV     A,B             ; high byte
+        ORA     A
+        JNZ     SDHNHL          ; > 255 -> past this line
+        MOV     A,C
+        CPI     TXTCOLS
+        JNC     SDHNHL          ; >= TXTCOLS -> past visible
+        STA     SDHLS
+SDHLEC: ; Compute SDHLE = max(0, SDHLEN - SDLNST) clamped 8-bit
+        LHLD    SDHLEN
+        XCHG                    ; DE = SDHLEN
+        LHLD    SDLNST          ; HL = line start
+        MOV     A,E
+        SUB     L
+        MOV     C,A
+        MOV     A,D
+        SBB     H
+        MOV     B,A             ; BC = SDHLEN - SDLNST
+        JNC     SDHLE1          ; positive
+        MVI     A,0             ; negative -> 0 (no highlight)
+        STA     SDHLE
+        JMP     SDHLVL
+SDHLE1: MOV     A,B
+        ORA     A
+        JNZ     SDHEFF          ; > 255 -> clamp to FF
+        MOV     A,C
+        JMP     SDHLE2
+SDHEFF: MVI     A,0FFH          ; clamp (end beyond line)
+SDHLE2: STA     SDHLE
+SDHLVL: ; Validate: start must be < end, start < TXTCOLS
+        LDA     SDHLE
+        MOV     B,A
+        LDA     SDHLS
+        CMP     B
+        JNC     SDHNHL          ; start >= end -> no highlight
+        JMP     SDHSET
+SDHNHL: ; No highlight on this line
+        MVI     A,0FFH
+        STA     SDHLS
+        STA     SDHLE
+SDHSET: POP     D               ; restore text pointer
+        XRA     A
+        STA     SDHLON          ; not in reverse yet
+        STA     SDBYTI          ; byte index = 0
         MVI     C,0             ; C = column counter
+        ; --- Text output loop ---
 SDTXLP: MOV     A,C
         CPI     TXTCOLS
         JNC     SDCLR           ; hit column limit
@@ -337,6 +487,18 @@ SDTXLP: MOV     A,C
         JZ      SDCLR
         CPI     LF
         JZ      SDCLR
+        ; --- Highlight transition check ---
+        STA     SDTMPB          ; save text byte
+        LDA     SDBYTI
+        MOV     B,A
+        LDA     SDHLS
+        CMP     B
+        CZ      SDRVON          ; byte index == start -> reverse on
+        LDA     SDHLE
+        CMP     B
+        CZ      SDRVOF          ; byte index == end -> reverse off
+        ; --- Output character ---
+        LDA     SDTMPB          ; reload text byte
         CPI     TAB
         JZ      SDTAB
         PUSH    D               ; protect text ptr (OUTCHAR clobbers E)
@@ -346,6 +508,9 @@ SDTXLP: MOV     A,C
         POP     D
         INX     D
         INR     C
+        LDA     SDBYTI
+        INR     A
+        STA     SDBYTI
         JMP     SDTXLP
 
 SDTAB:  ; Expand tab to next tab stop
@@ -368,9 +533,20 @@ SDTBSP: MVI     A,' '
         DCR     B
         JNZ     SDTBSP
         INX     D               ; skip TAB byte
+        LDA     SDBYTI
+        INR     A
+        STA     SDBYTI
         JMP     SDTXLP
 
-SDCLR:  ; Clear rest of line
+SDCLR:  ; Reset reverse video if active before clearing
+        LDA     SDHLON
+        ORA     A
+        JZ      SDCLR2          ; not in reverse
+        LXI     D,SGRRES
+        CALL    OUTSTR
+        XRA     A
+        STA     SDHLON
+SDCLR2: ; Clear rest of line
         LXI     D,CLREOL
         CALL    OUTSTR
 
@@ -383,6 +559,34 @@ SDCLR:  ; Clear rest of line
 SDRWDN: CALL    RULRDRAW        ; restore tab ruler (row 2)
         CALL    SEPRDRAW        ; restore separator (row 23)
         CALL    STATCLR         ; clear status bar (row 24)
+        RET
+
+;-------------------------------------------------------------
+; SDRVON - Turn on reverse video for highlight.
+; Called via CZ from text loop. Preserves B,C,D,E.
+;-------------------------------------------------------------
+SDRVON: PUSH    D
+        PUSH    B
+        LXI     D,SGRREV
+        CALL    OUTSTR
+        POP     B
+        POP     D
+        MVI     A,1
+        STA     SDHLON
+        RET
+
+;-------------------------------------------------------------
+; SDRVOF - Turn off reverse video for highlight.
+; Called via CZ from text loop. Preserves B,C,D,E.
+;-------------------------------------------------------------
+SDRVOF: PUSH    D
+        PUSH    B
+        LXI     D,SGRRES
+        CALL    OUTSTR
+        POP     B
+        POP     D
+        XRA     A
+        STA     SDHLON
         RET
 
 ;=============================================================
@@ -993,6 +1197,16 @@ SDTPLN: DW      0               ; saved TOPLN for gutter numbers
 SDLOFF: DW      0               ; current logical scan offset
 SDFND:  DB      0               ; 1=lines exist, 0=past end
 SDROW:  DB      0               ; current screen row (0-based)
+; Highlight working variables
+SDHLBG: DW      0               ; highlight start (logical offset)
+SDHLEN: DW      0               ; highlight end (logical offset)
+SDHLMD: DB      0               ; highlight mode (0=off, 1=on)
+SDLNST: DW      0               ; current line start offset
+SDHLS:  DB      0               ; per-line: start byte index (FF=none)
+SDHLE:  DB      0               ; per-line: end byte index (FF=none)
+SDHLON: DB      0               ; currently in reverse video
+SDBYTI: DB      0               ; byte index within line
+SDTMPB: DB      0               ; saved text byte across SGR calls
         CSEG
 
         END

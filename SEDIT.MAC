@@ -292,6 +292,36 @@ START:
 ; MAINLP - Main edit loop
 ;------------------------------------------------------------
 MAINLP:
+        ; Force full redraw if marking in progress (highlight tracks cursor)
+        LHLD    CURBDP
+        MVI     A,BD_MRKEN
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A             ; HL -> BD_MRKEN
+        MOV     A,M
+        INX     H
+        ANA     M               ; A = low AND high
+        INR     A               ; Z if FFFF
+        JNZ     MLNOMK          ; MRKEN != FFFF -> not marking
+        ; MRKEN==FFFF; check MRKBG != FFFF
+        LHLD    CURBDP
+        MVI     A,BD_MRKBG
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A             ; HL -> BD_MRKBG
+        MOV     A,M
+        INX     H
+        ANA     M
+        INR     A
+        JZ      MLNOMK          ; MRKBG == FFFF -> no mark
+        ; Marking mode: force full redraw
+        MVI     A,1
+        STA     DIRTY
+MLNOMK:
         ; Check redraw level: DIRTY=full, DRTLINE=current line only
         LDA     DIRTY
         ORA     A
@@ -380,13 +410,13 @@ DO_PGD: CALL    GBPGDN
         MVI     A,1
         STA     DIRTY
         JMP     MAINLP
-DO_SCU: CALL    GBMVUP          ; scroll up = cursor up
-        MVI     A,1
-        STA     DIRTY
+DO_SCU: CALL    SVTOPLN
+        CALL    GBMVUP
+        CALL    CHKSCRL
         JMP     MAINLP
-DO_SCD: CALL    GBMVDN          ; scroll dn = cursor dn
-        MVI     A,1
-        STA     DIRTY
+DO_SCD: CALL    SVTOPLN
+        CALL    GBMVDN
+        CALL    CHKSCRL
         JMP     MAINLP
 DO_LST: CALL    GBMLNS
         JMP     MAINLP          ; cursor-only: no redraw

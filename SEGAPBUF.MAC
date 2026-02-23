@@ -1327,11 +1327,8 @@ GDLNLP: CALL    GBGAPEN         ; HL = GAPEN
         MOV     A,H
         SBB     D
         JNC     GDLNDN          ; GAPEN >= BSIZE, at end
-        CALL    GBBASE
-        CALL    GBGAPEN
-        DAD     D
-        MOV     A,M
-        CALL    GBDELRT         ; delete next char
+        CALL    GBDELRT         ; delete next char (saves to GBTMP)
+        LDA     GBTMP           ; get the deleted character
         CPI     LF
         JNZ     GDLNLP          ; keep going until LF
 GDLNDN: RET
