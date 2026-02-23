@@ -138,7 +138,8 @@ ACT_BLKCP EQU   28          ; copy block
 ACT_BLKDL EQU   29          ; delete block
 ACT_BLKPS EQU   30          ; paste clipboard
 ACT_MENU  EQU   31          ; open ESC menu
-ACT_MAX   EQU   31          ; highest action code
+ACT_FIND  EQU   32          ; find (always prompt)
+ACT_MAX   EQU   32          ; highest action code
 
 ;--- Block mark sentinel ------------------------------
 NO_MARK EQU     0FFFFH      ; marks absent/unset

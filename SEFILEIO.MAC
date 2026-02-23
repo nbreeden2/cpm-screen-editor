@@ -26,6 +26,7 @@
         EXTRN   GBMVTOP         ; move cursor to file top
         EXTRN   STATMSG         ; display status message
         EXTRN   OUTSTR          ; write $-string to console
+        EXTRN   CURGOTO         ; position cursor (B=row,C=col)
 
 ;--- Exports ----------------------------------------------
         PUBLIC  FIOPEN          ; load file into buffer
@@ -212,6 +213,11 @@ SRCHMAX EQU     64          ; max find string length
         CSEG
 
 FIOPEN:
+        ; If DE=0, WRKFCB already set by caller (e.g. FIPROMPT)
+        MOV     A,D
+        ORA     E
+        JZ      FISKIP
+
         ; Copy FCB to our working copy
         LXI     H,WRKFCB
         MVI     B,FCB_SIZ
@@ -223,6 +229,7 @@ FICPY:  LDAX    D
         JNZ     FICPY
 
         ; Save filename from FCB bytes 1-11 into descriptor
+FISKIP:
         CALL    FISAVFN
 
         ; Initialise gap buffer to empty
@@ -333,6 +340,11 @@ FSVERE: LXI     D,ERRMSG
 ;         Regs: all clobbered.
 ;=============================================================
 FIPROMPT:
+        PUSH    D               ; save prompt string pointer
+        MVI     B,STATROW       ; row 24
+        MVI     C,1             ; col 1
+        CALL    CURGOTO         ; position cursor on status line
+        POP     D               ; restore prompt pointer
         CALL    OUTSTR          ; display prompt (DE)
 
         ; Use BDOS buffered line input into RDLNBUF

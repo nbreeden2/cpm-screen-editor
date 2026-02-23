@@ -380,7 +380,10 @@ SDCLR:  ; Clear rest of line
         STA     SDROW
         JMP     SDRWLP
 
-SDRWDN: RET
+SDRWDN: CALL    RULRDRAW        ; restore tab ruler (row 2)
+        CALL    SEPRDRAW        ; restore separator (row 23)
+        CALL    STATCLR         ; clear status bar (row 24)
+        RET
 
 ;=============================================================
 ; SCREDCL - Redraw only the current cursor line + info bar.

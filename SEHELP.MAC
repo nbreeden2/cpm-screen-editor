@@ -342,6 +342,9 @@ HLPLINES EQU    20              ; number of help line pairs
 ;=============================================================
         DSEG
 
+; Loop index for help display
+HLPIDX: DB      0
+
 ; Left column text pointer table (word per line)
 HLPLTBL:
         DW      HLL01
@@ -387,9 +390,6 @@ HLPRTBL:
         DW      HLR18
         DW      HLR19
         DW      HLR20
-
-; Loop index for help display
-HLPIDX: DB      0
 
         END
 

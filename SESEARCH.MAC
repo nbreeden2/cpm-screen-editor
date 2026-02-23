@@ -27,10 +27,12 @@
         EXTRN   GBDELRT         ; delete char right
         EXTRN   GBINSRT         ; insert char at cursor
         EXTRN   OUTSTR          ; write $-string to console
+        EXTRN   CURGOTO         ; position cursor (B=row,C=col)
         EXTRN   STATMSG         ; status bar message
         EXTRN   DIRTY           ; screen redraw flag
 
 ;--- Exports ----------------------------------------------
+        PUBLIC  SRFIND          ; find (always prompt)
         PUBLIC  SRFNDNX         ; find next
         PUBLIC  SRREPLACE       ; find and replace
 
@@ -211,13 +213,31 @@ SRCHMAX EQU     64          ; max find string length
 
         CSEG
 
+;=============================================================
+; SRFIND - Find with prompt (always asks for search string).
+; Entry:  (none)
+; Exit:   Cursor moved to match if found; all regs clobbered.
+;=============================================================
+SRFIND:
+        XRA     A
+        STA     SRCHSTR         ; clear string to force prompt
+        ; Fall through to SRFNDNX
+
+;=============================================================
+; SRFNDNX - Find next (repeat last search; prompt if none).
+; Entry:  (none)
+; Exit:   Cursor moved to match if found; all regs clobbered.
+;=============================================================
 SRFNDNX:
         ; If search string is empty, prompt for one
         LDA     SRCHSTR
         ORA     A
         JNZ     SRFNDS          ; already have a string
 
-        ; Prompt for search string
+        ; Prompt for search string on status line
+        MVI     B,STATROW
+        MVI     C,1
+        CALL    CURGOTO
         LXI     D,SRCHPMT
         CALL    OUTSTR
         LXI     D,SRDINBUF

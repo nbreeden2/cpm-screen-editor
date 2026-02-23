@@ -197,7 +197,7 @@ SRCHMAX EQU     64          ; max find string length
         EXTRN   FIOPEN          ; open file
         EXTRN   FISAVE          ; save file
         EXTRN   FIPROMPT        ; prompt for filename
-        EXTRN   SRFNDNX         ; find next
+        EXTRN   SRFIND          ; find (always prompt)
         EXTRN   HLPSHOW         ; help screen
         EXTRN   BMSWITCH        ; switch buffer
         EXTRN   CURGOTO         ; position hw cursor (B=row,C=col)
@@ -354,7 +354,7 @@ MNSWBF:
 
 ;--- Find / Replace --------------------------------------
 MNFIND:
-        CALL    SRFNDNX
+        CALL    SRFIND
         MVI     A,1
         STA     DIRTY
         RET
