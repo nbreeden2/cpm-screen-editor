@@ -512,7 +512,9 @@ DO_FND: CALL    SRFIND
         MVI     A,1
         STA     DIRTY
         JMP     MAINLP
-DO_SAV: CALL    FISAVE
+DO_SAV: LXI     D,SAVWMSG
+        CALL    STATMSG
+        CALL    FISAVE
         CALL    INFOBAR
         JMP     MAINLP
 DO_OPN: CALL    MNUSHOW         ; open via menu
@@ -601,6 +603,8 @@ DXYES:
         CALL    FISAVFN         ; copy WRKFCB name to BD_FNAME
 
 DXSAVE:
+        LXI     D,SAVWMSG
+        CALL    STATMSG
         CALL    FISAVE
 
 DXEXIT:
@@ -708,6 +712,7 @@ ACTTBL:
 ;--- String constants ---------------------------------
 NOMEMSG: DB    'Insufficient memory',CR,LF,'$'
 CLRMSG:  DB    ' $'
+SAVWMSG: DB    'Saving file, please wait...$'
 EXTSAVQ: DB    'Save changes? (Y/N/Esc) $'
 EXTASPMT: DB   'Save as: $'
 
