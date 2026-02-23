@@ -248,7 +248,9 @@ BLMST2:
         ; MRKEN = NO_MARK -> set MRKEN = cursor
         CALL    BLCUROF         ; HL = cursor
         XCHG                    ; DE = cursor
+        PUSH    D               ; save cursor (BLRDMB clobbers DE)
         CALL    BLRDMB          ; HL = MRKBG
+        POP     D               ; DE = cursor restored
         ; If cursor < MRKBG: swap them
         MOV     A,D
         CMP     H
@@ -260,15 +262,11 @@ BLMST2:
 
 BLMSWP: ; cursor < MRKBG: swap so MRKBG <= MRKEN
         ; DE = cursor (new MRKBG), HL = old MRKBG (new MRKEN)
-        PUSH    D               ; save cursor
-        CALL    BLWRMB          ; MRKBG = HL (old MRKBG)... wait
-        ; Actually we want MRKBG=cursor, MRKEN=old MRKBG
         PUSH    H               ; save old MRKBG
         XCHG                    ; HL = cursor
         CALL    BLWRMB          ; MRKBG = cursor
         POP     H               ; HL = old MRKBG
         CALL    BLWRME          ; MRKEN = old MRKBG
-        POP     D               ; clean stack
         LXI     D,BM2MSG
         CALL    STATMSG
         RET

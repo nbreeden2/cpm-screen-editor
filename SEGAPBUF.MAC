@@ -219,6 +219,9 @@ SRCHMAX EQU     64          ; max find string length
         PUBLIC  GBFNDLN         ; find logical offset of line N (fast)
         PUBLIC  GBFNDCS         ; find TOPLN offset via backward scan
         PUBLIC  GBRDLNO         ; read line at given logical offset
+        PUBLIC  GBBASE          ; DE = buffer base address
+        PUBLIC  GBBSIZ          ; DE = buffer size
+        PUBLIC  GBGAPEN         ; HL = gap end offset
 
 ;=============================================================
 ; Internal helper: load descriptor fields into registers.

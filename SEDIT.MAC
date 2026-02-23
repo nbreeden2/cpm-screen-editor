@@ -211,6 +211,9 @@ SRCHMAX EQU     64          ; max find string length
         EXTRN   INFOBAR         ; update info bar
         EXTRN   CURPOS          ; position hw cursor
         EXTRN   GBINSRT         ; insert char at gap
+        EXTRN   GBBASE          ; DE = buffer base address
+        EXTRN   GBBSIZ          ; DE = buffer size
+        EXTRN   GBGAPEN         ; HL = gap end offset
         EXTRN   GBDLFT         ; delete left (BS)
         EXTRN   GBDELRT         ; delete right (Del)
         EXTRN   GBTMP           ; last deleted/inserted char
@@ -371,9 +374,29 @@ MLDONE:
         XCHG
         PCHL                    ; jump to handler
 
-        ; Insert a printable character (KT_CHAR)
+        ; Insert/overwrite a printable character (KT_CHAR)
 DOCHAR:
-        MOV     A,C             ; character value
+        LDA     INSMODE
+        CPI     MODE_OVR
+        JNZ     DCINS           ; insert mode: skip delete
+        ; Overstrike: delete char at cursor unless at EOL/EOF
+        CALL    GBGAPEN         ; HL = GAPEN
+        PUSH    H
+        CALL    GBBSIZ          ; DE = BSIZE
+        POP     H
+        MOV     A,L
+        SUB     E
+        MOV     A,H
+        SBB     D
+        JNC     DCINS           ; at EOF: just insert
+        CALL    GBBASE          ; DE = base
+        CALL    GBGAPEN         ; HL = GAPEN
+        DAD     D               ; HL = abs addr of char at cursor
+        MOV     A,M
+        CPI     LF
+        JZ      DCINS           ; at EOL: just insert
+        CALL    GBDELRT         ; delete char at cursor
+DCINS:  MOV     A,C             ; character value (C preserved)
         CALL    GBINSRT         ; insert at cursor
         MVI     A,1
         STA     DRTLINE         ; redraw current line only
