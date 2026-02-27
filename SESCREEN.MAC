@@ -87,6 +87,11 @@ ATTR_CYN EQU    36H         ; cyan foreground
 ATTR_GRN EQU    32H         ; green foreground
 ATTR_YEL EQU    33H         ; yellow foreground
 ATTR_MAG EQU    35H         ; magenta foreground
+ATTR_RED EQU    31H         ; red foreground
+ATTR_BLU EQU    34H         ; blue foreground
+
+;--- Color assembly option ---------------------------
+COLOR   EQU     1           ; 1 = color, 0 = monochrome
 
 ;--- Buffer descriptor field offsets -----------------
 BD_BSTAR EQU    0           ; 2: buffer base address
@@ -211,6 +216,13 @@ SGRRES:  DB     ESC,'[','0','m','$'  ; SGR reset
 SGRBLD:  DB     ESC,'[','1','m','$'  ; SGR bold
 SGRDIM:  DB     ESC,'[','2','m','$'  ; SGR dim
 SGRREV:  DB     ESC,'[','7','m','$'  ; SGR reverse
+        IF COLOR
+SGRMAG:  DB     ESC,'[','3','5','m','$'  ; SGR magenta fg
+SGRGRN:  DB     ESC,'[','3','2','m','$'  ; SGR green fg
+SGRBLU:  DB     ESC,'[','3','4','m','$'  ; SGR blue fg
+SGRRED:  DB     ESC,'[','3','1','m','$'  ; SGR red fg
+SGRYEL:  DB     ESC,'[','3','3','m','$'  ; SGR yellow fg
+        ENDIF
 
 ;--- Separator line (80 '=' characters) ---------------
 SEPLINE: DB     '========================================'
@@ -383,6 +395,10 @@ SDRWLP: LDA     SDROW
         CALL    CURGOTO
 
         ; Print 3-digit line number gutter
+        IF COLOR
+        LXI     D,SGRGRN        ; green for line numbers
+        CALL    OUTSTR
+        ENDIF
         LHLD    SDTPLN          ; HL = TOPLN
         LDA     SDROW
         ADD     L
@@ -392,6 +408,10 @@ SDRWLP: LDA     SDROW
         MOV     H,A             ; HL = TOPLN + row
         INX     H               ; 1-based for display
         CALL    OUTN3DG
+        IF COLOR
+        LXI     D,SGRRES        ; reset after gutter
+        CALL    OUTSTR
+        ENDIF
         MVI     A,' '
         CALL    OUTCHAR         ; space after gutter
 
@@ -666,7 +686,17 @@ SCREDLN:
         MOV     L,A
         MVI     H,0             ; HL = line number
         INX     H               ; make 1-based (match SLEDRAW gutter)
+        IF COLOR
+        PUSH    H
+        LXI     D,SGRGRN        ; green for line numbers
+        CALL    OUTSTR
+        POP     H
+        ENDIF
         CALL    OUTN3DG         ; print 3-digit number
+        IF COLOR
+        LXI     D,SGRRES        ; reset after gutter
+        CALL    OUTSTR
+        ENDIF
         MVI     A,' '
         CALL    OUTCHAR
         LXI     D,CLREOL        ; clear rest of line
@@ -695,7 +725,17 @@ SLEDRAW:
         MOV     L,A
         MVI     H,0             ; HL = display line#
         INX     H               ; make 1-based
+        IF COLOR
+        PUSH    H
+        LXI     D,SGRGRN        ; green for line numbers
+        CALL    OUTSTR
+        POP     H
+        ENDIF
         CALL    OUTN3DG         ; print 3-digit number
+        IF COLOR
+        LXI     D,SGRRES        ; reset after gutter
+        CALL    OUTSTR
+        ENDIF
         MVI     A,' '           ; column 4 space
         CALL    OUTCHAR
         POP     B               ; restore row
@@ -764,6 +804,10 @@ INFOBAR:
         CALL    OUTSTR
         LXI     D,SGRBLD        ; bold for info bar
         CALL    OUTSTR
+        IF COLOR
+        LXI     D,SGRMAG        ; magenta for filename
+        CALL    OUTSTR
+        ENDIF
 
         ; Print filename
         ; BD_FNAME stores name(8)+ext(3), no drive byte
@@ -842,6 +886,10 @@ IBEXTL: MOV     A,M
         JNZ     IBEXTL
 IBNEXT:
         ; Print Lines: count
+        IF COLOR
+        LXI     D,SGRBLU        ; blue for stats
+        CALL    OUTSTR
+        ENDIF
         LXI     D,IBLNSTR
         CALL    OUTSTR
         CALL    GBCNTLN         ; HL = line count
@@ -881,10 +929,18 @@ IBNEXT:
         LDA     INSMODE
         ORA     A
         JNZ     IBOVRMD
+        IF COLOR
+        LXI     D,SGRGRN        ; green for [INS]
+        CALL    OUTSTR
+        ENDIF
         LXI     D,IBINSTR
         CALL    OUTSTR
         JMP     IBMODIF
 IBOVRMD:
+        IF COLOR
+        LXI     D,SGRRED        ; red for [OVR]
+        CALL    OUTSTR
+        ENDIF
         LXI     D,IBOVSTR
         CALL    OUTSTR
 
@@ -900,6 +956,10 @@ IBMODIF:
         MOV     A,M
         ORA     A
         JZ      IBCLEAR
+        IF COLOR
+        LXI     D,SGRYEL        ; yellow for [MOD]
+        CALL    OUTSTR
+        ENDIF
         LXI     D,IBMDSTR
         CALL    OUTSTR
 IBCLEAR:
@@ -946,7 +1006,7 @@ SEPRDRAW:
         MVI     B,SEPRROW
         MVI     C,1
         CALL    CURGOTO
-        LXI     D,SGRBLD
+        LXI     D,SGRDIM
         CALL    OUTSTR
         LXI     D,SEPLINE
         CALL    OUTSTR

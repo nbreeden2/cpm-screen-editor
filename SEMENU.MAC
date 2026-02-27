@@ -729,7 +729,7 @@ MNTX9:  DB      '9. Quit / Exit        $'
 OPNPMT: DB      'Open file: $'
 SVAPMT: DB      'Save as:   $'
 GTOPMT: DB      'Go to line: $'
-ABTMSG: DB      'SEDIT v1.01 CP/M Screen Editor  (any key)$'
+ABTMSG: DB      'SEDIT v1.02 CP/M Screen Editor  (any key)$'
 
 ;=============================================================
 ; DATA SEGMENT
