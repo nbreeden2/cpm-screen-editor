@@ -231,14 +231,18 @@ GKIDLE:
         JZ      GKCTLK
         CPI     CTRLQ           ; Ctrl-Q prefix
         JZ      GKCTLQ
-        CPI     ' '             ; printable?
-        JNC     GKCHAR          ; >= space is printable
-        CPI     DEL             ; DEL key
+        CPI     ' '             ; < space = control code
+        JC      GKCTRL
+        CPI     DEL             ; DEL key?
         JZ      GKDEL
-        ; Control character: look up in table
+        JNC     GKHIGH          ; > DEL (80h+): high-byte key
+        ; 0x20-0x7E: printable ASCII character
+        MOV     C,A
+        MVI     B,KT_CHAR
+        RET
+
+GKCTRL: ; Control character 00-1F: look up in KBDTBL
         MOV     L,A
-        MVI     H,HIGH KBDTBL
-        MOV     L,A             ; index = ctrl code
         MVI     H,0
         LXI     D,KBDTBL
         DAD     D               ; HL = &KBDTBL[A]
@@ -250,13 +254,14 @@ GKIDLE:
         MVI     B,KT_NONE       ; no action mapped
         RET
 
-GKCHAR:
-        MOV     C,A             ; C = character
-        MVI     B,KT_CHAR       ; type = char
-        RET
-
 GKDEL:  MVI     C,ACT_DELRT     ; DEL = delete right
         MVI     B,KT_ACT
+        RET
+
+GKHIGH: ; High-byte key (80h-FFh): look up in HKYTBL
+        MOV     D,A             ; D = byte to find
+        LXI     H,HKYTBL
+        CALL    TBLSRCH         ; search (byte,action) table
         RET
 
 GKESC:  MVI     A,KST_ESC       ; enter ESC state
@@ -571,6 +576,22 @@ CTQTBL:
         DB      'W',ACT_BLKPS       ; ^QW paste
         DB      'w',ACT_BLKPS
         DB      0,0                 ; end
+
+; High-byte key table: (byte, action) pairs
+; For terminals that send single bytes >= 80h for special keys
+; Ends with 0,0
+HKYTBL:
+        DB      0EDH,ACT_CURUP     ; EDh = up arrow
+        DB      0ECH,ACT_CURDN     ; ECh = down arrow
+        DB      0EBH,ACT_CURLT     ; EBh = left arrow
+        DB      0EAH,ACT_CURRT     ; EAh = right arrow
+        DB      0F3H,ACT_TOGIN     ; F3h = insert
+        DB      0F2H,ACT_DELRT     ; F2h = delete
+        DB      0F1H,ACT_LINST     ; F1h = home
+        DB      0F0H,ACT_LINEN     ; F0h = end
+        DB      0EFH,ACT_PGUP      ; EFh = page up
+        DB      0EEH,ACT_PGDN      ; EEh = page down
+        DB      0,0                 ; end of table
 
 ; Escape sequence table exported for SEKEYBND to update
 KBDTBL_ESC EQU  CSITBL

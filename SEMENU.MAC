@@ -191,6 +191,7 @@ SRCHMAX EQU     64          ; max find string length
 
 
 ;--- Imports ----------------------------------------------
+        EXTRN   GETKEY          ; read next key (unified decoder)
         EXTRN   CURBDP          ; active buffer descriptor ptr
         EXTRN   DIRTY           ; screen redraw flag
         EXTRN   DOEXIT          ; exit handler (save prompt)
@@ -239,33 +240,27 @@ MNULP:
         ; Highlight current selection
         CALL    MNUHIL
 
-        ; Read a key (blocking via BDOS BF_CONIN)
-        MVI     C,BF_CONIN
-        CALL    BDOS
+        ; Read a key via unified decoder (handles all terminals)
+        CALL    GETKEY          ; B=type, C=code/char
+        MOV     A,B
+        ORA     A
+        JZ      MNULP           ; KT_NONE, try again
 
-        ; ESC or 'Q'/'q' = cancel
-        CPI     ESC
-        JZ      MNUCNC
+        CPI     KT_ACT
+        JZ      MNUACD          ; action code -> check actions
+
+        ; KT_CHAR: check printable characters
+        MOV     A,C
+        CPI     CR
+        JZ      MNUACT          ; Enter = select
         CPI     'Q'
         JZ      MNUCNC
         CPI     'q'
         JZ      MNUCNC
-
-        ; Enter = select
-        CPI     CR
-        JZ      MNUACT
-
-        ; Up arrow (^E or raw up-arrow byte passed through)
-        CPI     CTRUP
-        JZ      MNUUP
-        CPI     'K'             ; 'k' / 'K' also navigate
+        CPI     'K'
         JZ      MNUUP
         CPI     'k'
         JZ      MNUUP
-
-        ; Down arrow (^X)
-        CPI     CTRDW
-        JZ      MNUDN
         CPI     'J'
         JZ      MNUDN
         CPI     'j'
@@ -280,7 +275,17 @@ MNULP:
         STA     MNUSEL
         JMP     MNUACT
 
-        JMP     MNULP
+MNUACD: ; Action code in C
+        MOV     A,C
+        CPI     ACT_CURUP
+        JZ      MNUUP
+        CPI     ACT_CURDN
+        JZ      MNUDN
+        CPI     ACT_MENU
+        JZ      MNUCNC          ; ESC = cancel
+        CPI     ACT_INSNL
+        JZ      MNUACT          ; Enter = select
+        JMP     MNULP           ; ignore other actions
 
 MNUUP:  LDA     MNUSEL
         ORA     A
@@ -687,9 +692,7 @@ FS2LP:  LDAX    D
 ATTRREV: DB     ESC,'[7m$'
 ATTRNRM: DB     ESC,'[0m$'
 
-; Control chars used for navigation
-CTRUP   EQU     05H             ; ^E = up
-CTRDW   EQU     18H             ; ^X = down
+; (CTRUP/CTRDW removed - menu now uses GETKEY action codes)
 
 ; Menu box borders ($ terminated)
 MNUTOP: DB      ESC,'[',MNUROW1+'0',';'
@@ -726,7 +729,7 @@ MNTX9:  DB      '9. Quit / Exit        $'
 OPNPMT: DB      'Open file: $'
 SVAPMT: DB      'Save as:   $'
 GTOPMT: DB      'Go to line: $'
-ABTMSG: DB      'SEDIT v1.08 CP/M Screen Editor  (any key)$'
+ABTMSG: DB      'SEDIT v1.01 CP/M Screen Editor  (any key)$'
 
 ;=============================================================
 ; DATA SEGMENT
