@@ -39,11 +39,8 @@
 
 ;--- Exports ----------------------------------------------
         PUBLIC  SYNINIT         ; detect syntax mode
-        PUBLIC  SYNLINE         ; tokenise line -> span table
-        PUBLIC  SNTBL           ; span table
-        PUBLIC  SNCNT           ; span count
-
-SNMAX   EQU     16              ; max spans per line
+        PUBLIC  SYNLINE         ; tokenise line -> attr buffer
+        PUBLIC  SYNATTR         ; per-byte attribute buffer
 
 ;=============================================================
 ;============================================================
@@ -119,6 +116,11 @@ ATTR_CYN EQU    36H         ; cyan foreground
 ATTR_GRN EQU    32H         ; green foreground
 ATTR_YEL EQU    33H         ; yellow foreground
 ATTR_MAG EQU    35H         ; magenta foreground
+ATTR_RED EQU    31H         ; red foreground
+ATTR_BLU EQU    34H         ; blue foreground
+
+;--- Syntax highlighting option ----------------------
+SYNHI   EQU     1           ; 0=none, 1=ASM, 2=C (future)
 
 ;--- Buffer descriptor field offsets -----------------
 BD_BSTAR EQU    0           ; 2: buffer base address
@@ -285,30 +287,41 @@ SYNONE: ; Set SYN_NONE
 ; SYNLINE - Tokenise a line of text for syntax highlighting.
 ; Entry:  DE = pointer to line text (NUL or CR terminated)
 ;         B  = column width limit (TXTCOLS = 74)
-; Exit:   SNTBL filled; SNCNT = number of spans.
+; Exit:   SYNATTR filled with per-byte attributes.
 ;         Regs: all clobbered.
 ;=============================================================
 SYNLINE:
-        ; Clear span table
-        XRA     A
-        STA     SNCNT
+        ; Initialize SYNATTR to ATTR_NRM
+        PUSH    D
+        PUSH    B
+        LXI     H,SYNATTR
+        MVI     B,TXTCOLS
+        MVI     A,ATTR_NRM
+SNCLR:  MOV     M,A
+        INX     H
+        DCR     B
+        JNZ     SNCLR
+        POP     B
+        POP     D
 
+        IF SYNHI EQ 0
+        RET                     ; no syntax: buffer cleared, done
+        ENDIF
+
+        IF SYNHI EQ 1
         ; Check current buffer's syntax mode
         LHLD    CURBDP
         MOV     A,L
         ADI     BD_SYNMD
         MOV     L,A
-        MOV     A,H
-        ACI     0
+        MVI     A,0
+        ADC     H
         MOV     H,A
         MOV     A,M
         CPI     SYN_ASM
-        RNZ                     ; SYN_NONE: no spans
+        RNZ                     ; SYN_NONE: no highlighting
 
         ; Save line pointer and width limit
-        ; HL = desc+BD_SYNMD (used below to re-read mode)
-        MOV     A,M             ; A = BD_SYNMD (already read above)
-        ; save DE (line ptr) and B (limit) to temps
         MOV     A,B
         STA     SYNLIM
         XCHG
@@ -319,19 +332,12 @@ SYNLINE:
         MVI     C,1
 
 SNLP:
-        ; Check col limit and span table full
-        MOV     A,C
-        LDA     SYNLIM
-        ; compare C with SYNLIM
+        ; Check col limit
         LDA     SYNLIM
         MOV     B,A
         MOV     A,C
         CMP     B
         JNC     SNDNE           ; col >= limit: done
-
-        LDA     SNCNT
-        CPI     SNMAX
-        JNC     SNDNE           ; span table full
 
         ; Read current char
         LHLD    SYNPTR
@@ -371,6 +377,12 @@ SNWRD:
         ; Identifier token: collect chars, classify
         MOV     D,C             ; D = start col
         CALL    SNCOL           ; collect identifier, C = end col
+        MOV     A,C
+        CMP     D               ; did C advance?
+        JNZ     SNWRD2          ; yes, classify token
+        INR     C               ; skip non-identifier char
+        JMP     SNLP
+SNWRD2:
         ; Classify: label if followed by ':', else opcode/reg
         ; Check char at C (after identifier)
         LHLD    SYNPTR
@@ -385,14 +397,26 @@ SNWRD:
         CPI     ':'
         JZ      SNLABL
 
+        ; Save start col (SNISREG/SNISDIR clobber D via LXI)
+        MOV     A,D
+        STA     SNSAVD
+
         ; Check if it's a register name (1-3 chars, known set)
         CALL    SNISREG         ; Z if register
+        LDA     SNSAVD          ; LDA/MOV don't affect flags
+        MOV     D,A             ; restore start col
         JZ      SNREG
 
-        ; Default: opcode colour
+        ; Check if it's a directive (EQU, EXTRN, PUBLIC)
+        CALL    SNISDIR         ; Z if directive
+        LDA     SNSAVD
+        MOV     D,A             ; restore start col
+        JZ      SNDIR
+
+        ; Default: opcode colour (bold/white)
         MOV     E,C             ; E = end col
-        MVI     A,ATTR_GRN
-        CALL    SNADD           ; add span (D=start, E=end, A=attr)
+        MVI     A,ATTR_BLD
+        CALL    SNFILL          ; fill SYNATTR[D-1..E-2]
         JMP     SNLP
 
 SNLABL:
@@ -400,13 +424,19 @@ SNLABL:
         INR     E               ; include the ':'
         INR     C
         MVI     A,ATTR_YEL
-        CALL    SNADD
+        CALL    SNFILL
         JMP     SNLP
 
 SNREG:
         MOV     E,C
         MVI     A,ATTR_CYN
-        CALL    SNADD
+        CALL    SNFILL
+        JMP     SNLP
+
+SNDIR:
+        MOV     E,C
+        MVI     A,ATTR_BLU
+        CALL    SNFILL
         JMP     SNLP
 
 SNNUM:
@@ -436,8 +466,8 @@ SNNUMD:
 SNNUMH: INR     C
 SNNUME:
         MOV     E,C
-        MVI     A,ATTR_MAG
-        CALL    SNADD
+        MVI     A,ATTR_BLU
+        CALL    SNFILL
         JMP     SNLP
 
 SNSTR:
@@ -475,16 +505,17 @@ SNSTRC: INR     C               ; include closing quote
 SNSTRD:
         MOV     E,C
         MVI     A,ATTR_MAG
-        CALL    SNADD
+        CALL    SNFILL
         JMP     SNLP
 
 SNCOMM:
-        ; Comment: ; to end of line
+        ; Comment: ; to end of line (green)
         MOV     D,C             ; start
         LDA     SYNLIM
         MOV     E,A             ; end = line limit
-        MOV     A,ATTR_DIM
-        CALL    SNADD
+        INR     E               ; inclusive end for SNFILL
+        MVI     A,ATTR_GRN
+        CALL    SNFILL
         JMP     SNDNE           ; comment goes to end
 
 SNDNE:  RET
@@ -594,6 +625,8 @@ SNISREG:
         ACI     0
         MOV     H,A             ; HL = &line[D-1]
 
+        MOV     A,B             ; save token length
+        STA     SNTLEN
         LXI     D,SINTOK
 SIRTOK:
         MOV     A,M
@@ -606,21 +639,23 @@ SIRTOK:
         XRA     A
         STAX    D               ; NUL terminate
 
-        ; Length E is token length; search REGTBL
+        ; Search REGTBL (token length in SNTLEN)
         LXI     H,REGTBL
 SIRLK:
         MOV     A,M
         ORA     A
         JZ      SIRNF           ; end of table
-        ; compare E (token length) with table entry length
-        ; Table format: length_byte, chars...
-        CMP     E
+        PUSH    H
+        LXI     H,SNTLEN
+        CMP     M               ; table_len - token_len
+        POP     H
         JNZ     SIRNXT
 
         ; lengths match; compare chars
-        INX     H               ; H = first char of entry
+        INX     H               ; HL = first char of entry
         LXI     D,SINTOK
-        MOV     B,E             ; B = length
+        LDA     SNTLEN
+        MOV     B,A             ; B = token length
 SIRCHK:
         LDAX    D
         CMP     M
@@ -636,10 +671,10 @@ SIRCHK:
 SIRNXT2:
         ; Skip remaining chars of this entry
 SIRNX2:
-        DCR     B
-        JZ      SIRLK           ; back to length byte
         INX     H
-        JMP     SIRNX2
+        DCR     B
+        JNZ     SIRNX2
+        JMP     SIRLK           ; back to length byte
 
 SIRNXT:
         ; Skip length + chars
@@ -657,65 +692,95 @@ SIRNF:
         RET
 
 ;------------------------------------------------------------
-; SNADD - Add a span to SNTBL.
-; Entry: D = start_col, E = end_col, A = attribute
-; Exit:  span added; SNCNT incremented
+; SNISDIR - Test if token in SINTOK (length SNTLEN) is a
+; directive. Must be called after SNISREG (SINTOK filled).
+; Exit: Z = is a directive; NZ = not
 ;------------------------------------------------------------
-SNADD:
-        LDA     SNCNT
-        CPI     SNMAX
-        RNC                     ; table full
+SNISDIR:
+        LXI     H,DIRTBL
+SDRLK:
+        MOV     A,M             ; entry length
+        ORA     A
+        JZ      SDRNF           ; end of table
+        PUSH    H
+        LXI     H,SNTLEN
+        CMP     M               ; entry_len - token_len
+        POP     H
+        JNZ     SDRNXT          ; lengths differ
 
-        ; Index into SNTBL: offset = SNCNT * 3
-        MOV     B,A             ; B = SNCNT
-        MOV     C,A
-        ADD     A               ; *2
-        ADD     C               ; *3
-        MOV     C,A             ; C = byte offset
-        LXI     H,SNTBL
-        MVI     H,0
-        MOV     L,C
-        LXI     D,SNTBL
-        DAD     D               ; HL = &SNTBL[SNCNT*3]
-
-        ; Store (start, end, attr)
-        MOV     M,D             ; start_col... wait D is start
-        ; D = start_col, E = end_col; A clobbered by offset calc
-        ; Re-save attribute: was in A before the index calc
-        ; Problem: A was overwritten. Need to pass attr differently.
-        ; Restructure: save A to SNTMP before offset calc
-        RET                     ; placeholder - see SNADD2
-
-;------------------------------------------------------------
-; SNADD2 - Corrected span add (D=start, E=end, B=attr)
-; Caller puts attribute in B instead of A.
-;------------------------------------------------------------
-SNADD2:
-        LDA     SNCNT
-        CPI     SNMAX
-        RNC
-
-        MOV     C,A             ; C = SNCNT
-        ADD     A               ; *2
-        ADD     C               ; *3
-        LXI     H,SNTBL
-        MOV     C,A
-        MVI     B,0
-        DAD     B               ; HL = &SNTBL[SNCNT*3]
-
-        MOV     M,D             ; start_col
+        ; Lengths match; compare chars
         INX     H
-        MOV     M,E             ; end_col
+        LXI     D,SINTOK
+        LDA     SNTLEN
+        MOV     B,A             ; B = token length
+SDRCHK:
+        LDAX    D
+        CMP     M
+        JNZ     SDRNX2          ; mismatch
         INX     H
-        MOV     A,B
-        MOV     M,A             ; attribute
-        ; wait, B was used for MVI B,0 above - conflict
-        ; B now = 0. Need to use SNTMP.
-        MOV     M,B             ; attribute (broken if B=0)
+        INX     D
+        DCR     B
+        JNZ     SDRCHK
+        ; matched
+        XRA     A               ; Z
+        RET
 
-        LDA     SNCNT
-        INR     A
-        STA     SNCNT
+SDRNX2:
+        INX     H
+        DCR     B
+        JNZ     SDRNX2
+        JMP     SDRLK
+
+SDRNXT:
+        MOV     B,M             ; B = entry length
+        INX     H
+SDRSKP:
+        INX     H
+        DCR     B
+        JNZ     SDRSKP
+        JMP     SDRLK
+
+SDRNF:
+        MVI     A,1
+        ORA     A               ; NZ
+        RET
+
+;--- Directive name table --------------------------------
+DIRTBL:
+        DB      3,'E','Q','U'
+        DB      5,'E','X','T','R','N'
+        DB      6,'P','U','B','L','I','C'
+        DB      0               ; end
+
+;------------------------------------------------------------
+; SNFILL - Fill SYNATTR[D-1..E-2] with attribute byte A.
+; Entry: D = start_col (1-based), E = end_col (1-based, exclusive)
+;        A = attribute byte
+; Exit:  SYNATTR updated; B,C preserved via stack
+;------------------------------------------------------------
+SNFILL:
+        PUSH    B
+        PUSH    H
+        MOV     B,A             ; B = attribute
+        MOV     A,E
+        SUB     D               ; A = count (E - D)
+        JZ      SNFLDN          ; zero-length, skip
+        JC      SNFLDN          ; negative, skip
+        MOV     C,A             ; C = count
+        MOV     A,D
+        DCR     A               ; 0-based index
+        LXI     H,SYNATTR
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A             ; HL = &SYNATTR[D-1]
+SNFLLP: MOV     M,B
+        INX     H
+        DCR     C
+        JNZ     SNFLLP
+SNFLDN: POP     H
+        POP     B
         RET
 
 ;=============================================================
@@ -741,22 +806,30 @@ REGTBL:
         DB      2,'I','Y'
         DB      0               ; end of table
 
+        ENDIF                   ; SYNHI EQ 1
+
 ;=============================================================
 ; DATA SEGMENT
 ;=============================================================
         DSEG
 
-; Span table: SNMAX * 3 bytes (start, end, attr per entry)
-SNTBL:  DS      SNMAX*3
-SNCNT:  DB      0
+; Per-byte attribute buffer (one attribute per source byte)
+SYNATTR: DS     TXTCOLS         ; 74 bytes
 
 ; Syntax state
 SYNPTR: DW      0               ; pointer to current line text
 SYNLIM: DB      0               ; column width limit
-SNTMP:  DB      0               ; attribute temp
 
-; Token buffer for register comparison (NUL-terminated)
-SINTOK: DS      8
+; Token length (saved across LXI D,SINTOK clobber)
+SNTLEN: DB      0
+
+; Start column (saved across SNISREG/SNISDIR calls)
+SNSAVD: DB      0
+
+; Token buffer for register/directive comparison (NUL-terminated)
+; Must be last in DSEG: overflow from long identifiers goes into
+; safe space rather than corrupting SNTLEN/SNSAVD.
+SINTOK: DS      TXTCOLS+1       ; 75 bytes (max line width + NUL)
 
         END
 

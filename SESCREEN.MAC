@@ -93,6 +93,9 @@ ATTR_BLU EQU    34H         ; blue foreground
 ;--- Color assembly option ---------------------------
 COLOR   EQU     1           ; 1 = color, 0 = monochrome
 
+;--- Syntax highlighting option ----------------------
+SYNHI   EQU     1           ; 0=none, 1=ASM, 2=C (future)
+
 ;--- Buffer descriptor field offsets -----------------
 BD_BSTAR EQU    0           ; 2: buffer base address
 BD_BSIZE EQU    2           ; 2: capacity in bytes
@@ -191,6 +194,10 @@ SRCHMAX EQU     64          ; max find string length
         EXTRN   GBCNTLN         ; count lines in buffer
         EXTRN   GBFNDCS         ; find TOPLN offset via backward scan
         EXTRN   GBRDLNO         ; read line at given offset
+        IF SYNHI
+        EXTRN   SYNLINE         ; tokenize line for highlighting
+        EXTRN   SYNATTR         ; per-byte attribute buffer
+        ENDIF
 
         PUBLIC  SCRINIT         ; init/clear screen
         PUBLIC  SCRDRAW         ; full screen redraw
@@ -216,12 +223,13 @@ SGRRES:  DB     ESC,'[','0','m','$'  ; SGR reset
 SGRBLD:  DB     ESC,'[','1','m','$'  ; SGR bold
 SGRDIM:  DB     ESC,'[','2','m','$'  ; SGR dim
 SGRREV:  DB     ESC,'[','7','m','$'  ; SGR reverse
-        IF COLOR
+        IF COLOR+SYNHI
 SGRMAG:  DB     ESC,'[','3','5','m','$'  ; SGR magenta fg
 SGRGRN:  DB     ESC,'[','3','2','m','$'  ; SGR green fg
 SGRBLU:  DB     ESC,'[','3','4','m','$'  ; SGR blue fg
 SGRRED:  DB     ESC,'[','3','1','m','$'  ; SGR red fg
 SGRYEL:  DB     ESC,'[','3','3','m','$'  ; SGR yellow fg
+SGRCYN:  DB     ESC,'[','3','6','m','$'  ; SGR cyan fg
         ENDIF
 
 ;--- Separator line (80 '=' characters) ---------------
@@ -492,6 +500,15 @@ SDHNHL: ; No highlight on this line
         STA     SDHLS
         STA     SDHLE
 SDHSET: POP     D               ; restore text pointer
+        IF SYNHI
+        ; Tokenize line for syntax highlighting
+        PUSH    D               ; save text pointer
+        MVI     B,TXTCOLS
+        CALL    SYNLINE
+        POP     D               ; restore text pointer
+        XRA     A
+        STA     SDCATT          ; reset current syntax attribute
+        ENDIF
         XRA     A
         STA     SDHLON          ; not in reverse yet
         STA     SDBYTI          ; byte index = 0
@@ -517,6 +534,28 @@ SDTXLP: MOV     A,C
         LDA     SDHLE
         CMP     B
         CZ      SDRVOF          ; byte index == end -> reverse off
+        IF SYNHI
+        ; --- Syntax color (skip if in block highlight) ---
+        LDA     SDHLON
+        ORA     A
+        JNZ     SDSYNS          ; in reverse video, skip syntax
+        PUSH    D               ; save text pointer
+        LDA     SDBYTI
+        MOV     E,A
+        MVI     D,0
+        LXI     H,SYNATTR
+        DAD     D
+        MOV     A,M             ; A = attribute for this byte
+        LXI     H,SDCATT
+        CMP     M               ; same as current?
+        JZ      SDSYN2          ; yes, skip (common case)
+        MOV     M,A             ; update SDCATT
+        PUSH    B
+        CALL    SDSGR           ; emit SGR for attribute A
+        POP     B
+SDSYN2: POP     D               ; restore text pointer
+SDSYNS:
+        ENDIF
         ; --- Output character ---
         LDA     SDTMPB          ; reload text byte
         CPI     TAB
@@ -566,7 +605,19 @@ SDCLR:  ; Reset reverse video if active before clearing
         CALL    OUTSTR
         XRA     A
         STA     SDHLON
-SDCLR2: ; Clear rest of line
+SDCLR2:
+        IF SYNHI
+        ; Reset syntax color if not normal
+        LDA     SDCATT
+        ORA     A
+        JZ      SDCLR3          ; already normal
+        LXI     D,SGRRES
+        CALL    OUTSTR
+        XRA     A
+        STA     SDCATT
+SDCLR3:
+        ENDIF
+        ; Clear rest of line
         LXI     D,CLREOL
         CALL    OUTSTR
 
@@ -607,7 +658,59 @@ SDRVOF: PUSH    D
         POP     D
         XRA     A
         STA     SDHLON
+        IF SYNHI
+        STA     SDCATT          ; reset syntax attr after reverse off
+        ENDIF
         RET
+
+        IF SYNHI
+;-------------------------------------------------------------
+; SDSGR - Emit SGR sequence for attribute byte in A.
+; Looks up SGRLUT table (attr, DW string) triplets.
+; Entry:  A = attribute byte
+; Exit:   SGR emitted; DE clobbered
+;-------------------------------------------------------------
+SDSGR:  ORA     A               ; ATTR_NRM (0)?
+        JNZ     SDSGL0          ; no, look up in table
+        LXI     D,SGRRES        ; yes, emit SGR reset
+        JMP     SDSGF
+SDSGL0: LXI     H,SGRLUT
+SDSGL:  MOV     B,M             ; table attr byte
+        INX     H
+        MOV     E,M             ; string addr low
+        INX     H
+        MOV     D,M             ; string addr high
+        INX     H
+        MOV     C,A             ; save target attr
+        MOV     A,B
+        ORA     A
+        JZ      SDSGD           ; end of table
+        CMP     C
+        JZ      SDSGF           ; match found
+        MOV     A,C             ; restore target
+        JMP     SDSGL
+SDSGF:  CALL    OUTSTR          ; DE = SGR string
+SDSGD:  RET
+
+;--- SGR lookup table: attribute byte -> string address ------
+; Note: ATTR_NRM (00H) is handled above, not in table
+; (its value 0 conflicts with the end-of-table sentinel).
+SGRLUT: DB      ATTR_BLD
+        DW      SGRBLD
+        DB      ATTR_GRN
+        DW      SGRGRN
+        DB      ATTR_YEL
+        DW      SGRYEL
+        DB      ATTR_CYN
+        DW      SGRCYN
+        DB      ATTR_MAG
+        DW      SGRMAG
+        DB      ATTR_RED
+        DW      SGRRED
+        DB      ATTR_BLU
+        DW      SGRBLU
+        DB      0               ; end sentinel
+        ENDIF
 
 ;=============================================================
 ; SCREDCL - Redraw only the current cursor line + info bar.
@@ -741,6 +844,17 @@ SLEDRAW:
         POP     B               ; restore row
         POP     D               ; restore text pointer
 
+        IF SYNHI
+        ; Tokenize line for syntax highlighting
+        PUSH    D               ; save text pointer
+        MVI     B,TXTCOLS
+        CALL    SYNLINE
+        POP     D               ; restore text pointer
+        XRA     A
+        STA     SDCATT          ; reset syntax attribute
+        STA     SLBYTI          ; byte index = 0
+        ENDIF
+
         ; Output up to TXTCOLS chars of text
         MVI     C,0             ; C = chars output
 SLETXT:
@@ -756,6 +870,26 @@ SLETXT:
         JZ      SLEEND
         CPI     TAB             ; expand tabs
         JZ      SLETAB
+        IF SYNHI
+        ; Syntax color check
+        PUSH    D               ; save text pointer
+        PUSH    PSW             ; save text byte
+        LDA     SLBYTI
+        MOV     E,A
+        MVI     D,0
+        LXI     H,SYNATTR
+        DAD     D
+        MOV     A,M             ; A = attribute for this byte
+        LXI     H,SDCATT
+        CMP     M               ; same as current?
+        JZ      SLSNS           ; yes, skip
+        MOV     M,A             ; update SDCATT
+        PUSH    B
+        CALL    SDSGR           ; emit SGR for attribute A
+        POP     B
+SLSNS:  POP     PSW             ; restore text byte
+        POP     D               ; restore text pointer
+        ENDIF
         PUSH    D               ; protect text pointer (OUTCHAR: MOV E,A clobbers E)
         PUSH    B               ; protect C (column counter) from BDOS
         CALL    OUTCHAR
@@ -763,6 +897,11 @@ SLETXT:
         POP     D               ; restore text pointer
         INX     D
         INR     C
+        IF SYNHI
+        LDA     SLBYTI
+        INR     A
+        STA     SLBYTI
+        ENDIF
         JMP     SLETXT
 SLETAB:
         ; Expand tab to next tab stop
@@ -785,8 +924,24 @@ STABSP: MVI     A,' '
         DCR     B
         JNZ     STABSP
         INX     D               ; skip TAB byte
+        IF SYNHI
+        LDA     SLBYTI
+        INR     A
+        STA     SLBYTI
+        ENDIF
         JMP     SLETXT
 SLEEND:
+        IF SYNHI
+        ; Reset syntax color if not normal
+        LDA     SDCATT
+        ORA     A
+        JZ      SLEND2
+        LXI     D,SGRRES
+        CALL    OUTSTR
+        XRA     A
+        STA     SDCATT
+SLEND2:
+        ENDIF
         LXI     D,CLREOL        ; erase to end of line
         CALL    OUTSTR
         RET
@@ -1267,6 +1422,10 @@ SDHLE:  DB      0               ; per-line: end byte index (FF=none)
 SDHLON: DB      0               ; currently in reverse video
 SDBYTI: DB      0               ; byte index within line
 SDTMPB: DB      0               ; saved text byte across SGR calls
+        IF SYNHI
+SDCATT: DB      0               ; current syntax attribute
+SLBYTI: DB      0               ; byte index for SCREDLN
+        ENDIF
         CSEG
 
         END

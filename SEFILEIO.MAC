@@ -24,8 +24,10 @@
         EXTRN   GBINIT          ; initialise gap buffer
         EXTRN   GBINSRT         ; insert char into buffer
         EXTRN   GBMVTOP         ; move cursor to file top
+        EXTRN   SYNINIT         ; detect syntax mode from filename
         EXTRN   STATMSG         ; display status message
         EXTRN   OUTSTR          ; write $-string to console
+        EXTRN   OUTCHAR         ; output one character
         EXTRN   CURGOTO         ; position cursor (B=row,C=col)
 
 ;--- Exports ----------------------------------------------
@@ -248,6 +250,13 @@ FISKIP:
         ; File opened; show loading message and read records
         LXI     D,LDNGMSG
         CALL    STATMSG
+
+        ; Initialise line/column tracking
+        LXI     H,1
+        SHLD    FILNUM          ; line number = 1
+        XRA     A
+        STA     FICOL           ; column = 0
+
 FIRLP:  LXI     D,DMABUF        ; set DMA to our buffer
         MVI     C,BF_SETDMA
         CALL    BDOS
@@ -262,17 +271,71 @@ FIRLP:  LXI     D,DMABUF        ; set DMA to our buffer
         LXI     H,DMABUF
         MVI     B,RECSIZ
 FISTLP: MOV     A,M
-        CPI     CPMEOF          ; strip CP/M EOF marker
+        CPI     CPMEOF          ; CP/M EOF marker?
         JZ      FIEOF
-        PUSH    H               ; save DMA pointer (GBINSRT clobbers HL)
-        PUSH    B               ; save loop counter (GBINSRT clobbers B)
+        CPI     0DH             ; CR?
+        JZ      FICHR           ; insert without counting
+        CPI     0AH             ; LF?
+        JZ      FILF
+
+        ; Regular character - check line width
+        PUSH    H
+        LXI     H,FICOL
+        INR     M               ; increment column
+        MOV     A,M             ; A = new column count
+        POP     H
+        CPI     TXTCOLS+1       ; > 74 chars?
+        JNC     FIWIDE          ; line too wide
+        JMP     FICHR           ; insert the byte
+
+FILF:   ; LF - reset column, increment line number
+        PUSH    H
+        XRA     A
+        STA     FICOL
+        LHLD    FILNUM
+        INX     H
+        SHLD    FILNUM
+        POP     H
+
+FICHR:  ; Insert byte into gap buffer
+        PUSH    H               ; save DMA pointer
+        PUSH    B               ; save loop counter
         CALL    GBINSRT
         POP     B               ; restore loop counter
         POP     H               ; restore DMA pointer
+        INR     A               ; 0FFH -> 0 means buffer full
+        JZ      FIFULL
         INX     H
         DCR     B
         JNZ     FISTLP
         JMP     FIRLP
+
+FIFULL:
+        ; Buffer full - close file, discard buffer, show error
+        LXI     D,WRKFCB
+        MVI     C,BF_FCLOSE
+        CALL    BDOS
+        CALL    FIBUFCLR        ; reset gap buffer to empty
+        CALL    SYNINIT
+        LXI     D,FULLMSG
+        CALL    STATMSG
+        RET
+
+FIWIDE:
+        ; Line too wide - close file, discard buffer, show error
+        LXI     D,WRKFCB
+        MVI     C,BF_FCLOSE
+        CALL    BDOS
+        CALL    FIBUFCLR        ; reset gap buffer to empty
+        CALL    SYNINIT
+        ; Print "Line N is wider than 74 characters"
+        LXI     D,FIWDM1        ; "Line "
+        CALL    STATMSG         ; positions cursor, resets SGR
+        LHLD    FILNUM
+        CALL    FIPRNUM         ; print line number
+        LXI     D,FIWDM2        ; " is wider than 74 characters"
+        CALL    OUTSTR
+        RET
 
 FIEOF:
         ; Close file (ignore error)
@@ -283,6 +346,7 @@ FIEOF:
 FIOOPN: ; New or loaded: move cursor to top, clear modified
         CALL    GBMVTOP
         CALL    FICLRMOD
+        CALL    SYNINIT         ; set BD_SYNMD based on extension
         LXI     D,LOADMSG
         CALL    STATMSG
         RET
@@ -932,6 +996,80 @@ FPNESC: STAX    D
         RET
 
 ;=============================================================
+; FIPRNUM - Print HL as decimal number (0-65535).
+;           Leading zeros suppressed; at least 1 digit output.
+; Entry:  HL = number
+; Exit:   Digits output via OUTCHAR; all regs clobbered
+;=============================================================
+FIPRNUM:
+        XRA     A
+        STA     FIPFLG          ; 0 = suppress leading zeros
+        LXI     D,-10000
+        CALL    FIPRDG
+        LXI     D,-1000
+        CALL    FIPRDG
+        LXI     D,-100
+        CALL    FIPRDG
+        LXI     D,-10
+        CALL    FIPRDG
+        ; Units digit: always print
+        MOV     A,L
+        ADI     '0'
+        JMP     OUTCHAR         ; tail call
+
+;-------------------------------------------------------------
+; FIPRDG - Extract and print one decimal digit.
+; Entry:  HL = value, DE = negative power of 10
+; Exit:   HL = remainder; FIPFLG updated; DE clobbered
+;-------------------------------------------------------------
+FIPRDG:
+        MVI     B,0             ; digit counter
+FIPRLP: DAD     D               ; HL -= |power| (via add negative)
+        JNC     FIPRDN          ; underflow -> done
+        INR     B
+        JMP     FIPRLP
+FIPRDN:
+        ; Restore HL: negate DE and add back
+        MOV     A,D
+        CMA
+        MOV     D,A
+        MOV     A,E
+        CMA
+        MOV     E,A
+        INX     D               ; DE = -DE (positive)
+        DAD     D               ; HL = remainder
+
+        ; B = digit value. Print if non-zero or past leading zeros
+        MOV     A,B
+        ORA     A
+        JNZ     FIPRNZ          ; non-zero, always print
+
+        ; Zero digit: suppress if still leading
+        LDA     FIPFLG
+        ORA     A
+        RZ                      ; leading zero, skip
+
+        ; Past leading zeros: print '0'
+        MVI     A,'0'
+        PUSH    H
+        CALL    OUTCHAR
+        POP     H
+        RET
+
+FIPRNZ:
+        ; Non-zero digit: set flag, print
+        MOV     A,B
+        ADI     '0'
+        PUSH    H
+        PUSH    PSW             ; save ASCII digit
+        MVI     A,1
+        STA     FIPFLG          ; no more suppression
+        POP     PSW             ; restore digit
+        CALL    OUTCHAR
+        POP     H
+        RET
+
+;=============================================================
 ; DATA SEGMENT
 ;=============================================================
         DSEG
@@ -969,6 +1107,14 @@ LDNGMSG: DB    'Please wait, loading file...$'
 LOADMSG: DB    'File loaded.$'
 SAVEMSG: DB    'File saved. $'
 ERRMSG:  DB    'Write error!$'
+FULLMSG: DB    'File is too big.$'
+FIWDM1:  DB    'Line $'
+FIWDM2:  DB    ' is wider than 74 characters.$'
+
+; File load tracking
+FILNUM: DW      0               ; current line number during load
+FICOL:  DB      0               ; column counter during load
+FIPFLG: DB      0               ; FIPRNUM leading zero suppress
 
         END
 
