@@ -234,6 +234,7 @@ SRCHMAX EQU     64          ; max find string length
         EXTRN   FISAVFN         ; copy WRKFCB name to BD_FNAME
         EXTRN   FISMOD          ; read BD_MODIF flag
         EXTRN   FIPROMPT        ; prompt for filename
+        EXTRN   SYNINIT         ; detect syntax mode from filename
         EXTRN   CURGOTO         ; position cursor (B=row, C=col)
         EXTRN   MNUSHOW         ; run ESC menu
         EXTRN   SRFIND          ; find (always prompt)
@@ -508,8 +509,8 @@ DO_FNX: CALL    SRFNDNX
 DO_FND: CALL    SRFIND
         JMP     MLDIRT
 DO_SAV:
-        ; Check if filename exists (BD_FNAME[0] != space)
-        MVI     A,BD_FNAME
+        ; Check if filename exists (BD_FNAME[1] != space)
+        MVI     A,BD_FNAME+1
         CALL    BDFLD
         MOV     A,M
         ANI     7FH
@@ -520,6 +521,7 @@ DO_SAV:
         CALL    FIPROMPT
         JZ      DSAVDN          ; user cancelled
         CALL    FISAVFN         ; copy WRKFCB name to BD_FNAME
+        CALL    SYNINIT         ; update syntax mode for new ext
 DSAVGO: LXI     D,SAVWMSG
         CALL    STATMSG
         CALL    FISAVE
@@ -583,8 +585,8 @@ DOEXIT:
         JMP     DXRET
 
 DXYES:
-        ; Check if filename exists (BD_FNAME[0] != space)
-        MVI     A,BD_FNAME
+        ; Check if filename exists (BD_FNAME[1] != space)
+        MVI     A,BD_FNAME+1
         CALL    BDFLD
         MOV     A,M
         ANI     7FH

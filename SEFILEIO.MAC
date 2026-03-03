@@ -82,6 +82,7 @@ BF_FDEL   EQU   19          ; delete: DE=FCB
 BF_FREAD  EQU   20          ; seq read: DE=FCB
 BF_FWRITE EQU   21          ; seq write: DE=FCB
 BF_FMAKE  EQU   22          ; create: DE=FCB
+BF_GETDSK EQU   25          ; get current disk: ret A=0..15
 BF_SETDMA EQU   26          ; set DMA: DE=addr
 BF_USRNUM EQU   32          ; get/set user: E=num
 
@@ -528,8 +529,9 @@ FIBUFCLR:
         RET
 
 ;------------------------------------------------------------
-; FISAVFN - Copy FCB name bytes 1-11 into BD_FNAME field.
+; FISAVFN - Copy FCB drive+name+ext into BD_FNAME field.
 ; WRKFCB must be populated before calling.
+; BD_FNAME layout: [drive(1) + name(8) + ext(3)] = 12 bytes
 ;------------------------------------------------------------
 FISAVFN:
         LHLD    CURBDP          ; HL = descriptor
@@ -540,16 +542,14 @@ FISAVFN:
         ACI     0
         MOV     H,A             ; HL = &desc.BD_FNAME
 
-        LXI     D,WRKFCB+FCB_FN ; DE = name bytes in FCB
-        MVI     B,11            ; 8+3 = 11 bytes
+        LXI     D,WRKFCB+FCB_DR ; DE = drive+name+ext in FCB
+        MVI     B,12            ; 1+8+3 = 12 bytes
 FSFNLP: LDAX    D
         MOV     M,A
         INX     H
         INX     D
         DCR     B
         JNZ     FSFNLP
-        ; Store NUL terminator
-        MVI     M,0
         RET
 
 ;------------------------------------------------------------
@@ -605,7 +605,7 @@ FBFCLP: MOV     M,A
         DCR     B
         JNZ     FBFCLP
 
-        ; Copy name from descriptor BD_FNAME (11 bytes)
+        ; Copy drive+name+ext from descriptor BD_FNAME (12 bytes)
         LHLD    CURBDP
         MOV     A,L
         ADI     BD_FNAME
@@ -614,8 +614,8 @@ FBFCLP: MOV     M,A
         ACI     0
         MOV     H,A             ; HL = BD_FNAME
 
-        LXI     D,WRKFCB+FCB_FN
-        MVI     B,11
+        LXI     D,WRKFCB+FCB_DR
+        MVI     B,12
 FBFLP:  MOV     A,M
         STAX    D
         INX     H

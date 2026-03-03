@@ -48,6 +48,7 @@ BF_FDEL   EQU   19          ; delete: DE=FCB
 BF_FREAD  EQU   20          ; seq read: DE=FCB
 BF_FWRITE EQU   21          ; seq write: DE=FCB
 BF_FMAKE  EQU   22          ; create: DE=FCB
+BF_GETDSK EQU   25          ; get current disk: ret A
 BF_SETDMA EQU   26          ; set DMA: DE=addr
 BF_USRNUM EQU   32          ; get/set user: E=num
 
@@ -227,10 +228,11 @@ SGRREV:  DB     ESC,'[','7','m','$'  ; SGR reverse
         IF COLOR+SYNHI
 SGRMAG:  DB     ESC,'[','3','5','m','$'  ; SGR magenta fg
 SGRGRN:  DB     ESC,'[','3','2','m','$'  ; SGR green fg
-SGRBLU:  DB     ESC,'[','3','4','m','$'  ; SGR blue fg
+SGRBLU:  DB     ESC,'[','9','4','m','$'  ; SGR bright blue fg
 SGRRED:  DB     ESC,'[','3','1','m','$'  ; SGR red fg
 SGRYEL:  DB     ESC,'[','3','3','m','$'  ; SGR yellow fg
 SGRCYN:  DB     ESC,'[','3','6','m','$'  ; SGR cyan fg
+SGRWHT:  DB     ESC,'[','0',';','3','7','m','$' ; SGR reset+white fg
         ENDIF
 
 ;--- Separator line (80 '=' characters) ---------------
@@ -739,7 +741,7 @@ SDRVOF: PUSH    D
 ;-------------------------------------------------------------
 SDSGR:  ORA     A               ; ATTR_NRM (0)?
         JNZ     SDSGL0          ; no, look up in table
-        LXI     D,SGRRES        ; yes, emit SGR reset
+        LXI     D,SGRWHT        ; yes, emit white (not bright)
         JMP     SDSGF
 SDSGL0: LXI     H,SGRLUT
 SDSGL:  MOV     B,M             ; table attr byte
@@ -1083,7 +1085,7 @@ INFOBAR:
         ENDIF
 
         ; Print filename
-        ; BD_FNAME stores name(8)+ext(3), no drive byte
+        ; BD_FNAME stores drive(1)+name(8)+ext(3)
         LHLD    CURBDP
         MVI     A,BD_FNAME
         ADD     L
@@ -1091,18 +1093,32 @@ INFOBAR:
         MVI     A,0
         ADC     H
         MOV     H,A             ; HL -> BD_FNAME
-        ; Check if name is blank (no file loaded)
+        ; Check if name is blank (BD_FNAME+1 == space)
+        INX     H               ; HL -> BD_FNAME+1
         MOV     A,M
         ANI     7FH
         CPI     ' '
+        DCX     H               ; HL -> BD_FNAME
         JZ      IBNONAME
-        ; Print "A:" prefix
+        ; Display drive letter from BD_FNAME[0]
+        MOV     A,M             ; A = FCB drive (0=default,1=A,2=B...)
+        ORA     A
+        JNZ     IBDRVOK
+        ; Drive=0: query current disk via BDOS
+        PUSH    H
+        MVI     C,BF_GETDSK
+        CALL    BDOS            ; A = current disk (0=A,1=B...)
+        POP     H
+        INR     A               ; 0-based -> 1-based
+IBDRVOK:
+        DCR     A               ; 1-based -> 0-based
+        ADI     'A'             ; convert to letter
         PUSH    H               ; save BD_FNAME ptr across OUTCHAR
-        MVI     A,'A'           ; default drive
         CALL    OUTCHAR
         MVI     A,':'
         CALL    OUTCHAR
         POP     H               ; restore BD_FNAME ptr
+        INX     H               ; HL -> BD_FNAME+1 (name start)
         JMP     IBNAME
 IBNONAME:
         ; No file loaded - print placeholder
@@ -1112,7 +1128,7 @@ IBNONAME:
         POP     H
         JMP     IBNMDN
 IBNAME:
-        ; Print 8-char name (BD_FNAME+0..7)
+        ; Print 8-char name (BD_FNAME+1..8)
         MVI     B,8
 IBNMLP: MOV     A,M
         ANI     7FH             ; strip attribute bit
@@ -1130,7 +1146,7 @@ IBNMLP: MOV     A,M
 IBNMDN:
         ; Print extension if present
         LHLD    CURBDP
-        MVI     A,BD_FNAME+8    ; extension offset (name=8, ext at +8)
+        MVI     A,BD_FNAME+9    ; extension offset (drive+name=9, ext at +9)
         ADD     L
         MOV     L,A
         MVI     A,0

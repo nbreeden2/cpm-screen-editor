@@ -224,7 +224,7 @@ SRCHMAX EQU     64          ; max find string length
 SYNINIT:
         LHLD    CURBDP
         MOV     A,L
-        ADI     BD_FNAME+8      ; BD_FNAME + 8 = ext byte 0
+        ADI     BD_FNAME+9      ; BD_FNAME + 9 = ext byte 0 (after drive)
         MOV     L,A
         MOV     A,H
         ACI     0
@@ -250,16 +250,41 @@ SYNINIT:
 SYCHKASM:
         ; Check for 'A' 'S' 'M' (ASM)
         CPI     'A'
-        JNZ     SYNONE
+        JNZ     SYCHKINC
         INX     H
         MOV     A,M
         ANI     5FH
         CPI     'S'
-        JNZ     SYNONE
+        JNZ     SYCHKINC
         INX     H
         MOV     A,M
         ANI     5FH
         CPI     'M'
+        JNZ     SYCHKINC
+        JMP     SYASM
+
+SYCHKINC:
+        ; Check for 'I' 'N' 'C' (INC)
+        LHLD    CURBDP
+        MOV     A,L
+        ADI     BD_FNAME+9
+        MOV     L,A
+        MOV     A,H
+        ACI     0
+        MOV     H,A             ; HL -> extension field
+        MOV     A,M
+        ANI     5FH
+        CPI     'I'
+        JNZ     SYNONE
+        INX     H
+        MOV     A,M
+        ANI     5FH
+        CPI     'N'
+        JNZ     SYNONE
+        INX     H
+        MOV     A,M
+        ANI     5FH
+        CPI     'C'
         JNZ     SYNONE
 
 SYASM:  ; Set SYN_ASM
@@ -362,17 +387,19 @@ SNLP:
         CPI     ';'             ; comment
         JZ      SNCOMM
 
+        ; Check quote -> string (before digit range check;
+        ; quote chars 0x22/0x27 are below '0' so JC would
+        ; misroute them to SNWRD)
+        CPI     0027H           ; single quote '
+        JZ      SNSTR
+        CPI     '"'
+        JZ      SNSTR2
+
         ; Check digit -> number
         CPI     '0'
         JC      SNWRD
         CPI     '9'+1
         JC      SNNUM
-
-        ; Check quote -> string
-        CPI     0027H           ; single quote '
-        JZ      SNSTR
-        CPI     '"'
-        JZ      SNSTR2
 
 SNWRD:
         ; Identifier token: collect chars, classify

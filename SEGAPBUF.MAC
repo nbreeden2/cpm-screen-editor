@@ -478,6 +478,28 @@ GBDLBRC:
         ; Recalculate column as length of current line
         CALL    GBCURLNL        ; HL = current line length
         CALL    GBSETCSCOL
+        ; Delete preceding CR if present (CR+LF inserted as pair)
+        CALL    GBGAPBG         ; HL = GAPBG
+        MOV     A,H
+        ORA     L
+        JZ      GBDLDONE        ; at buffer start, skip
+        CALL    GBBASE          ; DE = base
+        CALL    GBGAPBG         ; HL = GAPBG
+        DCX     H               ; GAPBG - 1
+        DAD     D               ; HL = abs address
+        MOV     A,M             ; byte before cursor
+        CPI     CR
+        JNZ     GBDLDONE        ; not CR, done
+        ; CR found: absorb it into the gap
+        CALL    GBGAPBG
+        DCX     H
+        CALL    GBSETGAPBG      ; GAPBG--
+        CALL    GBTXEND
+        DCX     H
+        CALL    GBSETTXEND      ; TXEND--
+        CALL    GBCSOFF
+        DCX     H
+        CALL    GBSETCSOFF      ; CSOFF--
         JMP     GBDLDONE
 GBDLBCL:
         ; Not a newline
@@ -1462,8 +1484,10 @@ GGLCPY: MOV     A,B
         POP     B               ; restore char count
         JZ      GGLCPD          ; past end of text
         CPI     CR
-        JZ      GGLCPD          ; end of line
-        CPI     LF
+        JNZ     GGLNCR
+        INX     H               ; skip CR (invisible, not a delimiter)
+        JMP     GGLCPY
+GGLNCR: CPI     LF
         JZ      GGLCPD          ; end of line
         STAX    D               ; store char in buffer
         INX     D

@@ -285,7 +285,7 @@ HLPWAIT:
 HLPCLR:  DB     ESC,'[2J',ESC,'[H$'
 HLPNRM:  DB     ESC,'[0m$'
 HLPHDR:  DB     ESC,'[7m'
-         DB     ' SEDIT v1.02 Key Reference'
+         DB     ' SEDIT v1.03 Key Reference'
          DB     '                              '
          DB     ESC,'[0m$'
 HLPFTR:  DB     ESC,'[7m'
