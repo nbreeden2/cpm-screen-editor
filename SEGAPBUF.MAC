@@ -88,9 +88,10 @@ INFOROW EQU     1           ; info bar row
 RULRROW EQU     2           ; tab ruler row
 SEPRROW EQU     23          ; separator (===) row
 STATROW EQU     24          ; status/message row
-LNUMWID EQU     4           ; gutter width (3+space)
-TXTCOLS EQU     74          ; max text columns/line
-TXTFCOL EQU     5           ; text start col (1-based)
+LNUMWID EQU     5           ; gutter width (4+space)
+TXTCOLS EQU     73          ; max text columns/line
+MAXCOLS EQU     128         ; max chars per line (raw bytes)
+TXTFCOL EQU     6           ; text start col (1-based)
 TABWID  EQU     4           ; tab stop interval
 
 ;--- SGR attribute byte values ------------------------
@@ -121,8 +122,8 @@ BD_FNAME EQU    22          ; 12: drive+name+ext
 BD_SIZE  EQU    34          ; bytes per descriptor
 
 ;--- Number of edit buffers ---------------------------
-MAXBUFS EQU     2           ; maximum open buffers
-MINMEM  EQU     18*1024     ; minimum TPA required
+MAXBUFS EQU     1           ; maximum open buffers
+MINMEM  EQU     9*1024      ; minimum TPA required
 
 ;--- Syntax mode codes --------------------------------
 SYN_NONE EQU    0           ; plain text
@@ -1452,7 +1453,7 @@ GGLSRP:
         LXI     D,GGLBUF        ; DE = output buffer
         MVI     B,0             ; B = char count
 GGLCPY: MOV     A,B
-        CPI     TXTCOLS
+        CPI     MAXCOLS
         JZ      GGLCPD          ; hit column limit
         PUSH    B               ; save char count (GBLOGRD clobbers BC)
         PUSH    D               ; save buffer pointer (GBLOGRD clobbers DE)
@@ -1886,7 +1887,7 @@ GRL1LP: LDA     GFLR1E+1
         CMP     L
         JZ      GRL1DN          ; R1 exhausted, switch to R2
 GRL1NE: MOV     A,B
-        CPI     TXTCOLS
+        CPI     MAXCOLS
         JNC     GRL1SK          ; past column limit
         MOV     A,M             ; read byte
         INX     H               ; advance read ptr
@@ -1939,7 +1940,7 @@ GRL2LP: LDA     GFLR2E+1
         CMP     L
         JZ      GRLDN2          ; end of text
 GRL2NE: MOV     A,B
-        CPI     TXTCOLS
+        CPI     MAXCOLS
         JNC     GRL2SK          ; past column limit
         MOV     A,M             ; read byte
         INX     H
@@ -2411,7 +2412,7 @@ GBSETMOD:
         DSEG
 GBTMP:  DB      0               ; temporary char storage
 GBLOFF: DW      0               ; GBLOGRD: saved logical offset (HL on entry)
-GGLBUF: DS      TXTCOLS+1       ; GBGETLN: flat line copy buffer (NUL terminated)
+GGLBUF: DS      MAXCOLS+1       ; GBGETLN: flat line copy buffer (NUL terminated)
 
 ; GBFNDLN working variables
 GFLCNT: DW      0               ; target line counter

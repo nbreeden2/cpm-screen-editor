@@ -102,9 +102,10 @@ INFOROW EQU     1           ; info bar row
 RULRROW EQU     2           ; tab ruler row
 SEPRROW EQU     23          ; separator (===) row
 STATROW EQU     24          ; status/message row
-LNUMWID EQU     4           ; gutter width (3+space)
-TXTCOLS EQU     74          ; max text columns/line
-TXTFCOL EQU     5           ; text start col (1-based)
+LNUMWID EQU     5           ; gutter width (4+space)
+TXTCOLS EQU     73          ; max text columns/line
+MAXCOLS EQU     128         ; max chars per line (raw bytes)
+TXTFCOL EQU     6           ; text start col (1-based)
 TABWID  EQU     4           ; tab stop interval
 
 ;--- SGR attribute byte values ------------------------
@@ -140,8 +141,8 @@ BD_FNAME EQU    22          ; 12: drive+name+ext
 BD_SIZE  EQU    34          ; bytes per descriptor
 
 ;--- Number of edit buffers ---------------------------
-MAXBUFS EQU     2           ; maximum open buffers
-MINMEM  EQU     18*1024     ; minimum TPA required
+MAXBUFS EQU     1           ; maximum open buffers
+MINMEM  EQU     9*1024      ; minimum TPA required
 
 ;--- Syntax mode codes --------------------------------
 SYN_NONE EQU    0           ; plain text
@@ -295,7 +296,7 @@ SYNLINE:
         PUSH    D
         PUSH    B
         LXI     H,SYNATTR
-        MVI     B,TXTCOLS
+        MVI     B,MAXCOLS
         MVI     A,ATTR_NRM
 SNCLR:  MOV     M,A
         INX     H
@@ -814,7 +815,7 @@ REGTBL:
         DSEG
 
 ; Per-byte attribute buffer (one attribute per source byte)
-SYNATTR: DS     TXTCOLS         ; 74 bytes
+SYNATTR: DS     MAXCOLS         ; 128 bytes
 
 ; Syntax state
 SYNPTR: DW      0               ; pointer to current line text
@@ -829,7 +830,7 @@ SNSAVD: DB      0
 ; Token buffer for register/directive comparison (NUL-terminated)
 ; Must be last in DSEG: overflow from long identifiers goes into
 ; safe space rather than corrupting SNTLEN/SNSAVD.
-SINTOK: DS      TXTCOLS+1       ; 75 bytes (max line width + NUL)
+SINTOK: DS      MAXCOLS+1       ; 129 bytes (max line width + NUL)
 
         END
 

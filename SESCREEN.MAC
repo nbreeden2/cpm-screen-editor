@@ -73,9 +73,10 @@ INFOROW EQU     1           ; info bar row
 RULRROW EQU     2           ; tab ruler row
 SEPRROW EQU     23          ; separator (===) row
 STATROW EQU     24          ; status/message row
-LNUMWID EQU     4           ; gutter width (3+space)
-TXTCOLS EQU     74          ; max text columns/line
-TXTFCOL EQU     5           ; text start col (1-based)
+LNUMWID EQU     5           ; gutter width (4+space)
+TXTCOLS EQU     73          ; max text columns/line
+MAXCOLS EQU     128         ; max chars per line (raw bytes)
+TXTFCOL EQU     6           ; text start col (1-based)
 TABWID  EQU     4           ; tab stop interval
 
 ;--- SGR attribute byte values ------------------------
@@ -114,8 +115,8 @@ BD_FNAME EQU    22          ; 12: drive+name+ext
 BD_SIZE  EQU    34          ; bytes per descriptor
 
 ;--- Number of edit buffers ---------------------------
-MAXBUFS EQU     2           ; maximum open buffers
-MINMEM  EQU     18*1024     ; minimum TPA required
+MAXBUFS EQU     1           ; maximum open buffers
+MINMEM  EQU     9*1024      ; minimum TPA required
 
 ;--- Syntax mode codes --------------------------------
 SYN_NONE EQU    0           ; plain text
@@ -189,7 +190,7 @@ SRCHMAX EQU     64          ; max find string length
 
         EXTRN   CURBDP          ; current buffer desc ptr
         EXTRN   INSMODE         ; insert/overwrite mode
-        EXTRN   BMGETCUR        ; get current buf desc
+        EXTRN   HSCROL          ; horizontal scroll offset
         EXTRN   GBGETLN         ; get ptr to line text
         EXTRN   GBCNTLN         ; count lines in buffer
         EXTRN   GBFNDCS         ; find TOPLN offset via backward scan
@@ -210,7 +211,7 @@ SRCHMAX EQU     64          ; max find string length
         PUBLIC  OUTCHAR         ; output one character
         PUBLIC  OUTSTR          ; output $-string
         PUBLIC  CURGOTO         ; goto row,col
-        PUBLIC  OUTN3DG         ; output 3-digit number
+        PUBLIC  OUTN4DG         ; output 4-digit number
 
 ;--- ESC sequence string constants --------------------
 ESCSTR:  DB     ESC,'[','$'     ; ESC [  (CSI intro)
@@ -415,7 +416,7 @@ SDRWLP: LDA     SDROW
         ADC     H
         MOV     H,A             ; HL = TOPLN + row
         INX     H               ; 1-based for display
-        CALL    OUTN3DG
+        CALL    OUTN4DG
         IF COLOR
         LXI     D,SGRRES        ; reset after gutter
         CALL    OUTSTR
@@ -464,8 +465,8 @@ SDHLS1: MOV     A,B             ; high byte
         ORA     A
         JNZ     SDHNHL          ; > 255 -> past this line
         MOV     A,C
-        CPI     TXTCOLS
-        JNC     SDHNHL          ; >= TXTCOLS -> past visible
+        CPI     MAXCOLS
+        JNC     SDHNHL          ; >= MAXCOLS -> past line
         STA     SDHLS
 SDHLEC: ; Compute SDHLE = max(0, SDHLEN - SDLNST) clamped 8-bit
         LHLD    SDHLEN
@@ -503,7 +504,7 @@ SDHSET: POP     D               ; restore text pointer
         IF SYNHI
         ; Tokenize line for syntax highlighting
         PUSH    D               ; save text pointer
-        MVI     B,TXTCOLS
+        MVI     B,MAXCOLS
         CALL    SYNLINE
         POP     D               ; restore text pointer
         XRA     A
@@ -512,11 +513,76 @@ SDHSET: POP     D               ; restore text pointer
         XRA     A
         STA     SDHLON          ; not in reverse yet
         STA     SDBYTI          ; byte index = 0
-        MVI     C,0             ; C = column counter
+        MVI     C,0             ; C = visual column counter
+
+        ; --- Skip phase: advance past HSCROL visual columns ---
+        LDA     HSCROL
+        ORA     A
+        JZ      SDTXLP          ; no scroll, enter output loop
+        STA     SDSKIP          ; save skip target
+SDSKPL: LDAX    D               ; read text byte
+        ORA     A
+        JZ      SDSKDN          ; NUL = end of line
+        CPI     CR
+        JZ      SDSKDN
+        CPI     LF
+        JZ      SDSKDN
+        CPI     TAB
+        JZ      SDSKTB
+        ; Normal char: advance 1 visual column
+        INX     D
+        INR     C               ; visual column++
+        LDA     SDBYTI
+        INR     A
+        STA     SDBYTI          ; byte index++
+        JMP     SDSKCK
+SDSKTB: ; Tab in skip: advance to next tab stop
+        LDA     HSCROL
+        ADD     C               ; A = absolute column (HSCROL + C)
+        ANI     TABWID-1        ; position within tab
+        MOV     B,A
+        MVI     A,TABWID
+        SUB     B               ; spaces to next stop
+        ADD     C               ; A = new visual column
+        MOV     C,A
+        INX     D               ; skip TAB byte
+        LDA     SDBYTI
+        INR     A
+        STA     SDBYTI          ; byte index++
+SDSKCK: LDA     SDSKIP
+        CMP     C               ; skip_target - visual_column
+        JC      SDSKDN          ; target < C, done
+        JZ      SDSKDN          ; target == C, done
+        JMP     SDSKPL          ; target > C, keep skipping
+SDSKDN: ; Skip done. Check if we entered highlight region.
+        LDA     SDHLMD
+        ORA     A
+        JZ      SDSK2           ; no highlight active
+        LDA     SDBYTI
+        MOV     B,A             ; B = current byte index
+        LDA     SDHLS
+        CMP     B
+        JZ      SDSK2           ; at start, will trigger normally
+        JNC     SDSK2           ; before start, no highlight yet
+        ; Past highlight start: check if before end
+        LDA     SDHLE
+        CMP     B
+        JC      SDSK2           ; past end, no highlight
+        JZ      SDSK2           ; at end, no highlight
+        ; Inside highlight region: turn reverse on
+        PUSH    D
+        PUSH    B
+        LXI     D,SGRREV        ; reverse video on
+        CALL    OUTSTR
+        POP     B
+        POP     D
+        MVI     A,1
+        STA     SDHLON
+SDSK2:  MVI     C,0             ; reset screen column for output
         ; --- Text output loop ---
 SDTXLP: MOV     A,C
         CPI     TXTCOLS
-        JNC     SDCLR           ; hit column limit
+        JNC     SDCLR           ; hit screen column limit
         LDAX    D               ; read text byte
         ORA     A
         JZ      SDCLR           ; NUL = end
@@ -572,8 +638,9 @@ SDSYNS:
         STA     SDBYTI
         JMP     SDTXLP
 
-SDTAB:  ; Expand tab to next tab stop
-        MOV     A,C
+SDTAB:  ; Expand tab to next tab stop (absolute column)
+        LDA     HSCROL
+        ADD     C               ; A = absolute column
         ANI     TABWID-1        ; position within tab
         MOV     B,A
         MVI     A,TABWID
@@ -734,7 +801,7 @@ SCREDCL:
 ; SCREDLN - Draw one edit area line.
 ; Entry:  B = screen row offset (0 = first edit row)
 ; Exit:   Line drawn on terminal; BC DE HL clobbered
-; Calls:  CURGOTO, OUTN3DG, OUTCHAR, OUTSTR, GBGETLN
+; Calls:  CURGOTO, OUTN4DG, OUTCHAR, OUTSTR, GBGETLN
 ;=============================================================
 SCREDLN:
         PUSH    B               ; save row offset
@@ -787,7 +854,9 @@ SCREDLN:
         MOV     A,E
         ADD     B
         MOV     L,A
-        MVI     H,0             ; HL = line number
+        MOV     A,D
+        ACI     0
+        MOV     H,A             ; HL = TOPLINE + row
         INX     H               ; make 1-based (match SLEDRAW gutter)
         IF COLOR
         PUSH    H
@@ -795,7 +864,7 @@ SCREDLN:
         CALL    OUTSTR
         POP     H
         ENDIF
-        CALL    OUTN3DG         ; print 3-digit number
+        CALL    OUTN4DG         ; print 4-digit number
         IF COLOR
         LXI     D,SGRRES        ; reset after gutter
         CALL    OUTSTR
@@ -807,8 +876,8 @@ SCREDLN:
         RET
 
 SLEDRAW:
-        ; DE = pointer to text, A = length (up to 74)
-        ; Draw the line number gutter (columns 1-3)
+        ; DE = pointer to text, A = length (up to 73)
+        ; Draw the line number gutter (columns 1-4)
         PUSH    D               ; save text pointer
         PUSH    B               ; save row
         LHLD    CURBDP
@@ -826,7 +895,9 @@ SLEDRAW:
         MOV     A,E
         ADD     B
         MOV     L,A
-        MVI     H,0             ; HL = display line#
+        MOV     A,D
+        ACI     0
+        MOV     H,A             ; HL = TOPLINE + row
         INX     H               ; make 1-based
         IF COLOR
         PUSH    H
@@ -834,12 +905,12 @@ SLEDRAW:
         CALL    OUTSTR
         POP     H
         ENDIF
-        CALL    OUTN3DG         ; print 3-digit number
+        CALL    OUTN4DG         ; print 4-digit number
         IF COLOR
         LXI     D,SGRRES        ; reset after gutter
         CALL    OUTSTR
         ENDIF
-        MVI     A,' '           ; column 4 space
+        MVI     A,' '           ; column 5 space
         CALL    OUTCHAR
         POP     B               ; restore row
         POP     D               ; restore text pointer
@@ -847,7 +918,7 @@ SLEDRAW:
         IF SYNHI
         ; Tokenize line for syntax highlighting
         PUSH    D               ; save text pointer
-        MVI     B,TXTCOLS
+        MVI     B,MAXCOLS
         CALL    SYNLINE
         POP     D               ; restore text pointer
         XRA     A
@@ -855,12 +926,58 @@ SLEDRAW:
         STA     SLBYTI          ; byte index = 0
         ENDIF
 
-        ; Output up to TXTCOLS chars of text
-        MVI     C,0             ; C = chars output
+        ; Output up to TXTCOLS screen chars of text
+        MVI     C,0             ; C = visual column counter
+
+        ; --- Skip phase: advance past HSCROL visual columns ---
+        LDA     HSCROL
+        ORA     A
+        JZ      SLETXT          ; no scroll, enter output loop
+        STA     SLSKIP          ; save skip target
+SLSKPL: LDAX    D               ; read text byte
+        ORA     A
+        JZ      SLSKDN          ; NUL = end
+        CPI     CR
+        JZ      SLSKDN
+        CPI     LF
+        JZ      SLSKDN
+        CPI     TAB
+        JZ      SLSKTB
+        ; Normal char: advance 1 visual column
+        INX     D
+        INR     C
+        IF SYNHI
+        LDA     SLBYTI
+        INR     A
+        STA     SLBYTI
+        ENDIF
+        JMP     SLSKCK
+SLSKTB: ; Tab in skip: advance to next tab stop
+        LDA     HSCROL
+        ADD     C               ; A = absolute column
+        ANI     TABWID-1
+        MOV     B,A
+        MVI     A,TABWID
+        SUB     B               ; spaces to next stop
+        ADD     C               ; new visual column
+        MOV     C,A
+        INX     D
+        IF SYNHI
+        LDA     SLBYTI
+        INR     A
+        STA     SLBYTI
+        ENDIF
+SLSKCK: LDA     SLSKIP
+        CMP     C               ; skip_target - visual_column
+        JC      SLSKDN          ; target < C, done
+        JZ      SLSKDN          ; target == C, done
+        JMP     SLSKPL          ; target > C, keep skipping
+SLSKDN: MVI     C,0             ; reset screen column for output
+
 SLETXT:
         MOV     A,C
         CPI     TXTCOLS
-        JNC     SLEEND          ; hit column limit
+        JNC     SLEEND          ; hit screen column limit
         LDAX    D               ; read text byte
         ORA     A               ; NUL = end
         JZ      SLEEND
@@ -904,8 +1021,9 @@ SLSNS:  POP     PSW             ; restore text byte
         ENDIF
         JMP     SLETXT
 SLETAB:
-        ; Expand tab to next tab stop
-        MOV     A,C
+        ; Expand tab to next tab stop (absolute column)
+        LDA     HSCROL
+        ADD     C               ; A = absolute column
         ANI     TABWID-1        ; position within tab
         MOV     B,A
         MVI     A,TABWID
@@ -1220,8 +1338,11 @@ CURPOS:
         MOV     A,B
         ADI     EDITFR
         MOV     B,A             ; B = terminal row
-        ; Terminal col = C + TXTFCOL (1-based)
+        ; Terminal col = C - HSCROL + TXTFCOL (1-based)
+        LDA     HSCROL
+        MOV     L,A             ; L = HSCROL
         MOV     A,C
+        SUB     L               ; A = CSCOL - HSCROL (screen col)
         ADI     TXTFCOL
         MOV     C,A             ; C = terminal col
         CALL    CURGOTO
@@ -1287,56 +1408,87 @@ OUTSTR:
         JMP     OUTSTR
 
 ;=============================================================
-; OUTN3DG - Output number in HL as 3-digit decimal,
+; OUTN4DG - Output number in HL as 4-digit decimal,
 ;           right-justified with leading spaces.
-; Entry:  HL = number (0-999 expected)
-; Exit:   3 chars output; AF BC DE HL clobbered
+; Entry:  HL = number (0-9999 expected)
+; Exit:   4 chars output; AF BC DE HL clobbered
 ;=============================================================
-OUTN3DG:
-        ; Hundreds digit
+OUTN4DG:
+        XRA     A
+        STA     ON4LZF          ; clear leading-digit flag
+        ; --- Thousands digit ---
+        MVI     B,0
+        LXI     D,-1000
+ON4KLP: INR     B
+        DAD     D
+        JC      ON4KLP
+        DCR     B               ; B = thousands digit
+        LXI     D,1000
+        DAD     D               ; HL = remainder 0..999
+        MOV     A,B
+        ORA     A
+        JNZ     ON4KD
+        MVI     A,' '
+        JMP     ON4KO
+ON4KD:  MVI     A,0FFH
+        STA     ON4LZF          ; mark: significant digit seen
+        MOV     A,B
+        ADI     '0'
+ON4KO:  PUSH    H
+        CALL    OUTCHAR
+        POP     H
+        ; --- Hundreds digit ---
         MVI     B,0
         LXI     D,-100
-ON3HLP: INR     B
+ON4HLP: INR     B
         DAD     D
-        JC      ON3HLP          ; loop while CY=1 (HL >= 100)
+        JC      ON4HLP
         DCR     B               ; B = hundreds digit
         LXI     D,100
-        DAD     D               ; restore HL (0..99 remainder)
+        DAD     D               ; HL = remainder 0..99
         MOV     A,B
-        STA     ON3HF           ; save hundreds flag (memory, not C)
         ORA     A
-        JNZ     ON3DS
-        MVI     A,' '           ; leading space for zero hundreds
-        JMP     ON3DP
-ON3DS:  ADI     '0'
-ON3DP:  PUSH    H               ; preserve remainder across OUTCHAR
+        JNZ     ON4HD
+        LDA     ON4LZF
+        ORA     A
+        JZ      ON4HZ           ; still leading -> space
+        MVI     A,'0'
+        JMP     ON4HO
+ON4HD:  MVI     A,0FFH
+        STA     ON4LZF          ; mark: significant digit seen
+        MOV     A,B
+        ADI     '0'
+        JMP     ON4HO
+ON4HZ:  MVI     A,' '
+ON4HO:  PUSH    H
         CALL    OUTCHAR
         POP     H
-        ; Tens digit
+        ; --- Tens digit ---
         MVI     B,0
         LXI     D,-10
-ON3TLP: INR     B
+ON4TLP: INR     B
         DAD     D
-        JC      ON3TLP          ; loop while CY=1 (HL >= 10)
+        JC      ON4TLP
         DCR     B               ; B = tens digit
         LXI     D,10
-        DAD     D               ; restore HL (0..9 units remainder)
-        ; suppress leading zero if hundreds AND tens both zero
+        DAD     D               ; HL = remainder 0..9
         MOV     A,B
         ORA     A
-        JNZ     ON3TS
-        LDA     ON3HF           ; was hundreds zero?
+        JNZ     ON4TD
+        LDA     ON4LZF
         ORA     A
-        JZ      ON3TZ           ; both zero -> space
-ON3TS:  MOV     A,B
+        JZ      ON4TZ           ; still leading -> space
+        MVI     A,'0'
+        JMP     ON4TO
+ON4TD:  MOV     A,B
         ADI     '0'
-        JMP     ON3TP
-ON3TZ:  MVI     A,' '
-ON3TP:  PUSH    H               ; preserve units remainder across OUTCHAR
+        JMP     ON4TO
+ON4TZ:  MVI     A,' '
+ON4TO:  PUSH    H
         CALL    OUTCHAR
         POP     H
-        ; Units digit
-        MOV     A,L             ; units remainder (0..9)
+        ; --- Units digit (always printed) ---
+        MOV     A,L
         ADI     '0'
         CALL    OUTCHAR
         RET
@@ -1406,7 +1558,7 @@ OUTHL4:
 ;--- Data for OUTHL leading-zero suppression ----------
         DSEG
 OHLFLAG: DB     0               ; non-zero = digit seen
-ON3HF:   DB     0               ; OUTN3DG: hundreds digit flag
+ON4LZF:  DB     0               ; OUTN4DG: leading-zero flag
 ; SCRDRAW working variables
 SDTPLN: DW      0               ; saved TOPLN for gutter numbers
 SDLOFF: DW      0               ; current logical scan offset
@@ -1422,10 +1574,12 @@ SDHLE:  DB      0               ; per-line: end byte index (FF=none)
 SDHLON: DB      0               ; currently in reverse video
 SDBYTI: DB      0               ; byte index within line
 SDTMPB: DB      0               ; saved text byte across SGR calls
+SDSKIP: DB      0               ; horizontal skip target (HSCROL copy)
         IF SYNHI
 SDCATT: DB      0               ; current syntax attribute
 SLBYTI: DB      0               ; byte index for SCREDLN
         ENDIF
+SLSKIP: DB      0               ; SLEDRAW horizontal skip target
         CSEG
 
         END

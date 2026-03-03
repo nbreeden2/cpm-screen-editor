@@ -19,14 +19,13 @@
 ;     M80 =SEMENU
 ;     M80 =SESEARCH
 ;     M80 =SEBLOCK
-;     M80 =SEBUFMGR
 ;     M80 =SESYNTAX
 ;     M80 =SEKEYBND
 ;     M80 =SEHELP
 ;   Link (one command, split here for readability):
 ;     L80 SEDIT,SESCREEN,SEKEY,SEGAPBUF,SEFILEIO,
-;         SEMENU,SESEARCH,SEBLOCK,SEBUFMGR,
-;         SESYNTAX,SEKEYBND,SEHELP,SEDIT/N/E
+;         SEMENU,SESEARCH,SEBLOCK,SESYNTAX,
+;         SEKEYBND,SEHELP,SEDIT/N/E
 ;   Or run: SUBMIT BUILD
 ;------------------------------------------------------------
 ; REVISION HISTORY:
@@ -91,9 +90,10 @@ INFOROW EQU     1           ; info bar row
 RULRROW EQU     2           ; tab ruler row
 SEPRROW EQU     23          ; separator (===) row
 STATROW EQU     24          ; status/message row
-LNUMWID EQU     4           ; gutter width (3+space)
-TXTCOLS EQU     74          ; max text columns/line
-TXTFCOL EQU     5           ; text start col (1-based)
+LNUMWID EQU     5           ; gutter width (4+space)
+TXTCOLS EQU     73          ; max text columns/line
+MAXCOLS EQU     128         ; max chars per line (raw bytes)
+TXTFCOL EQU     6           ; text start col (1-based)
 TABWID  EQU     4           ; tab stop interval
 
 ;--- SGR attribute byte values ------------------------
@@ -124,8 +124,8 @@ BD_FNAME EQU    22          ; 12: drive+name+ext
 BD_SIZE  EQU    34          ; bytes per descriptor
 
 ;--- Number of edit buffers ---------------------------
-MAXBUFS EQU     2           ; maximum open buffers
-MINMEM  EQU     18*1024     ; minimum TPA required
+MAXBUFS EQU     1           ; maximum open buffers
+MINMEM  EQU     9*1024      ; minimum TPA required
 
 ;--- Syntax mode codes --------------------------------
 SYN_NONE EQU    0           ; plain text
@@ -199,9 +199,8 @@ SRCHMAX EQU     64          ; max find string length
 
 
 ;--- Cross-module entry points ------------------------
-        EXTRN   BMINIT          ; buffer manager init
-        EXTRN   BMGETCUR        ; -> current buf desc
-        EXTRN   BMSWITCH        ; switch active buffer
+        EXTRN   BMDATEND        ; end-of-DSEG marker (SEHELP)
+        EXTRN   GBINIT          ; initialise gap buffer
         EXTRN   KBINIT          ; key binding init
         EXTRN   GETKEY          ; read next key
         EXTRN   SCRINIT         ; screen init/clear
@@ -251,6 +250,7 @@ SRCHMAX EQU     64          ; max find string length
         PUBLIC  CURBDP          ; current buf desc ptr
         PUBLIC  TPATOP          ; TPA top address
         PUBLIC  DOEXIT          ; exit handler (for SEMENU)
+        PUBLIC  HSCROL          ; horizontal scroll offset
 
 ;=============================================================
 ; CODE SEGMENT
@@ -272,9 +272,41 @@ START:
         LHLD    0006H           ; HL = BDOS address = TPA top
         SHLD    TPATOP          ; save it
 
-        ; Initialize buffer manager (allocates gap buffers)
-        CALL    BMINIT
-        JNZ     MEMFAIL         ; NZ = insufficient memory
+        ; Initialize single gap buffer (full TPA)
+        ; available = TPATOP - BMDATEND
+        LXI     D,BMDATEND
+        MOV     A,L
+        SUB     E
+        MOV     C,A
+        MOV     A,H
+        SBB     D
+        MOV     B,A             ; BC = available bytes
+
+        ; Check >= MINMEM
+        LXI     H,MINMEM
+        MOV     A,B
+        CMP     H
+        JC      MEMFAIL         ; high byte less
+        JNZ     BMOK1           ; high byte greater, ok
+        MOV     A,C
+        CMP     L
+        JC      MEMFAIL         ; equal high, low byte less
+BMOK1:
+        ; BC = buffer size, DE = base address (BMDATEND)
+        LXI     H,BDESC0        ; HL = descriptor
+        CALL    GBINIT
+
+        ; Set CURBDP
+        LXI     H,BDESC0
+        SHLD    CURBDP
+
+        ; Fill BD_FNAME with spaces (12 bytes)
+        LXI     H,BDESC0+BD_FNAME
+        MVI     B,12
+BFINLP: MVI     M,' '
+        INX     H
+        DCR     B
+        JNZ     BFINLP
 
         ; Initialize key bindings table
         CALL    KBINIT
@@ -295,6 +327,9 @@ START:
 ; MAINLP - Main edit loop
 ;------------------------------------------------------------
 MAINLP:
+        ; Auto-scroll horizontally if cursor outside viewport
+        CALL    AUTOSCR
+
         ; Force full redraw if marking in progress (highlight tracks cursor)
         MVI     A,BD_MRKEN
         CALL    BDFLD           ; HL -> BD_MRKEN
@@ -366,6 +401,15 @@ MLDONE:
 
         ; Insert/overwrite a printable character (KT_CHAR)
 DOCHAR:
+        ; Reject insert if cursor already at column limit
+        PUSH    B               ; save char in C
+        MVI     A,BD_CSCOL
+        CALL    BDFLD           ; HL -> BD_CSCOL
+        MOV     A,M
+        POP     B               ; restore C = char
+        CPI     MAXCOLS
+        JNC     MAINLP          ; at/past limit, ignore keystroke
+
         LDA     INSMODE
         CPI     MODE_OVR
         JNZ     DCINS           ; insert mode: skip delete
@@ -463,10 +507,23 @@ DO_FNX: CALL    SRFNDNX
         JMP     MLDIRT
 DO_FND: CALL    SRFIND
         JMP     MLDIRT
-DO_SAV: LXI     D,SAVWMSG
+DO_SAV:
+        ; Check if filename exists (BD_FNAME[0] != space)
+        MVI     A,BD_FNAME
+        CALL    BDFLD
+        MOV     A,M
+        ANI     7FH
+        CPI     ' '
+        JNZ     DSAVGO          ; has name, save directly
+        ; No name - prompt for one
+        LXI     D,EXTASPMT      ; "Save as: "
+        CALL    FIPROMPT
+        JZ      DSAVDN          ; user cancelled
+        CALL    FISAVFN         ; copy WRKFCB name to BD_FNAME
+DSAVGO: LXI     D,SAVWMSG
         CALL    STATMSG
         CALL    FISAVE
-        CALL    INFOBAR
+DSAVDN: CALL    INFOBAR
         JMP     MAINLP
         ; DO_OPN removed: identical to DO_MNU, merged via ACTTBL
 DO_EXT: CALL    DOEXIT          ; save & exit
@@ -604,6 +661,76 @@ CHKYES: MVI     A,1
         RET
 
 ;------------------------------------------------------------
+; AUTOSCR - Auto-adjust HSCROL so cursor stays visible.
+; Uses tab-aligned (multiple of 4) scroll offsets.
+; Snap-to-zero: if CSCOL < TXTCOLS-TABWID, HSCROL=0.
+; Entry:  (none)
+; Exit:   AF HL clobbered; DIRTY set if HSCROL changed
+;------------------------------------------------------------
+AUTOSCR:
+        ; Read BD_CSCOL
+        MVI     A,BD_CSCOL
+        CALL    BDFLD           ; HL -> BD_CSCOL
+        MOV     A,M             ; A = cursor column
+
+        ; Snap-to-zero: if CSCOL < TXTCOLS - TABWID (69), HSCROL = 0
+        CPI     TXTCOLS-TABWID
+        JNC     ASNOCHK
+        ; Cursor in safe zone: snap HSCROL to 0
+        LDA     HSCROL
+        ORA     A
+        RZ                      ; already 0, no change
+        XRA     A
+        STA     HSCROL
+        MVI     A,1
+        STA     DIRTY
+        RET
+
+ASNOCHK:
+        ; CSCOL >= 69. Check if cursor past right edge of viewport.
+        ; Right edge = HSCROL + TXTCOLS
+        MOV     L,A             ; L = CSCOL (save)
+        LDA     HSCROL
+        MOV     H,A             ; H = old HSCROL
+        ADI     TXTCOLS         ; A = HSCROL + TXTCOLS
+        JC      ASCHKLF         ; overflow means cursor can't be past it
+        CMP     L               ; right_edge - CSCOL
+        JC      ASRGHT          ; right_edge < CSCOL, need scroll right
+        JZ      ASRGHT          ; right_edge == CSCOL, need scroll right
+        JMP     ASCHKLF         ; right_edge > CSCOL, cursor visible
+
+ASRGHT: ; Cursor at or past right edge: scroll right
+        ; HSCROL = round_up(CSCOL - TXTCOLS + 1, 4)
+        MOV     A,L             ; A = CSCOL
+        SUI     TXTCOLS-1       ; A = CSCOL - TXTCOLS + 1
+        ADI     TABWID-1        ; round up: add 3
+        ANI     0FCH            ; align to multiple of 4
+        JMP     ASUPDAT         ; store new HSCROL
+
+ASCHKLF:
+        ; Check if cursor left of viewport (CSCOL < HSCROL)
+        MOV     A,L             ; A = CSCOL
+        CMP     H               ; compare CSCOL vs HSCROL
+        RNC                     ; CSCOL >= HSCROL, no change needed
+
+        ; Cursor left of viewport: scroll left
+        ; HSCROL = round_down(CSCOL, 4)
+        MOV     A,L             ; A = CSCOL
+        ANI     0FCH            ; align to multiple of 4
+
+ASUPDAT:
+        ; A = new HSCROL value. Only update if changed.
+        MOV     L,A             ; L = new HSCROL
+        LDA     HSCROL
+        CMP     L
+        RZ                      ; no change
+        MOV     A,L
+        STA     HSCROL
+        MVI     A,1
+        STA     DIRTY
+        RET
+
+;------------------------------------------------------------
 ; BDFLD - Compute pointer to buffer descriptor field.
 ; Entry:  A = field offset (BD_xxx constant)
 ; Exit:   HL -> field in current descriptor; A clobbered
@@ -673,8 +800,10 @@ TPATOP: DW      0               ; BDOS address / TPA top
 INSMODE: DB     MODE_INS        ; insert/overwrite mode
 DIRTY:  DB      1               ; 1 = full screen redraw needed
 DRTLINE: DB     0               ; 1 = redraw current line only
+HSCROL: DB      0               ; horizontal scroll offset (tab-aligned)
 OLDTPLN: DW     0               ; saved TOPLN for scroll detect
 CURBDP: DW      0               ; ptr to active buf desc
+BDESC0: DS      BD_SIZE         ; single buffer descriptor (34 bytes)
 
 ;--- Stack (64 words) ---------------------------------
         DS      128

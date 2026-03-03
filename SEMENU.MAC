@@ -84,9 +84,10 @@ INFOROW EQU     1           ; info bar row
 RULRROW EQU     2           ; tab ruler row
 SEPRROW EQU     23          ; separator (===) row
 STATROW EQU     24          ; status/message row
-LNUMWID EQU     4           ; gutter width (3+space)
-TXTCOLS EQU     74          ; max text columns/line
-TXTFCOL EQU     5           ; text start col (1-based)
+LNUMWID EQU     5           ; gutter width (4+space)
+TXTCOLS EQU     73          ; max text columns/line
+MAXCOLS EQU     128         ; max chars per line (raw bytes)
+TXTFCOL EQU     6           ; text start col (1-based)
 TABWID  EQU     4           ; tab stop interval
 
 ;--- SGR attribute byte values ------------------------
@@ -117,8 +118,8 @@ BD_FNAME EQU    22          ; 12: drive+name+ext
 BD_SIZE  EQU    34          ; bytes per descriptor
 
 ;--- Number of edit buffers ---------------------------
-MAXBUFS EQU     2           ; maximum open buffers
-MINMEM  EQU     18*1024     ; minimum TPA required
+MAXBUFS EQU     1           ; maximum open buffers
+MINMEM  EQU     9*1024      ; minimum TPA required
 
 ;--- Syntax mode codes --------------------------------
 SYN_NONE EQU    0           ; plain text
@@ -200,7 +201,6 @@ SRCHMAX EQU     64          ; max find string length
         EXTRN   FIPROMPT        ; prompt for filename
         EXTRN   SRFIND          ; find (always prompt)
         EXTRN   HLPSHOW         ; help screen
-        EXTRN   BMSWITCH        ; switch buffer
         EXTRN   CURGOTO         ; position hw cursor (B=row,C=col)
         EXTRN   OUTSTR          ; write $-string
         EXTRN   OUTCHAR         ; write single char
@@ -212,10 +212,10 @@ SRCHMAX EQU     64          ; max find string length
 ;--- Menu geometry ----------------------------------------
 ; Box occupies rows MNUROW1..MNUROW2, cols MNUCOL1..MNUCOL2
 MNUROW1 EQU     6               ; top border row (1-based)
-MNUROW2 EQU     18              ; bottom border row
+MNUROW2 EQU     17              ; bottom border row
 MNUCOL1 EQU     28              ; left border col
 MNUCOL2 EQU     54              ; right border col
-MNUITMS EQU     9               ; number of menu items
+MNUITMS EQU     8               ; number of menu items
 MNUFROW EQU     MNUROW1+2       ; first item row
 MNUTCOL EQU     MNUCOL1+2       ; text start column
 
@@ -269,7 +269,7 @@ MNULP:
         ; Digit shortcut 1-9
         CPI     '1'
         JC      MNULP
-        CPI     '9'+1
+        CPI     '8'+1
         JNC     MNULP
         SUI     '1'             ; 0-based index
         STA     MNUSEL
@@ -337,25 +337,35 @@ MNODNE: RET
 
 ;--- Save File --------------------------------------------
 MNSAVE:
-        CALL    FISAVE
-        RET
+        ; Check if filename exists (BD_FNAME[0] != space)
+        LHLD    CURBDP
+        MVI     A,BD_FNAME
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A             ; HL -> BD_FNAME
+        MOV     A,M
+        ANI     7FH
+        CPI     ' '
+        JNZ     MNSVGO          ; has name, save directly
+        ; No name - prompt for one (same as Save As)
+        LXI     D,SVAPMT
+        CALL    FIPROMPT
+        JZ      MNSVDN          ; cancelled
+        CALL    FISAVFN2        ; copy WRKFCB name to BD_FNAME
+MNSVGO: CALL    FISAVE
+MNSVDN: RET
 
 ;--- Save As ----------------------------------------------
 MNSVAS:
         LXI     D,SVAPMT
         CALL    FIPROMPT
-        JZ      MNSVDN          ; cancelled
+        JZ      MNSADN          ; cancelled
         ; Update filename in descriptor then save
         CALL    FISAVFN2        ; copy WRKFCB name to BD_FNAME
         CALL    FISAVE
-MNSVDN: RET
-
-;--- Switch Buffer ----------------------------------------
-MNSWBF:
-        CALL    BMSWITCH
-        MVI     A,1
-        STA     DIRTY
-        RET
+MNSADN: RET
 
 ;--- Find / Replace --------------------------------------
 MNFIND:
@@ -718,12 +728,11 @@ MNUBOT: DB      '+','-','-','-','-','-','-','-','-','-'
 MNTX1:  DB      '1. Open File          $'
 MNTX2:  DB      '2. Save File          $'
 MNTX3:  DB      '3. Save As...         $'
-MNTX4:  DB      '4. Switch Buffer      $'
-MNTX5:  DB      '5. Find / Replace     $'
-MNTX6:  DB      '6. Go To Line...      $'
-MNTX7:  DB      '7. Help               $'
-MNTX8:  DB      '8. About              $'
-MNTX9:  DB      '9. Quit / Exit        $'
+MNTX4:  DB      '4. Find / Replace     $'
+MNTX5:  DB      '5. Go To Line...      $'
+MNTX6:  DB      '6. Help               $'
+MNTX7:  DB      '7. About              $'
+MNTX8:  DB      '8. Quit / Exit        $'
 
 ; Prompt strings
 OPNPMT: DB      'Open file: $'
@@ -753,12 +762,11 @@ MNUTBL:
         DW      MNOPEN          ; 0 Open File
         DW      MNSAVE          ; 1 Save File
         DW      MNSVAS          ; 2 Save As
-        DW      MNSWBF          ; 3 Switch Buffer
-        DW      MNFIND          ; 4 Find / Replace
-        DW      MNGOTO          ; 5 Go To Line
-        DW      MNHELP          ; 6 Help
-        DW      MNABUT          ; 7 About
-        DW      MNQUIT          ; 8 Quit
+        DW      MNFIND          ; 3 Find / Replace
+        DW      MNGOTO          ; 4 Go To Line
+        DW      MNHELP          ; 5 Help
+        DW      MNABUT          ; 6 About
+        DW      MNQUIT          ; 7 Quit
 
 ; Item text pointer table (word per item)
 MNUTXP:
@@ -770,7 +778,6 @@ MNUTXP:
         DW      MNTX6
         DW      MNTX7
         DW      MNTX8
-        DW      MNTX9
 
         END
 

@@ -42,7 +42,7 @@
 ; FIOPEN - Open a file and load it into the current buffer.
 ; Entry:  DE = address of a 36-byte FCB (CP/M default FCB
 ;              at 005CH or caller-built FCB).
-;         CURBDP must be valid (set by SEBUFMGR).
+;         CURBDP must be valid.
 ; Exit:   Buffer filled; BD_FNAME and BD_MODIF updated.
 ;         BD_MODIF = 0 (clean after load).
 ;         On error: status message displayed, buffer empty.
@@ -107,9 +107,10 @@ INFOROW EQU     1           ; info bar row
 RULRROW EQU     2           ; tab ruler row
 SEPRROW EQU     23          ; separator (===) row
 STATROW EQU     24          ; status/message row
-LNUMWID EQU     4           ; gutter width (3+space)
-TXTCOLS EQU     74          ; max text columns/line
-TXTFCOL EQU     5           ; text start col (1-based)
+LNUMWID EQU     5           ; gutter width (4+space)
+TXTCOLS EQU     73          ; max text columns/line
+MAXCOLS EQU     128         ; max chars per line (raw bytes)
+TXTFCOL EQU     6           ; text start col (1-based)
 TABWID  EQU     4           ; tab stop interval
 
 ;--- SGR attribute byte values ------------------------
@@ -140,8 +141,8 @@ BD_FNAME EQU    22          ; 12: drive+name+ext
 BD_SIZE  EQU    34          ; bytes per descriptor
 
 ;--- Number of edit buffers ---------------------------
-MAXBUFS EQU     2           ; maximum open buffers
-MINMEM  EQU     18*1024     ; minimum TPA required
+MAXBUFS EQU     1           ; maximum open buffers
+MINMEM  EQU     9*1024      ; minimum TPA required
 
 ;--- Syntax mode codes --------------------------------
 SYN_NONE EQU    0           ; plain text
@@ -279,13 +280,15 @@ FISTLP: MOV     A,M
         JZ      FILF
 
         ; Regular character - check line width
+        STA     FITMP           ; save original byte
         PUSH    H
         LXI     H,FICOL
         INR     M               ; increment column
         MOV     A,M             ; A = new column count
         POP     H
-        CPI     TXTCOLS+1       ; > 74 chars?
+        CPI     MAXCOLS+1       ; > 128 chars?
         JNC     FIWIDE          ; line too wide
+        LDA     FITMP           ; restore original byte
         JMP     FICHR           ; insert the byte
 
 FILF:   ; LF - reset column, increment line number
@@ -296,6 +299,7 @@ FILF:   ; LF - reset column, increment line number
         INX     H
         SHLD    FILNUM
         POP     H
+        MVI     A,LF            ; restore A to LF value
 
 FICHR:  ; Insert byte into gap buffer
         PUSH    H               ; save DMA pointer
@@ -328,12 +332,12 @@ FIWIDE:
         CALL    BDOS
         CALL    FIBUFCLR        ; reset gap buffer to empty
         CALL    SYNINIT
-        ; Print "Line N is wider than 74 characters"
+        ; Print "Line N is wider than 73 characters"
         LXI     D,FIWDM1        ; "Line "
         CALL    STATMSG         ; positions cursor, resets SGR
         LHLD    FILNUM
         CALL    FIPRNUM         ; print line number
-        LXI     D,FIWDM2        ; " is wider than 74 characters"
+        LXI     D,FIWDM2        ; " is wider than 73 characters"
         CALL    OUTSTR
         RET
 
@@ -1109,11 +1113,12 @@ SAVEMSG: DB    'File saved. $'
 ERRMSG:  DB    'Write error!$'
 FULLMSG: DB    'File is too big.$'
 FIWDM1:  DB    'Line $'
-FIWDM2:  DB    ' is wider than 74 characters.$'
+FIWDM2:  DB    ' is wider than 128 characters.$'
 
 ; File load tracking
 FILNUM: DW      0               ; current line number during load
 FICOL:  DB      0               ; column counter during load
+FITMP:  DB      0               ; saved byte during column check
 FIPFLG: DB      0               ; FIPRNUM leading zero suppress
 
         END
