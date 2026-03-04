@@ -6,15 +6,11 @@
 ; AUTHOR:
 ;------------------------------------------------------------
 ; DESCRIPTION:
-;   Forward search and optional replace in the gap buffer.
+;   Forward search in the gap buffer.
 ;   SRFNDNX  - find next occurrence of SRCHSTR starting
 ;              from current cursor position, wrapping at
 ;              end of file.
-;   SRREPLACE - as SRFNDNX but prompt for replacement string
-;              and substitute.
 ;   Search is case-insensitive when SRCHOPTS bit 0 = 1.
-;   Replacement is straight string substitution (same-
-;   length or different-length via delete+insert).
 ;------------------------------------------------------------
 ; REVISION HISTORY:
 ;   1.0  1984-01-01  Initial release
@@ -24,8 +20,6 @@
         EXTRN   CURBDP          ; current buffer descriptor
         EXTRN   GBMVRT          ; move cursor right one char
         EXTRN   GBMVTOP         ; move cursor to file top
-        EXTRN   GBDELRT         ; delete char right
-        EXTRN   GBINSRT         ; insert char at cursor
         EXTRN   OUTSTR          ; write $-string to console
         EXTRN   CURGOTO         ; position cursor (B=row,C=col)
         EXTRN   STATMSG         ; status bar message
@@ -34,7 +28,6 @@
 ;--- Exports ----------------------------------------------
         PUBLIC  SRFIND          ; find (always prompt)
         PUBLIC  SRFNDNX         ; find next
-        PUBLIC  SRREPLACE       ; find and replace
 
 ;=============================================================
 ; SRFNDNX - Find next occurrence of SRCHSTR.
@@ -590,126 +583,6 @@ SRGAFT: ; After gap: physical addr = BSTAR + logical + (GAPEN - GAPBG)
         RET
 
 ;=============================================================
-; SRREPLACE - Find and replace.
-; Prompts for search string and replacement string,
-; then replaces all occurrences (with confirmation).
-;=============================================================
-SRREPLACE:
-        ; Prompt for search string
-        LXI     D,SRCHPMT
-        CALL    OUTSTR
-        LXI     D,SRDINBUF
-        MVI     C,BF_RDLINE
-        CALL    BDOS
-        LDA     SRDINBUF+1
-        ORA     A
-        RZ
-
-        ; Copy to SRCHSTR
-        MOV     C,A
-        LXI     H,SRDINBUF+2
-        LXI     D,SRCHSTR
-        MVI     B,0
-SRRCPL: MOV     A,M
-        STAX    D
-        INX     H
-        INX     D
-        INR     B
-        MOV     A,B
-        CMP     C
-        JNZ     SRRCPL
-        XRA     A
-        STAX    D
-        MOV     A,C
-        STA     SRCHLEN
-
-        ; Prompt for replace string
-        LXI     D,REPLPMT
-        CALL    OUTSTR
-        LXI     D,SRDINBUF
-        MVI     C,BF_RDLINE
-        CALL    BDOS
-
-        ; Copy replace string to REPLSTR
-        LDA     SRDINBUF+1
-        MOV     C,A
-        LXI     H,SRDINBUF+2
-        LXI     D,REPLSTR
-        ORA     A
-        JZ      SRRNCP          ; empty replace = delete
-        MVI     B,0
-SRRLPL: MOV     A,M
-        STAX    D
-        INX     H
-        INX     D
-        INR     B
-        MOV     A,B
-        CMP     C
-        JNZ     SRRLPL
-SRRNCP: XRA     A
-        STAX    D
-        MOV     A,C
-        STA     REPLLEN
-
-        ; Reset to top and replace all
-        CALL    GBMVTOP
-        MVI     A,0
-        STA     SRWRAP
-        LXI     H,0
-        SHLD    SRPOS
-
-SRRLLP:
-        LHLD    SRPOS
-        CALL    SRTRY           ; try match at SRPOS
-        JNZ     SRRNXT          ; no match at this offset
-
-        ; Match found: delete SRCHLEN chars, insert REPLSTR
-        LDA     SRCHLEN
-        MOV     B,A
-SRRDEL: CALL    GBDELRT
-        DCR     B
-        JNZ     SRRDEL
-
-        ; Insert replacement
-        LXI     H,REPLSTR
-SRRINL: MOV     A,M
-        ORA     A
-        JZ      SRRDNE
-        CALL    GBINSRT
-        INX     H
-        JMP     SRRINL
-SRRDNE:
-        MVI     A,1
-        STA     DIRTY
-        JMP     SRRLLP          ; continue from same position
-
-SRRNXT:
-        ; Advance to next position
-        LHLD    SRPOS
-        XCHG
-        LHLD    SRTXEND
-        ; if SRPOS >= SRTXEND, done
-        MOV     A,H
-        CMP     D
-        JC      SRRNDN          ; SRTXEND < SRPOS: done
-        JNZ     SRRNXN
-        MOV     A,L
-        CMP     E
-        JNC     SRRNDN
-SRRNXN:
-        LHLD    SRPOS
-        INX     H
-        SHLD    SRPOS
-        JMP     SRRLLP
-
-SRRNDN:
-        MVI     A,1
-        STA     DIRTY
-        LXI     D,SRFMSG
-        CALL    STATMSG
-        RET
-
-;=============================================================
 ; DATA SEGMENT
 ;=============================================================
         DSEG
@@ -717,14 +590,8 @@ SRRNDN:
 ; Search string (NUL terminated)
 SRCHSTR: DS     SRCHMAX+1
 
-; Replace string (NUL terminated)
-REPLSTR: DS     SRCHMAX+1
-
 ; Search string length
 SRCHLEN: DB     0
-
-; Replace string length
-REPLLEN: DB     0
 
 ; Search options: bit 0 = case-insensitive
 SRCHOPTS: DB    01H             ; default: case-insensitive
@@ -744,7 +611,6 @@ SRDINBUF: DB   SRCHMAX          ; max len
 
 ; Status messages
 SRCHPMT: DB    'Search: $'
-REPLPMT: DB    'Replace: $'
 SRFMSG:  DB    'Found.  $'
 SRNFMS:  DB    'Not found.$'
 

@@ -16,7 +16,7 @@
 ;     2. Save File
 ;     3. Save As
 ;     4. Switch Buffer
-;     5. Find / Replace
+;     5. Find text
 ;     6. Go To Line
 ;     7. Help
 ;     8. About
@@ -254,10 +254,6 @@ MNULP:
         MOV     A,C
         CPI     CR
         JZ      MNUACT          ; Enter = select
-        CPI     'Q'
-        JZ      MNUCNC
-        CPI     'q'
-        JZ      MNUCNC
         CPI     'K'
         JZ      MNUUP
         CPI     'k'
@@ -267,12 +263,47 @@ MNULP:
         CPI     'j'
         JZ      MNUDN
 
-        ; Digit shortcut 1-9
+        ; Digit shortcut 1-8
         CPI     '1'
-        JC      MNULP
+        JC      MNULSC          ; below '1', check letters
         CPI     '8'+1
-        JNC     MNULP
+        JNC     MNULSC          ; above '8', check letters
         SUI     '1'             ; 0-based index
+        STA     MNUSEL
+        JMP     MNUACT
+
+        ; Letter shortcuts (case-insensitive)
+MNULSC: ORI     20H             ; force lowercase
+        CPI     'o'
+        MVI     B,0             ; Open
+        JZ      MNULSL
+        CPI     's'
+        MVI     B,1             ; Save
+        JZ      MNULSL
+        CPI     'a'
+        MVI     B,2             ; Save As
+        JZ      MNULSL
+        CPI     'f'
+        MVI     B,3             ; Find
+        JZ      MNULSL
+        CPI     'g'
+        MVI     B,4             ; Go To Line
+        JZ      MNULSL
+        CPI     'h'
+        MVI     B,5             ; Help
+        JZ      MNULSL
+        CPI     'b'
+        MVI     B,6             ; About
+        JZ      MNULSL
+        CPI     'x'
+        MVI     B,7             ; Quit
+        JZ      MNULSL
+        CPI     'q'
+        MVI     B,7             ; Quit
+        JZ      MNULSL
+        JMP     MNULP           ; unrecognised, ignore
+
+MNULSL: MOV     A,B
         STA     MNUSEL
         JMP     MNUACT
 
@@ -379,7 +410,7 @@ MNSVAS:
         CALL    FISAVE
 MNSADN: RET
 
-;--- Find / Replace --------------------------------------
+;--- Find text -------------------------------------------
 MNFIND:
         CALL    SRFIND
         MVI     A,1
@@ -712,7 +743,7 @@ MNUBOT: DB      '+','-','-','-','-','-','-','-','-','-'
 MNTX1:  DB      '1. Open File          $'
 MNTX2:  DB      '2. Save File          $'
 MNTX3:  DB      '3. Save As...         $'
-MNTX4:  DB      '4. Find / Replace     $'
+MNTX4:  DB      '4. Find text...       $'
 MNTX5:  DB      '5. Go To Line...      $'
 MNTX6:  DB      '6. Help               $'
 MNTX7:  DB      '7. About              $'
@@ -722,7 +753,7 @@ MNTX8:  DB      '8. Quit / Exit        $'
 OPNPMT: DB      'Open file: $'
 SVAPMT: DB      'Save as:   $'
 GTOPMT: DB      'Go to line: $'
-ABTMSG: DB      'SEDIT v1.03 CP/M Screen Editor  (any key)$'
+ABTMSG: DB      'SEDIT v1.04 CP/M Screen Editor  (any key)$'
 
 ; Dispatch table in CSEG: immune to DSEG corruption.
 ; Order matches MNUITMS item order above.
@@ -730,7 +761,7 @@ MNUTBL:
         DW      MNOPEN          ; 0 Open File
         DW      MNSAVE          ; 1 Save File
         DW      MNSVAS          ; 2 Save As
-        DW      MNFIND          ; 3 Find / Replace
+        DW      MNFIND          ; 3 Find text
         DW      MNGOTO          ; 4 Go To Line
         DW      MNHELP          ; 5 Help
         DW      MNABUT          ; 6 About
