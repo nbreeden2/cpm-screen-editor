@@ -391,6 +391,10 @@ FISAVE:
 
         ; Write buffer contents record by record
         CALL    FIWRITE
+        ; Check for write errors (disk full, etc)
+        LDA     FWERRF
+        ORA     A
+        JNZ     FSVERE          ; write failed
 
 FSVSKP: LXI     D,SAVEMSG
         CALL    STATMSG
@@ -398,6 +402,8 @@ FSVSKP: LXI     D,SAVEMSG
 
 FSVERE: LXI     D,ERRMSG
         CALL    STATMSG
+        MVI     C,BF_CONIN
+        CALL    BDOS            ; wait for any key
         RET
 
 ;=============================================================
@@ -684,6 +690,9 @@ FRNLP2: LDAX    D
 ; Appends CPMEOF if last record is partial.
 ;------------------------------------------------------------
 FIWRITE:
+        ; Clear write error flag
+        XRA     A
+        STA     FWERRF
         ; Initialise write state
         MVI     B,0             ; B = position in DMABUF (0..127)
         LXI     H,DMABUF        ; HL = current DMA write ptr
@@ -831,6 +840,9 @@ FWPHYS: ; HL = physical offset; add FWBASE
 
         ; Write one full record
         CALL    FWREC
+        LDA     FWERRF
+        ORA     A
+        JNZ     FWCLOS          ; write error, abort
         MVI     B,0             ; reset DMA position
         JMP     FWLOP
 
@@ -859,12 +871,16 @@ FWCLOS:
         MVI     C,BF_FCLOSE
         CALL    BDOS
 
-        ; Clear modified flag
+        ; Only clear modified flag if no write errors
+        LDA     FWERRF
+        ORA     A
+        RNZ                     ; error: keep modified flag
         CALL    FICLRMOD
         RET
 
 ;------------------------------------------------------------
 ; FWREC - Write one RECSIZ record from DMABUF to WRKFCB.
+; Sets FWERRF on write error (disk full, etc).
 ;------------------------------------------------------------
 FWREC:
         LXI     D,DMABUF
@@ -873,6 +889,10 @@ FWREC:
         LXI     D,WRKFCB
         MVI     C,BF_FWRITE
         CALL    BDOS
+        ORA     A
+        RZ                      ; A=0: success
+        MVI     A,1
+        STA     FWERRF          ; mark write error
         RET
 
 ;------------------------------------------------------------
@@ -1105,12 +1125,13 @@ FWGPEN: DW     0              ; gap end   (physical offset)
 FWBASE: DW     0              ; buffer base address
 FWTXEND: DW    0              ; text end offset
 FWOFF:  DW     0              ; current logical write offset
+FWERRF: DB     0              ; write error flag (0=ok, 1=error)
 
 ; Status messages
 LDNGMSG: DB    'Please wait, loading file...$'
 LOADMSG: DB    'File loaded.$'
 SAVEMSG: DB    'File saved. $'
-ERRMSG:  DB    'Write error!$'
+ERRMSG:  DB    'Disk full or write error! Press any key.$'
 FULLMSG: DB    'File is too big.$'
 FIWDM1:  DB    'Line $'
 FIWDM2:  DB    ' is wider than 128 characters.$'

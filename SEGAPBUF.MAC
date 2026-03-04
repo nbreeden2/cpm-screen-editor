@@ -216,10 +216,12 @@ SRCHMAX EQU     64          ; max find string length
         PUBLIC  GBWRDPV         ; move to previous word
         PUBLIC  GBWRDNX         ; move to next word
         PUBLIC  GBGETLN         ; get ptr to line N text
+        PUBLIC  GBCURLN         ; get current cursor line (fast)
         PUBLIC  GBCNTLN         ; count lines in buffer
         PUBLIC  GBFNDLN         ; find logical offset of line N (fast)
         PUBLIC  GBFNDCS         ; find TOPLN offset via backward scan
         PUBLIC  GBRDLNO         ; read line at given logical offset
+        PUBLIC  GBGOTOL         ; go to line N (fast bulk move)
         PUBLIC  GBBASE          ; DE = buffer base address
         PUBLIC  GBBSIZ          ; DE = buffer size
         PUBLIC  GBGAPEN         ; HL = gap end offset
@@ -943,6 +945,152 @@ GVECOL: CALL    GBCURLNL
         RET
 
 ;=============================================================
+; GBGOTOL - Go to a specific line number (fast bulk move).
+; Moves cursor to file top, then forward-scans R2 for
+; (target-1) LFs and bulk-copies those bytes into R1.
+; Entry:  HL = target line number (1-based)
+; Exit:   Cursor at start of target line; regs clobbered
+;=============================================================
+GBGOTOL:
+        MOV     A,H
+        ORA     L
+        RZ                      ; line 0 = no-op
+        SHLD    GGTLIN          ; save target line number
+        DCX     H               ; HL = LFs to skip
+        SHLD    GGTCNT          ; save LF count
+        ; Move to top first (one bulk copy)
+        CALL    GBMVTOP
+        ; If target is line 1, already at top
+        LHLD    GGTCNT
+        MOV     A,H
+        ORA     L
+        JZ      GGTPOS          ; line 1, done
+        ; Save base address
+        CALL    GBBASE
+        XCHG
+        SHLD    GPGBAS
+        ; Save GAPEN (after GBMVTOP, gap fills entire front)
+        CALL    GBGAPEN
+        SHLD    GGTGPE          ; save original GAPEN
+        ; Compute R2 start = base + GAPEN
+        XCHG                    ; DE = GAPEN
+        LHLD    GPGBAS
+        DAD     D               ; HL = base + GAPEN = R2 start
+        PUSH    H               ; save R2 start address
+        ; Compute R2 end = base + BSIZE
+        CALL    GBBSIZ          ; DE = BSIZE
+        LHLD    GPGBAS
+        DAD     D               ; HL = base + BSIZE = R2 end
+        XCHG                    ; DE = R2 end
+        POP     H               ; HL = R2 start
+        ; Forward scan for GGTCNT LFs
+GGTSLP: MOV     A,H
+        CMP     D
+        JNZ     GGTSNE
+        MOV     A,L
+        CMP     E
+        JZ      GGTSDN          ; reached end of text
+GGTSNE: MOV     A,M
+        INX     H
+        CPI     LF
+        JNZ     GGTSLP
+        ; Found a LF, decrement count
+        PUSH    H
+        PUSH    D
+        LHLD    GGTCNT
+        DCX     H
+        SHLD    GGTCNT
+        MOV     A,H
+        ORA     L
+        POP     D
+        POP     H
+        JNZ     GGTSLP          ; more LFs to find
+GGTSDN: ; HL = one past last LF (or end of text)
+        ; Compute N = HL - (base + GAPEN)
+        PUSH    H               ; save end position
+        LHLD    GGTGPE          ; HL = GAPEN
+        XCHG                    ; DE = GAPEN
+        LHLD    GPGBAS          ; HL = base
+        DAD     D               ; HL = base + GAPEN = R2 start
+        POP     D               ; DE = end position
+        MOV     A,E
+        SUB     L
+        MOV     C,A
+        MOV     A,D
+        SBB     H
+        MOV     B,A             ; BC = N (bytes to copy)
+        MOV     A,B
+        ORA     C
+        JZ      GGTPOS          ; N=0, nothing to move
+        MOV     H,B
+        MOV     L,C
+        SHLD    GPGCNT          ; save byte count
+        ; Forward copy: base+GAPEN → base+0 (GAPBG=0 after MVTOP)
+        ; Src: base + GAPEN
+        LHLD    GGTGPE
+        XCHG
+        LHLD    GPGBAS
+        DAD     D               ; HL = src
+        PUSH    H
+        ; Dst: base (GAPBG = 0)
+        LHLD    GPGBAS          ; HL = dst
+        PUSH    H
+        ; Load BC = N
+        LHLD    GPGCNT
+        MOV     B,H
+        MOV     C,L
+        POP     D               ; DE = dst
+        POP     H               ; HL = src
+        ; Copy forward (src > dst, safe)
+GGTCLP: MOV     A,M
+        STAX    D
+        INX     H
+        INX     D
+        DCX     B
+        MOV     A,B
+        ORA     C
+        JNZ     GGTCLP
+        ; --- Update descriptor fields ---
+        LHLD    GPGCNT
+        MOV     B,H
+        MOV     C,L             ; BC = N
+        ; GAPBG = 0 + N = N
+        MOV     H,B
+        MOV     L,C
+        CALL    GBSETGAPBG
+        ; GAPEN = old_GAPEN + N
+        LHLD    GGTGPE
+        DAD     B
+        CALL    GBSETGAPEN
+        ; CSOFF = N
+        LHLD    GPGCNT
+        CALL    GBSETCSOFF
+GGTPOS: ; Set TOPLN and CSROW based on target line
+        LHLD    GGTLIN          ; HL = target line (1-based)
+        ; If target <= EDITROW: TOPLN=0, CSROW=target-1
+        MOV     A,H
+        ORA     A
+        JNZ     GGTSRL          ; > 255, must scroll
+        MOV     A,L
+        CPI     EDITROW+1
+        JNC     GGTSRL          ; > EDITROW, must scroll
+        ; No scroll: TOPLN = 0, CSROW = target - 1
+        DCX     H
+        CALL    GBSETCSROW
+        LXI     H,0
+        CALL    GBSETTOPLN
+        JMP     GGTCOL
+GGTSRL: ; Scroll: TOPLN = target - 1, CSROW = 0
+        DCX     H
+        CALL    GBSETTOPLN
+        LXI     H,0
+        CALL    GBSETCSROW
+GGTCOL: ; CSCOL = 0 (at start of line)
+        LXI     H,0
+        CALL    GBSETCSCOL
+        RET
+
+;=============================================================
 ; GBPGUP - Scroll up one page (EDITROW lines).
 ; Uses bulk gap move for performance: scans backward for
 ; EDITROW LFs, then copies bytes in one tight loop instead
@@ -1499,6 +1647,142 @@ GGLCPD: ; NUL-terminate the copy buffer
         STAX    D
         MOV     A,B             ; A = line length
         LXI     H,GGLBUF        ; HL = pointer to flat copy
+        ORI     1               ; NZ = line exists
+        RET
+
+;=============================================================
+; GBCURLN - Read current cursor line into GGLBUF.
+; Fast path: scans backward from GAPBG for line start,
+; then copies forward across the gap. O(line_length)
+; instead of O(line_number) used by GBGETLN.
+; Entry:  (none) - uses current cursor position
+; Exit:   HL = GGLBUF, A = length, NZ = line exists
+;         Z = buffer empty
+; Clobbers: AF BC DE HL
+;=============================================================
+GBCURLN:
+        ; Check if buffer is empty
+        CALL    GBTXEND         ; HL = TXEND
+        MOV     A,H
+        ORA     L
+        RZ                      ; Z = buffer empty
+
+        ; --- Compute region boundaries ---
+        CALL    GBBASE          ; DE = base
+        XCHG
+        SHLD    GCLBAS
+
+        CALL    GBGAPBG         ; HL = GAPBG
+        PUSH    H               ; save GAPBG for R2 end calc
+        XCHG                    ; DE = GAPBG
+        LHLD    GCLBAS
+        DAD     D               ; HL = base + GAPBG
+        SHLD    GCLR1E
+
+        CALL    GBGAPEN         ; HL = GAPEN
+        XCHG                    ; DE = GAPEN
+        LHLD    GCLBAS
+        DAD     D               ; HL = base + GAPEN
+        SHLD    GCLR2S
+
+        ; R2 end = R2 start + (TXEND - GAPBG)
+        CALL    GBTXEND         ; HL = TXEND
+        XCHG                    ; DE = TXEND
+        POP     H               ; HL = GAPBG (saved earlier)
+        MOV     A,E
+        SUB     L
+        MOV     E,A
+        MOV     A,D
+        SBB     H
+        MOV     D,A             ; DE = TXEND - GAPBG
+        LHLD    GCLR2S
+        DAD     D
+        SHLD    GCLR2E          ; R2 end
+
+        ; --- Check if R1 has content (GAPBG > 0) ---
+        LHLD    GCLR1E          ; HL = base + GAPBG
+        XCHG                    ; DE = base + GAPBG
+        LHLD    GCLBAS          ; HL = base
+        MOV     A,E
+        SUB     L
+        JNZ     GCLR1           ; low bytes differ
+        MOV     A,D
+        SBB     H
+        JZ      GCLNR1          ; GAPBG = 0, skip to R2
+
+GCLR1:
+        ; --- Scan backward in R1 for line start ---
+        LHLD    GCLR1E
+        DCX     H               ; HL = last byte in R1
+GCLBLP: MOV     A,M
+        CPI     LF
+        JZ      GCLBF           ; found LF
+        ; Check if HL == base
+        LDA     GCLBAS+1
+        CMP     H
+        JNZ     GCLBN
+        LDA     GCLBAS
+        CMP     L
+        JZ      GCLATB          ; at base, line starts here
+GCLBN:  DCX     H
+        JMP     GCLBLP
+
+GCLBF:  INX     H               ; past the LF = line start
+GCLATB: ; HL = line start in R1
+        ; --- Copy R1 portion (before cursor) into GGLBUF ---
+        LXI     D,GGLBUF
+        MVI     B,0             ; B = char count
+GCLR1C: ; Check if HL reached R1 end
+        LDA     GCLR1E+1
+        CMP     H
+        JNZ     GCLR1G
+        LDA     GCLR1E
+        CMP     L
+        JZ      GCLNR1          ; R1 exhausted, continue R2
+GCLR1G: MOV     A,M
+        CPI     CR
+        JZ      GCLR1N          ; skip CR
+        CPI     LF
+        JZ      GCLCPD          ; unexpected LF = end of line
+        MOV     A,B
+        CPI     MAXCOLS
+        JZ      GCLCPD          ; column limit
+        MOV     A,M
+        STAX    D
+        INX     D
+        INR     B
+GCLR1N: INX     H
+        JMP     GCLR1C
+
+GCLNR1: ; --- Copy R2 portion (after cursor) into GGLBUF ---
+        LHLD    GCLR2S
+GCLR2C: ; Check if HL reached R2 end
+        LDA     GCLR2E+1
+        CMP     H
+        JNZ     GCLR2G
+        LDA     GCLR2E
+        CMP     L
+        JZ      GCLCPD          ; R2 exhausted
+GCLR2G: MOV     A,M
+        CPI     CR
+        JZ      GCLR2N          ; skip CR
+        CPI     LF
+        JZ      GCLCPD          ; LF = end of line
+        MOV     A,B
+        CPI     MAXCOLS
+        JZ      GCLCPD          ; column limit
+        MOV     A,M
+        STAX    D
+        INX     D
+        INR     B
+GCLR2N: INX     H
+        JMP     GCLR2C
+
+GCLCPD: ; NUL-terminate
+        XRA     A
+        STAX    D
+        MOV     A,B             ; A = line length
+        LXI     H,GGLBUF
         ORI     1               ; NZ = line exists
         RET
 
@@ -2452,9 +2736,20 @@ GPGBAS: DW      0               ; buffer base address
 GPGCNT: DW      0               ; byte count for bulk copy
 GPGLFS: DB      0               ; LFs found during scan
 
+; GBGOTOL working variables
+GGTLIN: DW      0               ; target line number (1-based)
+GGTCNT: DW      0               ; LFs remaining to find
+GGTGPE: DW      0               ; saved GAPEN (before bulk copy)
+
 ; Line count cache variables
 GLNCNT: DW      0               ; cached total line count
 GLNVAL: DB      0               ; 1 = GLNCNT is valid, 0 = invalid
+
+; GBCURLN working variables
+GCLBAS: DW      0               ; buffer base address
+GCLR1E: DW      0               ; R1 end (base + GAPBG)
+GCLR2S: DW      0               ; R2 start (base + GAPEN)
+GCLR2E: DW      0               ; R2 end
 
 ; GBCNTLN fast scan working variables
 GCNBAS: DW      0               ; buffer base address

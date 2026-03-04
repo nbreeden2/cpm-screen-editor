@@ -193,6 +193,7 @@ SRCHMAX EQU     64          ; max find string length
         EXTRN   INSMODE         ; insert/overwrite mode
         EXTRN   HSCROL          ; horizontal scroll offset
         EXTRN   GBGETLN         ; get ptr to line text
+        EXTRN   GBCURLN         ; get current cursor line (fast)
         EXTRN   GBCNTLN         ; count lines in buffer
         EXTRN   GBFNDCS         ; find TOPLN offset via backward scan
         EXTRN   GBRDLNO         ; read line at given offset
@@ -788,6 +789,7 @@ SGRLUT: DB      ATTR_BLD
 ; Calls:  INFOBAR, SCREDLN
 ;=============================================================
 SCREDCL:
+        ; Read cursor screen row
         LHLD    CURBDP
         MVI     A,BD_CSROW
         ADD     L
@@ -796,7 +798,21 @@ SCREDCL:
         ADC     H
         MOV     H,A
         MOV     B,M             ; B = cursor screen row (0-based)
-        CALL    SCREDLN         ; redraw just that line
+        ; Position terminal cursor at (row+EDITFR, col 1)
+        PUSH    B               ; save row (needed by SLEDRAW)
+        MOV     A,B
+        ADI     EDITFR          ; terminal row (1-based)
+        MOV     B,A
+        MVI     C,1
+        CALL    CURGOTO
+        ; Get current line text: O(line_length) fast path
+        CALL    GBCURLN         ; HL = GGLBUF, A = len, NZ = exists
+        XCHG                    ; DE = text ptr
+        POP     B               ; B = screen row (0-based)
+        JNZ     SLEDRAW         ; line exists, render it
+        ; Fallback (shouldn't happen for cursor line)
+        LXI     D,CLREOL
+        CALL    OUTSTR
         RET
 
 ;=============================================================

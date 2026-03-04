@@ -367,6 +367,15 @@ MNSVAS:
         ; Update filename in descriptor then save
         CALL    FISAVFN2        ; copy WRKFCB name to BD_FNAME
         CALL    SYNINIT         ; update syntax mode for new ext
+        ; Force modified flag so FISAVE always writes for Save As
+        LHLD    CURBDP
+        MVI     A,BD_MODIF
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A
+        MVI     M,1             ; BD_MODIF = 1
         CALL    FISAVE
 MNSADN: RET
 
@@ -379,6 +388,10 @@ MNFIND:
 
 ;--- Go To Line ------------------------------------------
 MNGOTO:
+        ; Position cursor at status bar for prompt
+        MVI     B,STATROW
+        MVI     C,1
+        CALL    CURGOTO
         LXI     D,GTOPMT
         CALL    OUTSTR
         ; Read line number via BF_RDLINE
@@ -390,7 +403,11 @@ MNGOTO:
         ORA     A
         JZ      MNGDNE
         CALL    MGPARSE         ; returns HL = line number
-        CALL    MGOTOL          ; navigate to that line
+        ; Clamp to >= 1
+        MOV     A,H
+        ORA     L
+        JZ      MNGDNE          ; 0 entered, do nothing
+        CALL    GBGOTOL         ; fast navigate to that line
         MVI     A,1
         STA     DIRTY
 MNGDNE: RET
@@ -406,9 +423,17 @@ MNHELP:
 MNABUT:
         LXI     D,ABTMSG
         CALL    STATMSG
-        ; Wait for any key
-        MVI     C,BF_CONIN
+        ; Drain buffered input then wait for fresh key
+MNADRN: MVI     E,0FFH
+        MVI     C,BF_RAWIO
         CALL    BDOS
+        ORA     A
+        JNZ     MNADRN
+MNAKEY: MVI     E,0FFH
+        MVI     C,BF_RAWIO
+        CALL    BDOS
+        ORA     A
+        JZ      MNAKEY
         RET
 
 ;--- Quit / Exit -----------------------------------------
@@ -582,94 +607,51 @@ MNUCDN: ; Set DIRTY so main loop redraws edit area
         RET
 
 ;=============================================================
-; MGPARSE - Parse decimal ASCII from GTOBUF+2, length in A.
+; MGPARSE - Parse decimal ASCII from GTOBUF+2.
+; Uses MGPVAL in memory as accumulator to avoid register
+; conflicts between source pointer and multiplication.
 ; Exit:  HL = parsed number (0 if invalid)
 ;=============================================================
 MGPARSE:
-        LXI     H,0             ; HL = accumulator
-        LXI     D,GTOBUF+2      ; DE = char ptr
-        LDA     GTOBUF+1
-        MOV     B,A             ; B = length
+        LXI     H,0
+        SHLD    MGPVAL          ; accumulator = 0
+        LDA     GTOBUF+1        ; length
         ORA     A
-        RZ
-MGPLP:  LDAX    D
+        RZ                      ; empty, return 0
+        MOV     B,A             ; B = char count
+        LXI     H,GTOBUF+2      ; HL = source pointer
+MGPLP:  MOV     A,M             ; read char
         CPI     '0'
         JC      MGPDN
         CPI     '9'+1
         JNC     MGPDN
-        SUI     '0'
-        MOV     C,A             ; digit
-        ; HL = HL*10 + digit
+        SUI     '0'             ; A = digit value
+        STA     MGPDGT          ; save digit
+        INX     H               ; advance source
+        PUSH    H               ; save source pointer
+        PUSH    B               ; save count
+        ; val = val * 10 + digit
+        LHLD    MGPVAL
         DAD     H               ; *2
-        MOV     E,L
-        MOV     D,H             ; save *2
+        MOV     D,H
+        MOV     E,L             ; DE = val*2
         DAD     H               ; *4
         DAD     H               ; *8
         DAD     D               ; *10
-        MOV     E,C
+        LDA     MGPDGT
+        MOV     E,A
         MVI     D,0
-        DAD     D               ; +digit
-        ; Use explicit increment:
-        MOV     A,E
-        ADI     1
-        MOV     E,A             ; actually DE is char ptr...
-        ; BUG: DE is reused as temp above; reload
-        ; This block is getting convoluted; redo with B-counter
+        DAD     D               ; + digit
+        SHLD    MGPVAL
+        POP     B               ; restore count
+        POP     H               ; restore source pointer
         DCR     B
-        JZ      MGPDN
-        ; advance source pointer - restore DE to GTOBUF+2 + offset
-        ; We lost DE. Use a simpler approach below.
-        JMP     MGPLP
-MGPDN:  RET
-
-;--- Simpler MGPARSE using explicit index -----------------
-; (Replaces the above attempt)
-; Actually let's just write it cleanly:
-MGPARSE2:
-        LXI     H,0
-        MVI     C,0             ; C = index
-        LDA     GTOBUF+1
-        MOV     B,A
-        ORA     A
-        RZ
-MG2LP:  MOV     A,C
-        CPI     B
-        RNZ
-        LXI     D,GTOBUF+2
-        MOV     A,C
-        MVI     H,0
-        MOV     L,A
-        DAD     D               ; HL = &GTOBUF[2+C]
-        MOV     A,M
-        ; Actually let's use D register solely for index
-        ; HL already = accumulator - conflict
-        ; Use MGPVAL as accumulator in memory
-        RET                     ; placeholder
-
-;=============================================================
-; MGOTOL - Navigate to line number in HL.
-; Moves cursor to file top then advances HL lines.
-;=============================================================
-MGOTOL:
-        EXTRN   GBMVTOP
-        EXTRN   GBMVDN
-        CALL    GBMVTOP
-        ; HL = target line (1-based); advance HL-1 times
-        MOV     A,H
-        ORA     L
-        RZ
-        DCX     H
-        MOV     A,H
-        ORA     L
-        RZ
-MGTLLP: PUSH    H
-        CALL    GBMVDN
-        POP     H
-        DCX     H
-        MOV     A,H
-        ORA     L
-        JNZ     MGTLLP
+        JNZ     MGPLP
+MGPDN:  LHLD    MGPVAL          ; return result in HL
         RET
+
+;--- MGOTOL removed: MNGOTO now calls GBGOTOL directly ---
+        EXTRN   GBGOTOL
 
 ;=============================================================
 ; FISAVFN2 - Copy WRKFCB drive+name+ext to BD_FNAME.
@@ -742,6 +724,29 @@ SVAPMT: DB      'Save as:   $'
 GTOPMT: DB      'Go to line: $'
 ABTMSG: DB      'SEDIT v1.03 CP/M Screen Editor  (any key)$'
 
+; Dispatch table in CSEG: immune to DSEG corruption.
+; Order matches MNUITMS item order above.
+MNUTBL:
+        DW      MNOPEN          ; 0 Open File
+        DW      MNSAVE          ; 1 Save File
+        DW      MNSVAS          ; 2 Save As
+        DW      MNFIND          ; 3 Find / Replace
+        DW      MNGOTO          ; 4 Go To Line
+        DW      MNHELP          ; 5 Help
+        DW      MNABUT          ; 6 About
+        DW      MNQUIT          ; 7 Quit
+
+; Item text pointer table in CSEG
+MNUTXP:
+        DW      MNTX1
+        DW      MNTX2
+        DW      MNTX3
+        DW      MNTX4
+        DW      MNTX5
+        DW      MNTX6
+        DW      MNTX7
+        DW      MNTX8
+
 ;=============================================================
 ; DATA SEGMENT
 ;=============================================================
@@ -755,31 +760,9 @@ GTOBUF: DB      8               ; max length
         DB      0               ; actual length
         DS      10              ; input chars
 
-; MGPARSE accumulator
-MGPVAL: DW      0
-
-; Dispatch table: word (handler address) per item
-; Order matches MNUITMS item order above
-MNUTBL:
-        DW      MNOPEN          ; 0 Open File
-        DW      MNSAVE          ; 1 Save File
-        DW      MNSVAS          ; 2 Save As
-        DW      MNFIND          ; 3 Find / Replace
-        DW      MNGOTO          ; 4 Go To Line
-        DW      MNHELP          ; 5 Help
-        DW      MNABUT          ; 6 About
-        DW      MNQUIT          ; 7 Quit
-
-; Item text pointer table (word per item)
-MNUTXP:
-        DW      MNTX1
-        DW      MNTX2
-        DW      MNTX3
-        DW      MNTX4
-        DW      MNTX5
-        DW      MNTX6
-        DW      MNTX7
-        DW      MNTX8
+; MGPARSE working variables
+MGPVAL: DW      0               ; accumulator
+MGPDGT: DB      0               ; current digit value
 
         END
 
