@@ -269,9 +269,20 @@ HLPWAIT:
         LXI     D,HLPFTR
         CALL    OUTSTR
 
-        ; Wait for any key
-        MVI     C,BF_CONIN
+        ; Drain any buffered keyboard input so a stale
+        ; keystroke from the menu cannot dismiss help instantly
+HLPDRN: MVI     E,0FFH
+        MVI     C,BF_RAWIO
         CALL    BDOS
+        ORA     A
+        JNZ     HLPDRN          ; keep draining
+
+        ; Wait for a fresh keypress (non-blocking poll)
+HLPKEY: MVI     E,0FFH
+        MVI     C,BF_RAWIO
+        CALL    BDOS
+        ORA     A
+        JZ      HLPKEY          ; no char yet, keep polling
 
         ; Reset attribute
         LXI     D,HLPNRM
@@ -282,7 +293,7 @@ HLPWAIT:
 ; String constants
 ;=============================================================
 
-HLPCLR:  DB     ESC,'[2J',ESC,'[H$'
+HLPCLR:  DB     ESC,'[0m',ESC,'[2J',ESC,'[H$'
 HLPNRM:  DB     ESC,'[0m$'
 HLPHDR:  DB     ESC,'[7m'
          DB     ' SEDIT v1.03 Key Reference'
@@ -339,14 +350,8 @@ HLR20:  DB  '^M   Insert newline        $'
 
 HLPLINES EQU    20              ; number of help line pairs
 
-;=============================================================
-; DATA SEGMENT
-;=============================================================
-        DSEG
-
-; Loop index for help display
-HLPIDX: DB      0
-
+; Pointer tables in CSEG: immune to DSEG corruption from
+; gap buffer or other data operations.
 ; Left column text pointer table (word per line)
 HLPLTBL:
         DW      HLL01
@@ -395,10 +400,21 @@ HLPRTBL:
 
 ;------------------------------------------------------------
 ; BMDATEND - marks the end of all static data.
-; This module must be linked LAST so $ resolves to
-; the address after all DSEG allocations.
+; This MUST be in CSEG at the very end of the last-linked
+; module, because L80 lays out [DSEG][CSEG] per module.
+; Placing it in DSEG would miss SEHELP's CSEG content
+; (HLPSHOW code, help strings, pointer tables), and the
+; gap buffer starting at BMDATEND would overwrite them.
 ;------------------------------------------------------------
 BMDATEND EQU    $
+
+;=============================================================
+; DATA SEGMENT
+;=============================================================
+        DSEG
+
+; Loop index for help display
+HLPIDX: DB      0
 
         END
 
