@@ -383,7 +383,7 @@ Memory:  [pre-gap text R1][---GAP---][post-gap text R2]
 - **R1** = base .. base+GAPBG-1 (text before cursor)
 - **R2** = base+GAPEN .. base+BSIZE-1 (text after cursor)
 - Cursor is always at the gap. Insert = write at GAPBG, advance GAPBG.
-- Line delimiter: LF (`0AH`) in buffer. Files stored as CR+LF on disk, LF-only internally.
+- Line delimiter: CR+LF (`0DH 0AH`) stored in the buffer. Newline insert writes CR then LF. Backspace over LF auto-absorbs the preceding CR.
 
 ### 6.1 Buffer Descriptor (34 bytes)
 
@@ -505,8 +505,8 @@ Syntax mode is set automatically by SYNINIT based on file extension (`.MAC`, `.A
 2. Build FCB from BD_FNAME
 3. Rename existing file to `.BAK` (delete old .BAK first)
 4. Create new file via BDOS BF_FMAKE
-5. Write buffer contents record-by-record via GBLOGRD:
-   - Convert LF to CR+LF on output
+5. Write buffer contents record-by-record (bytes written verbatim from gap buffer):
+   - No CR+LF conversion needed — buffer already stores CR+LF pairs
    - Pad final 128-byte record with zeros
    - Append CPMEOF marker
 6. Close file; clear MODIFIED flag
