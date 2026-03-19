@@ -13,3 +13,8 @@ Thumbs.db
 # Python
 __pycache__/
 *.pyc
+
+# Local tooling
+.claude/
+build-1.bat
+cpmulator.exe
