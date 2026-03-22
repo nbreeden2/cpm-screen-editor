@@ -76,7 +76,7 @@ SEPRROW EQU     23          ; separator (===) row
 STATROW EQU     24          ; status/message row
 LNUMWID EQU     5           ; gutter width (4+space)
 TXTCOLS EQU     73          ; max text columns/line
-MAXCOLS EQU     128         ; max chars per line (raw bytes)
+MAXCOLS EQU     255         ; max chars per line (raw bytes)
 TXTFCOL EQU     6           ; text start col (1-based)
 TABWID  EQU     4           ; tab stop interval
 

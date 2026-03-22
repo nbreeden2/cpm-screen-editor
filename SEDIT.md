@@ -4,7 +4,7 @@
 **Assembler:** Microsoft M80 / L80
 **Terminal:** VT100 / ANSI
 **Editing Model:** Full-screen, ESC-menu driven, WordStar-compatible control keys
-**Version:** 1.05
+**Version:** 1.06
 
 ---
 
@@ -104,7 +104,7 @@ COL:  1  2  3  4  5  6 ---------------------------------------------------- 80
 
 #### 2.3.2 Line Width and Horizontal Scrolling
 
-- Maximum stored line width: **128 characters** (MAXCOLS=128, excluding line terminator)
+- Maximum stored line width: **255 characters** (MAXCOLS=255, excluding line terminator)
 - Visible text area: **73 columns** (TXTCOLS=73, terminal columns 6-78)
 - Lines longer than the visible area are handled by horizontal scrolling (HSCROL variable)
 - Horizontal scroll auto-adjusts as the cursor moves beyond the visible range
@@ -207,7 +207,7 @@ Menu geometry: top-left at row 6/col 28, bottom-right at row 17/col 54.
 - Press any key to return to editing
 
 #### 7. About (B)
-- Displays `SEDIT v1.05 CP/M Screen Editor` on the status bar
+- Displays `SEDIT v1.06 CP/M Screen Editor` on the status bar
 - Press any key to dismiss
 
 #### 8. Quit / Exit (X/Q)
@@ -495,7 +495,7 @@ Syntax mode is set automatically by SYNINIT based on file extension (`.MAC`, `.A
    - Skip CPMEOF (`1AH`) markers
    - CR stored as-is (invisible in display)
    - LF marks line boundary
-   - Lines wider than MAXCOLS (128) chars generate a warning
+   - Lines wider than MAXCOLS (255) chars generate a warning
 6. Close file; move cursor to top; clear MODIFIED flag
 7. Call SYNINIT to detect syntax mode from extension
 
@@ -640,7 +640,7 @@ SEHELP must be the **last** module in the link order. `BMDATEND EQU $` is define
 | Condition | Response |
 |-----------|----------|
 | Buffer full | BEL; status message |
-| File load: line > 128 chars | Warning in status bar |
+| File load: line > 255 chars | Warning in status bar |
 | Disk full on save | `Disk error` in status bar; buffer stays modified |
 | File not found on open | Open empty buffer; `New file` in status bar |
 | TPA too small (< 9 KB) | Print message to console; exit immediately |
@@ -651,7 +651,7 @@ SEHELP must be the **last** module in the link order. `BMDATEND EQU $` is define
 
 ## 15. Limitations
 
-- Maximum stored line length: 128 characters (MAXCOLS)
+- Maximum stored line length: 255 characters (MAXCOLS)
 - Maximum visible line width: 73 characters without scrolling (TXTCOLS)
 - Maximum file size: limited by available TPA (~30-38 KB typical)
 - Single edit buffer (no split view or buffer switching)

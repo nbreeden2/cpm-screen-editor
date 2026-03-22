@@ -110,7 +110,7 @@ SEPRROW EQU     23          ; separator (===) row
 STATROW EQU     24          ; status/message row
 LNUMWID EQU     5           ; gutter width (4+space)
 TXTCOLS EQU     73          ; max text columns/line
-MAXCOLS EQU     128         ; max chars per line (raw bytes)
+MAXCOLS EQU     255         ; max chars per line (raw bytes)
 TXTFCOL EQU     6           ; text start col (1-based)
 TABWID  EQU     4           ; tab stop interval
 
@@ -284,11 +284,11 @@ FISTLP: MOV     A,M
         STA     FITMP           ; save original byte
         PUSH    H
         LXI     H,FICOL
+        MOV     A,M             ; A = current column count
+        CPI     MAXCOLS         ; already at max?
+        JNC     FIWDPOP         ; line too wide (pop H)
         INR     M               ; increment column
-        MOV     A,M             ; A = new column count
         POP     H
-        CPI     MAXCOLS+1       ; > 128 chars?
-        JNC     FIWIDE          ; line too wide
         LDA     FITMP           ; restore original byte
         JMP     FICHR           ; insert the byte
 
@@ -326,6 +326,8 @@ FIFULL:
         CALL    STATMSG
         RET
 
+FIWDPOP:
+        POP     H               ; balance PUSH H from width check
 FIWIDE:
         ; Line too wide - close file, discard buffer, show error
         LXI     D,WRKFCB
@@ -1134,7 +1136,7 @@ SAVEMSG: DB    'File saved. $'
 ERRMSG:  DB    'Disk full or write error! Press any key.$'
 FULLMSG: DB    'File is too big.$'
 FIWDM1:  DB    'Line $'
-FIWDM2:  DB    ' is wider than 128 characters.$'
+FIWDM2:  DB    ' is wider than 255 characters.$'
 
 ; File load tracking
 FILNUM: DW      0               ; current line number during load

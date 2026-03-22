@@ -92,7 +92,7 @@ SEPRROW EQU     23          ; separator (===) row
 STATROW EQU     24          ; status/message row
 LNUMWID EQU     5           ; gutter width (4+space)
 TXTCOLS EQU     73          ; max text columns/line
-MAXCOLS EQU     128         ; max chars per line (raw bytes)
+MAXCOLS EQU     255         ; max chars per line (raw bytes)
 TXTFCOL EQU     6           ; text start col (1-based)
 TABWID  EQU     4           ; tab stop interval
 
@@ -473,18 +473,27 @@ DO_FEN: CALL    GBMVEND
         JMP     MLDIRT
 DO_DLF: CALL    GBDLFT
         ORA     A
-        JNZ     MAINLP          ; at BOF, nothing deleted
-        LDA     GBTMP
+        JZ      DODLF1          ; A=0: deleted ok
+        CPI     0FEH
+        JZ      DOJNLG          ; A=FEH: line too long
+        JMP     MAINLP          ; A=FFH: at BOF
+DODLF1: LDA     GBTMP
         CPI     LF
         JZ      MLDIRT          ; LF deleted: full redraw
         JMP     MLDRTL          ; same line: redraw current only
 DO_DRT: CALL    GBDELRT
         ORA     A
-        JNZ     MAINLP          ; at EOF, nothing deleted
-        LDA     GBTMP
+        JZ      DODRT1          ; A=0: deleted ok
+        CPI     0FEH
+        JZ      DOJNLG          ; A=FEH: line too long
+        JMP     MAINLP          ; A=FFH: at EOF
+DODRT1: LDA     GBTMP
         CPI     LF
         JZ      MLDIRT          ; LF deleted: full redraw
         JMP     MLDRTL          ; same line: redraw current only
+DOJNLG: LXI     D,JNLMSG        ; "Line too long"
+        CALL    STATMSG
+        JMP     MAINLP
 DO_DWD: CALL    GBWRDNX         ; move to next word
         CALL    GBDLFT         ; then delete back
         JMP     MLDIRT
@@ -791,6 +800,7 @@ CLRMSG:  DB    ' $'
 SAVWMSG: DB    'Saving file, please wait...$'
 EXTSAVQ: DB    'Save changes? (Y/N/Esc) $'
 EXTASPMT: DB   'Save as: $'
+JNLMSG:  DB    'Line too long to join.$'
 
 ;=============================================================
 ; DATA SEGMENT

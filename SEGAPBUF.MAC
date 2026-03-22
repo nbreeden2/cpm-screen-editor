@@ -90,7 +90,7 @@ SEPRROW EQU     23          ; separator (===) row
 STATROW EQU     24          ; status/message row
 LNUMWID EQU     5           ; gutter width (4+space)
 TXTCOLS EQU     73          ; max text columns/line
-MAXCOLS EQU     128         ; max chars per line (raw bytes)
+MAXCOLS EQU     255         ; max chars per line (raw bytes)
 TXTFCOL EQU     6           ; text start col (1-based)
 TABWID  EQU     4           ; tab stop interval
 
@@ -434,6 +434,28 @@ GBDLFT:
         MOV     A,M             ; byte before cursor
         STA     GBTMP           ; save it
 
+        ; If deleting LF, check combined line length
+        CPI     LF
+        JNZ     GBDLGO          ; not LF, safe to delete
+        ; Set up GBJLCHK params:
+        ;   HL = base+GAPBG-2 (left side, byte before LF)
+        ;   DE = base+GAPEN   (right side, current line)
+        CALL    GBBASE          ; DE = base
+        PUSH    D               ; save base
+        CALL    GBGAPBG         ; HL = GAPBG (DE=base ok)
+        DCX     H
+        DCX     H               ; HL = GAPBG-2
+        DAD     D               ; HL = base+GAPBG-2 (left)
+        POP     D               ; DE = base
+        PUSH    H               ; save left start
+        CALL    GBGAPEN         ; HL = GAPEN (DE=base ok)
+        DAD     D               ; HL = base+GAPEN (right)
+        XCHG                    ; DE = base+GAPEN
+        POP     H               ; HL = base+GAPBG-2
+        CALL    GBJLCHK         ; A=0 ok, A=FFH too long
+        ORA     A
+        JNZ     GBDLONG         ; line too long, refuse
+GBDLGO:
         ; Shrink gap leftward: GAPBG -= 1
         CALL    GBGAPBG
         DCX     H
@@ -521,6 +543,9 @@ GBDLDONE:
 GBDLBER:
         MVI     A,0FFH
         RET
+GBDLONG:
+        MVI     A,0FEH          ; line too long to join
+        RET
 
 ;=============================================================
 ; GBDELRT - Delete char at cursor (forward delete).
@@ -546,6 +571,28 @@ GBDELRT:
         MOV     A,M
         STA     GBTMP
 
+        ; If deleting LF, check combined line length
+        CPI     LF
+        JNZ     GBDRGO          ; not LF, safe to delete
+        ; Set up GBJLCHK params:
+        ;   HL = base+GAPBG-1 (left side, end of current line)
+        ;   DE = base+GAPEN+1 (right side, start of next line)
+        CALL    GBBASE          ; DE = base
+        PUSH    D               ; save base
+        CALL    GBGAPBG         ; HL = GAPBG (DE=base ok)
+        DCX     H               ; HL = GAPBG-1
+        DAD     D               ; HL = base+GAPBG-1 (left)
+        POP     D               ; DE = base
+        PUSH    H               ; save left start
+        CALL    GBGAPEN         ; HL = GAPEN (DE=base ok)
+        INX     H               ; HL = GAPEN+1 (skip the LF)
+        DAD     D               ; HL = base+GAPEN+1 (right)
+        XCHG                    ; DE = base+GAPEN+1
+        POP     H               ; HL = base+GAPBG-1
+        CALL    GBJLCHK         ; A=0 ok, A=FFH too long
+        ORA     A
+        JNZ     GBDLONG         ; line too long, refuse
+GBDRGO:
         ; Extend gap right: GAPEN += 1
         CALL    GBGAPEN
         INX     H
@@ -2715,6 +2762,110 @@ GBSETMOD:
         RET
 
 ;=============================================================
+; GBJLCHK - Check if joining two lines exceeds MAXCOLS.
+; Called before deleting a LF that separates two lines.
+; Entry: HL = left scan start (physical addr, last byte
+;             of left line or CR before LF)
+;        DE = right scan start (physical addr, first byte
+;             of right line after the LF)
+; Exit:  A=0 ok to join, A=FFH combined too long
+;        All regs clobbered
+;=============================================================
+GBJLCHK:
+        SHLD    GJKLPTR         ; left scan pointer
+        XCHG
+        SHLD    GJKRPTR         ; right scan pointer
+        ; Get buffer physical bounds
+        CALL    GBBASE          ; DE = base
+        XCHG
+        SHLD    GJKBAS
+        CALL    GBBSIZ          ; DE = bsize
+        LHLD    GJKBAS
+        DAD     D
+        SHLD    GJKBEND         ; base + bsize
+
+        ; --- Right side: scan forward to next LF or end ---
+        XRA     A
+        STA     GJKRCNT         ; right count = 0
+        LHLD    GJKRPTR
+GJKRLP: XCHG                    ; DE = ptr
+        LHLD    GJKBEND         ; HL = end
+        MOV     A,E
+        SUB     L
+        MOV     A,D
+        SBB     H               ; ptr - end
+        JNC     GJKRDN          ; ptr >= end, done
+        LDAX    D               ; A = byte at ptr
+        INX     D               ; advance ptr
+        CPI     LF
+        JZ      GJKRDN
+        CPI     CR
+        JZ      GJKRL2
+        ; visible char
+        LXI     H,GJKRCNT
+        INR     M
+GJKRL2: XCHG                    ; HL = advanced ptr
+        JMP     GJKRLP
+GJKRDN:
+        ; --- Left side: scan backward to prev LF or base ---
+        XRA     A
+        STA     GJKLCNT         ; left count = 0
+        LHLD    GJKLPTR
+        XCHG                    ; DE = ptr
+        LHLD    GJKBAS
+        MOV     A,E
+        SUB     L
+        MOV     A,D
+        SBB     H
+        JC      GJKLDN          ; ptr < base, left empty
+        XCHG                    ; HL = ptr
+        ; Skip initial CR if present
+        MOV     A,M
+        CPI     CR
+        JNZ     GJKLLP
+        DCX     H               ; skip CR
+        ; Re-check >= base
+        XCHG
+        LHLD    GJKBAS
+        MOV     A,E
+        SUB     L
+        MOV     A,D
+        SBB     H
+        JC      GJKLDN
+        XCHG
+GJKLLP: ; Check ptr >= base
+        XCHG
+        LHLD    GJKBAS
+        MOV     A,E
+        SUB     L
+        MOV     A,D
+        SBB     H
+        JC      GJKLDN          ; below base
+        XCHG                    ; HL = ptr
+        MOV     A,M
+        DCX     H               ; move backward
+        CPI     LF
+        JZ      GJKLDN
+        CPI     CR
+        JZ      GJKLLP
+        PUSH    H
+        LXI     H,GJKLCNT
+        INR     M
+        POP     H
+        JMP     GJKLLP
+GJKLDN:
+        ; Check combined length
+        LDA     GJKRCNT
+        MOV     B,A
+        LDA     GJKLCNT
+        ADD     B               ; A = left + right
+        JC      GJKFAL          ; overflow > 255 = MAXCOLS
+        XRA     A               ; ok
+        RET
+GJKFAL: MVI     A,0FFH
+        RET
+
+;=============================================================
 ; DATA SEGMENT
 ;=============================================================
         DSEG
@@ -2756,6 +2907,14 @@ GCNBAS: DW      0               ; buffer base address
 GCNR1E: DW      0               ; region 1 end (base + GAPBG)
 GCNR2S: DW      0               ; region 2 start (base + GAPEN)
 GCNR2E: DW      0               ; region 2 end (base + BSIZE)
+
+; GBJLCHK working variables
+GJKLPTR: DW     0               ; left scan pointer
+GJKRPTR: DW     0               ; right scan pointer
+GJKBAS: DW      0               ; buffer base address
+GJKBEND: DW     0               ; buffer physical end
+GJKRCNT: DB     0               ; right side char count
+GJKLCNT: DB     0               ; left side char count
 
         END
 
