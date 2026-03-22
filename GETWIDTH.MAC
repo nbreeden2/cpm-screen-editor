@@ -1,0 +1,249 @@
+;============================================================
+; FILE:    GETWIDTH.MAC
+; PROJECT: SEDIT - Screen Editor for CP/M 2.2
+; VERSION: 1.00
+; DATE:    1984-01-01
+;------------------------------------------------------------
+; DESCRIPTION:
+;   Standalone utility to detect and display the terminal
+;   display width. Moves cursor to far-right column, sends
+;   a VT100 Device Status Report (ESC[6n), parses the
+;   Cursor Position Report response (ESC[row;colR), and
+;   prints the column count.
+;
+; BUILD:
+;   M80 =GETWIDTH
+;   L80 GETWIDTH,GETWIDTH/N/E
+;
+; USAGE:
+;   A>GETWIDTH
+;   Terminal width: 80 columns
+;------------------------------------------------------------
+; REVISION HISTORY:
+;   1.00  1984-01-01  Initial version
+;============================================================
+
+BF_COUT EQU     2           ; BDOS console output
+BF_RAWIO EQU    6           ; BDOS direct console I/O
+ESC     EQU     1BH
+CR      EQU     0DH
+LF      EQU     0AH
+
+        CSEG
+
+START:
+        LXI     SP,STACK
+
+        ; --- Save current cursor position ---
+        LXI     D,SAVSTR
+        CALL    PRTSTR
+
+        ; --- Move cursor to column 999 ---
+        ; ESC[999C  (cursor forward 999 cols)
+        LXI     D,FWDSTR
+        CALL    PRTSTR
+
+        ; --- Send Device Status Report ---
+        ; ESC[6n  - terminal replies ESC[row;colR
+        LXI     D,DSRSTR
+        CALL    PRTSTR
+
+        ; --- Read response: ESC [ row ; col R ---
+        ; Wait for ESC
+        CALL    RDWAIT
+        CPI     ESC
+        JNZ     FAIL
+
+        ; Wait for [
+        CALL    RDWAIT
+        CPI     '['
+        JNZ     FAIL
+
+        ; Read row digits until ;
+        LXI     H,0         ; discard row number
+RDROW:  CALL    RDWAIT
+        CPI     ';'
+        JZ      RDCOL0
+        ; accumulate digit (ignored, we only want col)
+        JMP     RDROW
+
+        ; Read col digits until R
+RDCOL0: LXI     H,0         ; HL = column number
+RDCOL:  CALL    RDWAIT
+        CPI     'R'
+        JZ      GOTCOL
+        ; Accumulate digit: HL = HL*10 + (A-'0')
+        SUI     '0'
+        MOV     C,A         ; save digit in C
+        ; HL = HL * 10
+        PUSH    B
+        MOV     B,H
+        MOV     C,L         ; BC = HL
+        DAD     H           ; HL = HL*2
+        DAD     H           ; HL = HL*4
+        DAD     B           ; HL = HL*5
+        DAD     H           ; HL = HL*10
+        POP     B
+        ; Add digit
+        MVI     B,0
+        DAD     B           ; HL = HL*10 + digit
+        JMP     RDCOL
+
+GOTCOL: ; HL = terminal width (column count)
+        SHLD    WIDTH
+
+        ; --- Restore cursor position ---
+        LXI     D,RSTSTR
+        CALL    PRTSTR
+
+        ; --- Print result ---
+        LXI     D,MSG1
+        CALL    PRTSTR
+
+        LHLD    WIDTH
+        CALL    PRTHL
+
+        LXI     D,MSG2
+        CALL    PRTSTR
+
+        JMP     0000H       ; warm boot
+
+FAIL:
+        ; --- Restore cursor position ---
+        LXI     D,RSTSTR
+        CALL    PRTSTR
+
+        LXI     D,ERRMSG
+        CALL    PRTSTR
+        JMP     0000H
+
+;------------------------------------------------------------
+; RDWAIT - Read one byte from console, blocking.
+; Polls BDOS raw I/O until a character arrives.
+; Exit:   A = character received
+;------------------------------------------------------------
+RDWAIT:
+        PUSH    B
+        PUSH    D
+        PUSH    H
+RDW1:   MVI     C,BF_RAWIO
+        MVI     E,0FFH      ; input request
+        CALL    0005H
+        ORA     A
+        JZ      RDW1        ; no char yet, poll again
+        POP     H
+        POP     D
+        POP     B
+        RET
+
+;------------------------------------------------------------
+; PRTSTR - Print $-terminated string at DE via BDOS.
+;------------------------------------------------------------
+PRTSTR:
+        PUSH    B
+        PUSH    H
+        MVI     C,9         ; BDOS print string
+        CALL    0005H
+        POP     H
+        POP     B
+        RET
+
+;------------------------------------------------------------
+; PRTHL - Print HL as decimal number, no leading zeros.
+; Entry:  HL = 16-bit unsigned value
+;------------------------------------------------------------
+PRTHL:
+        PUSH    B
+        PUSH    D
+        PUSH    H
+        ; Divide by 10000, 1000, 100, 10, 1
+        LXI     D,10000
+        MVI     B,0         ; leading zero flag
+        CALL    PHDIG
+        LXI     D,1000
+        CALL    PHDIG
+        LXI     D,100
+        CALL    PHDIG
+        LXI     D,10
+        CALL    PHDIG
+        ; Last digit always prints
+        MOV     A,L
+        ADI     '0'
+        CALL    CHROUT
+        POP     H
+        POP     D
+        POP     B
+        RET
+
+;------------------------------------------------------------
+; PHDIG - Print one decimal digit (HL / DE).
+; Entry:  HL = value, DE = divisor, B = suppress flag
+; Exit:   HL = remainder, B updated
+;------------------------------------------------------------
+PHDIG:
+        MVI     C,0         ; quotient
+PHD1:   MOV     A,L
+        SUB     E
+        MOV     L,A
+        MOV     A,H
+        SBB     D
+        MOV     H,A
+        JC      PHD2        ; went negative
+        INR     C
+        JMP     PHD1
+PHD2:   ; Restore: HL = HL + DE
+        MOV     A,L
+        ADD     E
+        MOV     L,A
+        MOV     A,H
+        ADC     D
+        MOV     H,A
+        ; C = quotient digit
+        MOV     A,C
+        ORA     A
+        JNZ     PHD3
+        ; Zero digit: suppress if leading
+        MOV     A,B
+        ORA     A
+        RZ              ; still leading zeros, skip
+PHD3:   MVI     B,1         ; no longer leading
+        MOV     A,C
+        ADI     '0'
+        CALL    CHROUT
+        RET
+
+;------------------------------------------------------------
+; CHROUT - Output character in A via BDOS raw I/O.
+;------------------------------------------------------------
+CHROUT:
+        PUSH    B
+        PUSH    D
+        PUSH    H
+        MOV     E,A
+        MVI     C,BF_RAWIO
+        CALL    0005H
+        POP     H
+        POP     D
+        POP     B
+        RET
+
+;------------------------------------------------------------
+; Data
+;------------------------------------------------------------
+SAVSTR: DB      ESC,'7','$'             ; save cursor (DECSC)
+RSTSTR: DB      ESC,'8','$'             ; restore cursor (DECRC)
+FWDSTR: DB      ESC,'[','9','9','9','C','$' ; cursor fwd 999
+DSRSTR: DB      ESC,'[','6','n','$'     ; device status report
+MSG1:   DB      'Terminal width: ','$'
+MSG2:   DB      ' columns',CR,LF,'$'
+ERRMSG: DB      'No response from terminal.',CR,LF,'$'
+
+        DSEG
+
+WIDTH:  DW      0
+
+        DS      64
+STACK   EQU     $
+
+        END     START
+
