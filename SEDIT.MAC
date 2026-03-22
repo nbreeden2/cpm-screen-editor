@@ -252,6 +252,10 @@ SRCHMAX EQU     64          ; max find string length
         PUBLIC  TPATOP          ; TPA top address
         PUBLIC  DOEXIT          ; exit handler (for SEMENU)
         PUBLIC  HSCROL          ; horizontal scroll offset
+        PUBLIC  COLMOD          ; column mode (0=80, 1=132)
+        PUBLIC  RTXTCL          ; runtime text columns
+        PUBLIC  RSCRCL          ; runtime screen columns
+        PUBLIC  RTXTTB          ; runtime TXTCOLS-TABWID
 
 ;=============================================================
 ; CODE SEGMENT
@@ -684,9 +688,13 @@ AUTOSCR:
         CALL    BDFLD           ; HL -> BD_CSCOL
         MOV     A,M             ; A = cursor column
 
-        ; Snap-to-zero: if CSCOL < TXTCOLS - TABWID (69), HSCROL = 0
-        CPI     TXTCOLS-TABWID
-        JNC     ASNOCHK
+        ; Snap-to-zero: if CSCOL < RTXTTB, HSCROL = 0
+        MOV     B,A             ; B = CSCOL
+        LDA     RTXTTB          ; A = runtime threshold
+        CMP     B               ; RTXTTB - CSCOL: carry if CSCOL > RTXTTB
+        MOV     A,B             ; A = CSCOL (restore)
+        JC      ASNOCHK         ; CSCOL > threshold
+        JZ      ASNOCHK         ; CSCOL == threshold
         ; Cursor in safe zone: snap HSCROL to 0
         LDA     HSCROL
         ORA     A
@@ -699,11 +707,13 @@ AUTOSCR:
 
 ASNOCHK:
         ; CSCOL >= 69. Check if cursor past right edge of viewport.
-        ; Right edge = HSCROL + TXTCOLS
+        ; Right edge = HSCROL + RTXTCL
         MOV     L,A             ; L = CSCOL (save)
         LDA     HSCROL
         MOV     H,A             ; H = old HSCROL
-        ADI     TXTCOLS         ; A = HSCROL + TXTCOLS
+        MOV     B,A             ; B = HSCROL
+        LDA     RTXTCL
+        ADD     B               ; A = HSCROL + RTXTCL
         JC      ASCHKLF         ; overflow means cursor can't be past it
         CMP     L               ; right_edge - CSCOL
         JC      ASRGHT          ; right_edge < CSCOL, need scroll right
@@ -711,9 +721,12 @@ ASNOCHK:
         JMP     ASCHKLF         ; right_edge > CSCOL, cursor visible
 
 ASRGHT: ; Cursor at or past right edge: scroll right
-        ; HSCROL = round_up(CSCOL - TXTCOLS + 1, 4)
+        ; HSCROL = round_up(CSCOL - RTXTCL + 1, 4)
+        LDA     RTXTCL
+        DCR     A               ; A = RTXTCL - 1
+        MOV     B,A             ; B = RTXTCL - 1
         MOV     A,L             ; A = CSCOL
-        SUI     TXTCOLS-1       ; A = CSCOL - TXTCOLS + 1
+        SUB     B               ; A = CSCOL - (RTXTCL - 1)
         ADI     TABWID-1        ; round up: add 3
         ANI     0FCH            ; align to multiple of 4
         JMP     ASUPDAT         ; store new HSCROL
@@ -813,6 +826,10 @@ INSMODE: DB     MODE_INS        ; insert/overwrite mode
 DIRTY:  DB      1               ; 1 = full screen redraw needed
 DRTLINE: DB     0               ; 1 = redraw current line only
 HSCROL: DB      0               ; horizontal scroll offset (tab-aligned)
+COLMOD: DB      0               ; column mode: 0=80, 1=132
+RTXTCL: DB      TXTCOLS         ; runtime text columns (73 or 125)
+RSCRCL: DB      SCRCOLS         ; runtime screen columns (80 or 132)
+RTXTTB: DB      TXTCOLS-TABWID  ; runtime TXTCOLS-TABWID (69 or 121)
 OLDTPLN: DW     0               ; saved TOPLN for scroll detect
 CURBDP: DW      0               ; ptr to active buf desc
 BDESC0: DS      BD_SIZE         ; single buffer descriptor (34 bytes)

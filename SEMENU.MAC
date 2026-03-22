@@ -206,6 +206,12 @@ SRCHMAX EQU     64          ; max find string length
         EXTRN   OUTCHAR         ; write single char
         EXTRN   STATMSG         ; status bar message
         EXTRN   SYNINIT         ; detect syntax mode from filename
+        EXTRN   COLMOD          ; column mode (0=80, 1=132)
+        EXTRN   RTXTCL          ; runtime text columns
+        EXTRN   RSCRCL          ; runtime screen columns
+        EXTRN   RTXTTB          ; runtime TXTCOLS-TABWID
+        EXTRN   HSCROL          ; horizontal scroll offset
+        EXTRN   SCRINIT         ; screen init
 
 ;--- Exports ----------------------------------------------
         PUBLIC  MNUSHOW         ; show menu and process
@@ -216,7 +222,7 @@ MNUROW1 EQU     6               ; top border row (1-based)
 MNUROW2 EQU     17              ; bottom border row
 MNUCOL1 EQU     28              ; left border col
 MNUCOL2 EQU     54              ; right border col
-MNUITMS EQU     8               ; number of menu items
+MNUITMS EQU     9               ; number of menu items
 MNUFROW EQU     MNUROW1+2       ; first item row
 MNUTCOL EQU     MNUCOL1+2       ; text start column
 
@@ -263,11 +269,11 @@ MNULP:
         CPI     'j'
         JZ      MNUDN
 
-        ; Digit shortcut 1-8
+        ; Digit shortcut 1-9
         CPI     '1'
         JC      MNULSC          ; below '1', check letters
-        CPI     '8'+1
-        JNC     MNULSC          ; above '8', check letters
+        CPI     '9'+1
+        JNC     MNULSC          ; above '9', check letters
         SUI     '1'             ; 0-based index
         STA     MNUSEL
         JMP     MNUACT
@@ -295,11 +301,14 @@ MNULSC: ORI     20H             ; force lowercase
         CPI     'b'
         MVI     B,6             ; About
         JZ      MNULSL
+        CPI     'w'
+        MVI     B,7             ; Toggle columns
+        JZ      MNULSL
         CPI     'x'
-        MVI     B,7             ; Quit
+        MVI     B,8             ; Quit
         JZ      MNULSL
         CPI     'q'
-        MVI     B,7             ; Quit
+        MVI     B,8             ; Quit
         JZ      MNULSL
         JMP     MNULP           ; unrecognised, ignore
 
@@ -465,6 +474,42 @@ MNAKEY: MVI     E,0FFH
         CALL    BDOS
         ORA     A
         JZ      MNAKEY
+        RET
+
+;--- Toggle 80/132 column mode ---------------------------
+MNTGCL:
+        LDA     COLMOD
+        ORA     A
+        JNZ     MNTG80          ; currently 132, switch to 80
+        ; Switch to 132-col mode
+        MVI     A,1
+        STA     COLMOD
+        MVI     A,125           ; 132 - LNUMWID(5) - 2
+        STA     RTXTCL
+        MVI     A,132
+        STA     RSCRCL
+        MVI     A,121           ; 125 - TABWID(4)
+        STA     RTXTTB
+        LXI     D,DCWIDE        ; ESC[?3h
+        CALL    OUTSTR
+        JMP     MNTGDN
+MNTG80: ; Switch to 80-col mode
+        XRA     A
+        STA     COLMOD
+        MVI     A,TXTCOLS       ; 73
+        STA     RTXTCL
+        MVI     A,SCRCOLS       ; 80
+        STA     RSCRCL
+        MVI     A,TXTCOLS-TABWID ; 69
+        STA     RTXTTB
+        LXI     D,DCNORM        ; ESC[?3l
+        CALL    OUTSTR
+MNTGDN: ; DECCOLM clears screen on real VT100, full redraw
+        XRA     A
+        STA     HSCROL          ; reset horizontal scroll
+        CALL    SCRINIT         ; re-init screen (clear + chrome)
+        MVI     A,1
+        STA     DIRTY           ; force full content redraw
         RET
 
 ;--- Quit / Exit -----------------------------------------
@@ -747,13 +792,16 @@ MNTX4:  DB      '4. Find text...       $'
 MNTX5:  DB      '5. Go To Line...      $'
 MNTX6:  DB      '6. Help               $'
 MNTX7:  DB      '7. About              $'
-MNTX8:  DB      '8. Quit / Exit        $'
+MNTX8:  DB      '8. Toggle 80/132 col  $'
+MNTX9:  DB      '9. Quit / Exit        $'
 
 ; Prompt strings
 OPNPMT: DB      'Open file: $'
 SVAPMT: DB      'Save as:   $'
 GTOPMT: DB      'Go to line: $'
-ABTMSG: DB      'SEDIT v1.07 CP/M Screen Editor  (any key)$'
+ABTMSG: DB      'SEDIT v1.08 CP/M Screen Editor  (any key)$'
+DCWIDE: DB      ESC,'[','?','3','h','$'    ; DECCOLM: 132 columns
+DCNORM: DB      ESC,'[','?','3','l','$'    ; DECCOLM: 80 columns
 
 ; Dispatch table in CSEG: immune to DSEG corruption.
 ; Order matches MNUITMS item order above.
@@ -765,7 +813,8 @@ MNUTBL:
         DW      MNGOTO          ; 4 Go To Line
         DW      MNHELP          ; 5 Help
         DW      MNABUT          ; 6 About
-        DW      MNQUIT          ; 7 Quit
+        DW      MNTGCL          ; 7 Toggle 80/132 col
+        DW      MNQUIT          ; 8 Quit
 
 ; Item text pointer table in CSEG
 MNUTXP:
@@ -777,6 +826,7 @@ MNUTXP:
         DW      MNTX6
         DW      MNTX7
         DW      MNTX8
+        DW      MNTX9
 
 ;=============================================================
 ; DATA SEGMENT

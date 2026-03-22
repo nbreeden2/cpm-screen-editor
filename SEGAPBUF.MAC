@@ -1755,7 +1755,7 @@ GBCURLN:
         JNZ     GCLR1           ; low bytes differ
         MOV     A,D
         SBB     H
-        JZ      GCLNR1          ; GAPBG = 0, skip to R2
+        JZ      GCLNR0          ; GAPBG = 0, init GGLBUF then R2
 
 GCLR1:
         ; --- Scan backward in R1 for line start ---
@@ -1801,6 +1801,9 @@ GCLR1G: MOV     A,M
 GCLR1N: INX     H
         JMP     GCLR1C
 
+GCLNR0: ; R1 empty (GAPBG = 0): init GGLBUF ptr and count
+        LXI     D,GGLBUF
+        MVI     B,0
 GCLNR1: ; --- Copy R2 portion (after cursor) into GGLBUF ---
         LHLD    GCLR2S
 GCLR2C: ; Check if HL reached R2 end

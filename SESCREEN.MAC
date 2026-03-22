@@ -192,6 +192,8 @@ SRCHMAX EQU     64          ; max find string length
         EXTRN   CURBDP          ; current buffer desc ptr
         EXTRN   INSMODE         ; insert/overwrite mode
         EXTRN   HSCROL          ; horizontal scroll offset
+        EXTRN   RTXTCL          ; runtime text columns
+        EXTRN   RSCRCL          ; runtime screen columns
         EXTRN   GBGETLN         ; get ptr to line text
         EXTRN   GBCURLN         ; get current cursor line (fast)
         EXTRN   GBCNTLN         ; count lines in buffer
@@ -235,14 +237,6 @@ SGRYEL:  DB     ESC,'[','3','3','m','$'  ; SGR yellow fg
 SGRCYN:  DB     ESC,'[','3','6','m','$'  ; SGR cyan fg
 SGRWHT:  DB     ESC,'[','0',';','3','7','m','$' ; SGR reset+white fg
         ENDIF
-
-;--- Separator line (80 '=' characters) ---------------
-SEPLINE: DB     '========================================'
-         DB     '========================================','$'
-
-;--- Tab ruler (74 chars, ':' every TABWID cols) ------
-RULRTXT: DB     '----:----:----:----:----:----:----:'
-         DB     '----:----:----:----:----:----:----:----','$'
 
 ;--- Info bar label strings ---------------------------
 IBLNSTR: DB     ' Lines:',' $'
@@ -585,8 +579,14 @@ SDSKDN: ; Skip done. Check if we entered highlight region.
 SDSK2:  MVI     C,0             ; reset screen column for output
         ; --- Text output loop ---
 SDTXLP: MOV     A,C
-        CPI     TXTCOLS
-        JNC     SDCLR           ; hit screen column limit
+        PUSH    B
+        MOV     B,A
+        LDA     RTXTCL
+        CMP     B               ; RTXTCL - col: carry if col > limit
+        MOV     A,B
+        POP     B
+        JC      SDCLR           ; hit screen column limit
+        JZ      SDCLR
         LDAX    D               ; read text byte
         ORA     A
         JZ      SDCLR           ; NUL = end
@@ -658,8 +658,14 @@ SDTBSP: MVI     A,' '
         POP     D
         INR     C
         MOV     A,C
-        CPI     TXTCOLS
-        JNC     SDCLR
+        PUSH    B
+        MOV     B,A
+        LDA     RTXTCL
+        CMP     B
+        MOV     A,B
+        POP     B
+        JC      SDCLR
+        JZ      SDCLR
         DCR     B
         JNZ     SDTBSP
         INX     D               ; skip TAB byte
@@ -811,7 +817,37 @@ SCREDCL:
         XCHG                    ; DE = text ptr
         POP     B               ; B = screen row (0-based)
         JNZ     SLEDRAW         ; line exists, render it
-        ; Fallback (shouldn't happen for cursor line)
+        ; Empty buffer: draw gutter + clear rest of line
+        LHLD    CURBDP
+        MOV     A,L
+        ADI     BD_TOPLN
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A
+        MOV     E,M
+        INX     H
+        MOV     D,M             ; DE = TOPLINE
+        MOV     A,E
+        ADD     B
+        MOV     L,A
+        MOV     A,D
+        ACI     0
+        MOV     H,A             ; HL = TOPLINE + row
+        INX     H               ; 1-based
+        IF COLOR
+        PUSH    H
+        LXI     D,SGRGRN
+        CALL    OUTSTR
+        POP     H
+        ENDIF
+        CALL    OUTN4DG
+        IF COLOR
+        LXI     D,SGRRES
+        CALL    OUTSTR
+        ENDIF
+        MVI     A,' '
+        CALL    OUTCHAR
         LXI     D,CLREOL
         CALL    OUTSTR
         RET
@@ -995,8 +1031,14 @@ SLSKDN: MVI     C,0             ; reset screen column for output
 
 SLETXT:
         MOV     A,C
-        CPI     TXTCOLS
-        JNC     SLEEND          ; hit screen column limit
+        PUSH    B
+        MOV     B,A
+        LDA     RTXTCL
+        CMP     B
+        MOV     A,B
+        POP     B
+        JC      SLEEND          ; hit screen column limit
+        JZ      SLEEND
         LDAX    D               ; read text byte
         ORA     A               ; NUL = end
         JZ      SLEEND
@@ -1056,8 +1098,14 @@ STABSP: MVI     A,' '
         POP     D               ; restore text pointer
         INR     C
         MOV     A,C
-        CPI     TXTCOLS
-        JNC     SLEEND
+        PUSH    B
+        MOV     B,A
+        LDA     RTXTCL
+        CMP     B
+        MOV     A,B
+        POP     B
+        JC      SLEEND
+        JZ      SLEEND
         DCR     B
         JNZ     STABSP
         INX     D               ; skip TAB byte
@@ -1294,17 +1342,31 @@ RULRDRAW:
         CALL    CURGOTO
         LXI     D,SGRDIM        ; dim for ruler
         CALL    OUTSTR
-        ; 4-char gutter (spaces to align with text)
+        ; Gutter spaces
         MVI     B,LNUMWID
 RLGUT:  MVI     A,' '
-        PUSH    B               ; protect loop counter from BDOS
+        PUSH    B
         CALL    OUTCHAR
         POP     B
         DCR     B
         JNZ     RLGUT
-        ; Print the ruler text
-        LXI     D,RULRTXT
-        CALL    OUTSTR
+        ; Dynamic ruler: ':' every TABWID, else '-'
+        LDA     RTXTCL
+        MOV     B,A             ; B = chars remaining
+        MVI     C,0             ; C = position (0-based)
+RLTXLP: MOV     A,C
+        INR     A               ; 1-based position
+        ANI     TABWID-1        ; mod 4
+        JNZ     RLDASH
+        MVI     A,':'
+        JMP     RLOUT
+RLDASH: MVI     A,'-'
+RLOUT:  PUSH    B
+        CALL    OUTCHAR
+        POP     B
+        INR     C
+        DCR     B
+        JNZ     RLTXLP
         LXI     D,CLREOL
         CALL    OUTSTR
         LXI     D,SGRRES
@@ -1322,8 +1384,15 @@ SEPRDRAW:
         CALL    CURGOTO
         LXI     D,SGRDIM
         CALL    OUTSTR
-        LXI     D,SEPLINE
-        CALL    OUTSTR
+        ; Dynamic separator: RSCRCL '=' chars
+        LDA     RSCRCL
+        MOV     B,A
+SPRLP:  MVI     A,'='
+        PUSH    B
+        CALL    OUTCHAR
+        POP     B
+        DCR     B
+        JNZ     SPRLP
         LXI     D,SGRRES
         CALL    OUTSTR
         RET

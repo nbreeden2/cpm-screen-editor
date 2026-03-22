@@ -36,7 +36,7 @@ SEDIT is a full-screen plain-text editor for CP/M 2.2 written in Intel 8080 asse
 
 ## 2. Screen Layout
 
-80 columns x 24 rows, VT100 terminal. The screen is divided into five fixed zones.
+80 columns x 24 rows, VT100 terminal (supports 132-column mode via ESC menu toggle). The screen is divided into five fixed zones.
 
 ```
 Row  1  +-- Info bar ----------------------------------------------------------------+
@@ -155,7 +155,8 @@ Pressing `ESC` at any time opens the command menu. The menu overlays the edit ar
          |  5. Go To Line...        |
          |  6. Help                 |
          |  7. About                |
-         |  8. Quit / Exit          |
+         |  8. Toggle 80/132 col    |
+         |  9. Quit / Exit          |
          +==========================+
 ```
 
@@ -166,8 +167,8 @@ Menu geometry: top-left at row 6/col 28, bottom-right at row 17/col 54.
 | Key | Action |
 |-----|--------|
 | Up / Down arrow, `^E` / `^X`, `K` / `J` | Move highlight |
-| Enter or digit `1`-`8` | Execute item |
-| Shortcut letter (O/S/A/F/G/H/B/X/Q) | Execute item directly |
+| Enter or digit `1`-`9` | Execute item |
+| Shortcut letter (O/S/A/F/G/H/B/W/X/Q) | Execute item directly |
 | ESC | Cancel menu, return to editing |
 
 ### 3.3 Menu Item Details
@@ -207,10 +208,18 @@ Menu geometry: top-left at row 6/col 28, bottom-right at row 17/col 54.
 - Press any key to return to editing
 
 #### 7. About (B)
-- Displays `SEDIT v1.07 CP/M Screen Editor` on the status bar
+- Displays `SEDIT v1.08 CP/M Screen Editor` on the status bar
 - Press any key to dismiss
 
-#### 8. Quit / Exit (X/Q)
+#### 8. Toggle 80/132 col (W)
+- Toggles between VT100 80-column and 132-column display modes
+- Sends DECCOLM escape sequence: `ESC[?3h` for 132-col, `ESC[?3l` for 80-col
+- Dynamically reconfigures screen width: text area expands from 73 to 125 columns
+- Resets horizontal scroll offset and reinitializes the screen
+- Runtime variables updated: RTXTCL (73/125), RSCRCL (80/132), RTXTTB (69/121)
+- Editor starts in 80-column mode by default
+
+#### 9. Quit / Exit (X/Q)
 - If buffer is modified, prompts to save
 - Clears screen and warm boots via `JMP 0000H`
 
