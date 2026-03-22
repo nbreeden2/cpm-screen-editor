@@ -1,9 +1,3 @@
-; BUILD.SUB - SEDIT build script for CP/M SUBMIT.COM
-; Usage: SUBMIT BUILD
-; Requires: M80.COM, L80.COM on search path (e.g. drive A:)
-;
-; CPMFMT.PY inlines SEDIT.INC into each .MAC file before assembly,
-; so M80 never sees an INCLUDE directive.  Simple =MODULE syntax works.
 M80 =SEDIT
 M80 =SESCREEN
 M80 =SEKEY
@@ -15,8 +9,5 @@ M80 =SEBLOCK
 M80 =SESYNTAX
 M80 =SEKEYBND
 M80 =SEHELP
-;
-; Link all modules into SEDIT.COM
-; SEHELP must be linked LAST because BMDATEND EQU $ resides there
 L80 SEDIT,SESCREEN,SEKEY,SEGAPBUF,SEFILEIO,SEMENU,SESEARCH,SEBLOCK,SESYNTAX,SEKEYBND,SEHELP,SEDIT/N/E
-
+

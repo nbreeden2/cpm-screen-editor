@@ -753,7 +753,7 @@ MNTX8:  DB      '8. Quit / Exit        $'
 OPNPMT: DB      'Open file: $'
 SVAPMT: DB      'Save as:   $'
 GTOPMT: DB      'Go to line: $'
-ABTMSG: DB      'SEDIT v1.06 CP/M Screen Editor  (any key)$'
+ABTMSG: DB      'SEDIT v1.07 CP/M Screen Editor  (any key)$'
 
 ; Dispatch table in CSEG: immune to DSEG corruption.
 ; Order matches MNUITMS item order above.

@@ -248,6 +248,7 @@ RULRTXT: DB     '----:----:----:----:----:----:----:'
 IBLNSTR: DB     ' Lines:',' $'
 IBRNSTR: DB     ' Row:  ',' $'
 IBCNSTR: DB     ' Col:  ',' $'
+IBWDSTR: DB     ' Len:',' $'
 IBINSTR: DB     ' [INS]','$'
 IBOVSTR: DB     ' [OVR]','$'
 IBMDSTR: DB     ' [MOD]','$'
@@ -1228,6 +1229,14 @@ IBNEXT:
         MOV     L,M
         MVI     H,0
         INX     H               ; 1-based
+        CALL    OUTHL4
+
+        ; Print Len: current line width
+        LXI     D,IBWDSTR
+        CALL    OUTSTR
+        CALL    GBCURLN         ; A = line length
+        MOV     L,A
+        MVI     H,0
         CALL    OUTHL4
 
         ; Print mode indicator
