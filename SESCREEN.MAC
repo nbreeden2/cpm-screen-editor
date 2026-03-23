@@ -239,12 +239,12 @@ SGRWHT:  DB     ESC,'[','0',';','3','7','m','$' ; SGR reset+white fg
         ENDIF
 
 ;--- Info bar label strings ---------------------------
-IBLNSTR: DB     ' Lines:',' $'
-IBRNSTR: DB     ' Row:  ',' $'
-IBCNSTR: DB     ' Col:  ',' $'
-IBWDSTR: DB     ' Len:',' $'
-IBINSTR: DB     ' [INS]','$'
-IBOVSTR: DB     ' [OVR]','$'
+IBLNSTR: DB     '   Lines:',' $'
+IBRNSTR: DB     '   Row:',' $'
+IBCNSTR: DB     '   Col:',' $'
+IBWDSTR: DB     '   Len:',' $'
+IBINSTR: DB     '   [INS]','$'
+IBOVSTR: DB     '   [OVR]','$'
 IBMDSTR: DB     ' [MOD]','$'
 NAMNMST: DB     '[No Name]','$'
 
