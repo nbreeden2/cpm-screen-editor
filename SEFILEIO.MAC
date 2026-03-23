@@ -43,7 +43,8 @@
 ; Entry:  DE = address of a 36-byte FCB (CP/M default FCB
 ;              at 005CH or caller-built FCB).
 ;         CURBDP must be valid.
-; Exit:   Buffer filled; BD_FNAME and BD_MODIF updated.
+; Exit:   A = 0 on success, A = FFH on fatal error (file too big).
+;         Buffer filled; BD_FNAME and BD_MODIF updated.
 ;         BD_MODIF = 0 (clean after load).
 ;         On error: status message displayed, buffer empty.
 ;         Regs: all clobbered.
@@ -324,6 +325,7 @@ FIFULL:
         CALL    SYNINIT
         LXI     D,FULLMSG
         CALL    STATMSG
+        MVI     A,0FFH          ; return error code
         RET
 
 FIWDPOP:
@@ -340,8 +342,9 @@ FIWIDE:
         CALL    STATMSG         ; positions cursor, resets SGR
         LHLD    FILNUM
         CALL    FIPRNUM         ; print line number
-        LXI     D,FIWDM2        ; " is wider than 73 characters"
+        LXI     D,FIWDM2        ; " is wider than 255 characters"
         CALL    OUTSTR
+        MVI     A,0FFH          ; return error code
         RET
 
 FIEOF:
@@ -356,6 +359,7 @@ FIOOPN: ; New or loaded: move cursor to top, clear modified
         CALL    SYNINIT         ; set BD_SYNMD based on extension
         LXI     D,LOADMSG
         CALL    STATMSG
+        XRA     A               ; return success (A=0)
         RET
 
 ;=============================================================

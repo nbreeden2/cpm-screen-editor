@@ -325,6 +325,8 @@ BFINLP: MVI     M,' '
         JZ      MAINLP          ; no file, skip load
         LXI     D,DFTFCB        ; DE = FCB address
         CALL    FIOPEN          ; load into buffer 0
+        INR     A               ; FFH -> 0 = error
+        JZ      FILFAIL         ; file too large, exit
         MVI     A,1
         STA     DIRTY           ; force full screen redraw
 
@@ -630,6 +632,14 @@ DXEXIT:
 DXRET:  LXI     D,CLRMSG
         CALL    STATMSG         ; clear leftover prompt
         RET
+
+;------------------------------------------------------------
+; FILFAIL - File too large or too wide to load.
+; STATMSG already shown by FIOPEN; wait for keypress, exit.
+;------------------------------------------------------------
+FILFAIL:
+        CALL    GETKEY          ; wait for any key
+        JMP     WBOOT
 
 ;------------------------------------------------------------
 ; MEMFAIL - Not enough memory to run.

@@ -799,7 +799,7 @@ MNTX9:  DB      '9. Quit / Exit        $'
 OPNPMT: DB      'Open file: $'
 SVAPMT: DB      'Save as:   $'
 GTOPMT: DB      'Go to line: $'
-ABTMSG: DB      'SEDIT v1.08 CP/M Screen Editor  (any key)$'
+ABTMSG: DB      'SEDIT v1.09 CP/M Screen Editor  (any key)$'
 DCWIDE: DB      ESC,'[','?','3','h','$'    ; DECCOLM: 132 columns
 DCNORM: DB      ESC,'[','?','3','l','$'    ; DECCOLM: 80 columns
 
