@@ -229,6 +229,7 @@ SRCHMAX EQU     64          ; max find string length
         PUBLIC  GBBASE          ; DE = buffer base address
         PUBLIC  GBBSIZ          ; DE = buffer size
         PUBLIC  GBGAPEN         ; HL = gap end offset
+        PUBLIC  GBLOGRD         ; read byte at logical offset
 
 ;=============================================================
 ; Internal helper: load descriptor fields into registers.

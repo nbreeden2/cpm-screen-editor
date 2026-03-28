@@ -34,13 +34,23 @@
 ;   1.0  1984-01-01  Initial release
 ;============================================================
 
+;--- Syntax highlighting option (must precede IF SYNHI) ----
+SYNHI   EQU     0           ; 0=none, 1=ASM, 2=C
+
 ;--- Imports ----------------------------------------------
         EXTRN   CURBDP          ; current descriptor
+        IF SYNHI
+        EXTRN   GBLOGRD         ; read byte at logical offset
+        ENDIF
 
 ;--- Exports ----------------------------------------------
         PUBLIC  SYNINIT         ; detect syntax mode
         PUBLIC  SYNLINE         ; tokenise line -> attr buffer
         PUBLIC  SYNATTR         ; per-byte attribute buffer
+        IF SYNHI
+        PUBLIC  SNCMST          ; comment state (for SESCREEN)
+        PUBLIC  SNCMSCAN        ; pre-scan comment state
+        ENDIF
 
 ;=============================================================
 ;============================================================
@@ -120,8 +130,7 @@ ATTR_MAG EQU    35H         ; magenta foreground
 ATTR_RED EQU    31H         ; red foreground
 ATTR_BLU EQU    34H         ; blue foreground
 
-;--- Syntax highlighting option ----------------------
-SYNHI   EQU     0           ; 0=none, 1=ASM, 2=C (future)
+;--- Syntax highlighting option (defined above imports) -----
 
 ;--- Buffer descriptor field offsets -----------------
 BD_BSTAR EQU    0           ; 2: buffer base address
@@ -147,6 +156,7 @@ MINMEM  EQU     9*1024      ; minimum TPA required
 ;--- Syntax mode codes --------------------------------
 SYN_NONE EQU    0           ; plain text
 SYN_ASM  EQU    1           ; 8080/Z80 assembly
+SYN_C    EQU    2           ; C language
 
 ;--- Insert / overwrite mode --------------------------
 MODE_INS EQU    0           ; insert mode (default)
@@ -275,17 +285,17 @@ SYCHKINC:
         MOV     A,M
         ANI     5FH
         CPI     'I'
-        JNZ     SYNONE
+        JNZ     SYCHKC
         INX     H
         MOV     A,M
         ANI     5FH
         CPI     'N'
-        JNZ     SYNONE
+        JNZ     SYCHKC
         INX     H
         MOV     A,M
         ANI     5FH
         CPI     'C'
-        JNZ     SYNONE
+        JNZ     SYCHKC
 
 SYASM:  ; Set SYN_ASM
         LHLD    CURBDP
@@ -296,6 +306,54 @@ SYASM:  ; Set SYN_ASM
         ACI     0
         MOV     H,A
         MVI     M,SYN_ASM
+        RET
+
+SYCHKC:
+        ; Check for 'C' ' ' ' ' (.C extension, space-padded)
+        LHLD    CURBDP
+        MOV     A,L
+        ADI     BD_FNAME+9
+        MOV     L,A
+        MOV     A,H
+        ACI     0
+        MOV     H,A
+        MOV     A,M
+        ANI     5FH
+        CPI     'C'
+        JNZ     SYCHKH
+        INX     H
+        MOV     A,M
+        CPI     ' '
+        JNZ     SYCHKH
+        JMP     SYCLNG
+
+SYCHKH:
+        ; Check for 'H' ' ' ' ' (.H extension, space-padded)
+        LHLD    CURBDP
+        MOV     A,L
+        ADI     BD_FNAME+9
+        MOV     L,A
+        MOV     A,H
+        ACI     0
+        MOV     H,A
+        MOV     A,M
+        ANI     5FH
+        CPI     'H'
+        JNZ     SYNONE
+        INX     H
+        MOV     A,M
+        CPI     ' '
+        JNZ     SYNONE
+
+SYCLNG: ; Set SYN_C
+        LHLD    CURBDP
+        MOV     A,L
+        ADI     BD_SYNMD
+        MOV     L,A
+        MOV     A,H
+        ACI     0
+        MOV     H,A
+        MVI     M,SYN_C
         RET
 
 SYNONE: ; Set SYN_NONE
@@ -334,7 +392,7 @@ SNCLR:  MOV     M,A
         RET                     ; no syntax: buffer cleared, done
         ENDIF
 
-        IF SYNHI EQ 1
+        IF SYNHI
         ; Check current buffer's syntax mode
         LHLD    CURBDP
         MOV     A,L
@@ -344,16 +402,27 @@ SNCLR:  MOV     M,A
         ADC     H
         MOV     H,A
         MOV     A,M
-        CPI     SYN_ASM
-        RNZ                     ; SYN_NONE: no highlighting
+        ORA     A
+        RZ                      ; SYN_NONE: no highlighting
 
         ; Save line pointer and width limit
+        PUSH    PSW             ; save syntax mode
         MOV     A,B
         STA     SYNLIM
         XCHG
         SHLD    SYNPTR          ; SYNPTR = line pointer
         XCHG
+        POP     PSW             ; restore syntax mode
 
+        ; Dispatch by syntax mode
+        CPI     SYN_ASM
+        JZ      SNASM
+        CPI     SYN_C
+        JZ      SNC_LP
+        RET                     ; unknown mode
+
+        ; --- ASM tokenizer ---
+SNASM:
         ; col counter C = 1
         MVI     C,1
 
@@ -830,11 +899,865 @@ REGTBL:
         DB      2,'S','P'
         DB      2,'P','C'
         DB      2,'A','F'
-        DB      2,'I','X'       ; Z80 index registers
-        DB      2,'I','Y'
         DB      0               ; end of table
 
-        ENDIF                   ; SYNHI EQ 1
+;=============================================================
+; C LANGUAGE TOKENIZER
+;=============================================================
+
+;------------------------------------------------------------
+; SNC_LP - C language tokenizer entry point.
+; Entry: SYNPTR/SYNLIM already set, SNCMST = comment state
+; Exit:  SYNATTR filled, SNCMST updated
+;------------------------------------------------------------
+SNC_LP:
+        ; col counter C = 1
+        MVI     C,1
+
+        ; Check if we're inside a block comment from prior line
+        LDA     SNCMST
+        ORA     A
+        JNZ     SNCBLK          ; continue block comment
+
+SNCLP:
+        ; Check col limit
+        LDA     SYNLIM
+        MOV     B,A
+        MOV     A,C
+        CMP     B
+        JNC     SNCDNE          ; col >= limit: done
+
+        ; Read current char
+        LHLD    SYNPTR
+        MOV     A,L
+        ADD     C
+        DCR     A               ; index = C-1
+        MOV     L,A
+        MOV     A,H
+        ACI     0
+        MOV     H,A
+        MOV     A,M             ; A = char at col C
+
+        ORA     A
+        JZ      SNCDNE          ; NUL = end of line
+        CPI     CR
+        JZ      SNCDNE
+        CPI     LF
+        JZ      SNCDNE
+
+        ; --- Dispatch on char ---
+        CPI     '#'
+        JZ      SNCPRE          ; preprocessor
+
+        CPI     '/'
+        JZ      SNCSLH          ; possible comment
+
+        CPI     0027H           ; single quote '
+        JZ      SNCCHR
+        CPI     '"'
+        JZ      SNCSTR
+
+        CPI     '0'
+        JC      SNCWRD
+        CPI     '9'+1
+        JC      SNCNUM
+
+SNCWRD:
+        ; Identifier: collect chars, classify
+        MOV     D,C             ; D = start col
+        CALL    SNCOL           ; advance C past identifier
+        MOV     A,C
+        CMP     D
+        JNZ     SNCW2           ; advanced -> classify
+        INR     C               ; skip non-identifier char
+        JMP     SNCLP
+SNCW2:
+        ; Check if keyword
+        MOV     A,D
+        STA     SNSAVD          ; save start col
+        CALL    SNISKW          ; Z if keyword
+        LDA     SNSAVD
+        MOV     D,A             ; restore start col
+        JNZ     SNCLP           ; not keyword -> normal text
+        ; Keyword: fill bold
+        MOV     E,C
+        MVI     A,ATTR_BLD
+        CALL    SNFILL
+        JMP     SNCLP
+
+;------------------------------------------------------------
+; SNCPRE - Preprocessor directive: # at first non-space
+;------------------------------------------------------------
+SNCPRE:
+        ; Check if # is at first non-space position
+        MOV     B,C             ; save current col
+        MVI     A,1
+        STA     SCPFLG          ; assume it's a preprocessor line
+        ; Scan cols 1..C-1 for non-space
+        DCR     B               ; B = cols before #
+        JZ      SCPYES          ; # is at col 1
+        PUSH    B
+        MVI     B,1             ; scan from col 1
+SCPCHK: LHLD    SYNPTR
+        MOV     A,L
+        ADD     B
+        DCR     A
+        MOV     L,A
+        MOV     A,H
+        ACI     0
+        MOV     H,A
+        MOV     A,M
+        CPI     ' '
+        JZ      SCPWSP          ; space is whitespace
+        CPI     TAB
+        JZ      SCPWSP          ; tab is whitespace
+        JMP     SCPNO           ; non-whitespace before #
+SCPWSP: INR     B
+        POP     D
+        PUSH    D
+        MOV     A,B
+        CMP     C               ; reached # position?
+        JC      SCPCHK
+        POP     B
+        JMP     SCPYES
+SCPNO:  POP     B
+        ; Not a preprocessor, treat # as normal
+        INR     C
+        JMP     SNCLP
+SCPYES:
+        ; Fill magenta from # to end of line
+        MOV     D,C             ; start = # position
+        LDA     SYNLIM
+        MOV     E,A
+        INR     E               ; inclusive end for SNFILL
+        MVI     A,ATTR_MAG
+        CALL    SNFILL
+        JMP     SNCDNE
+
+;------------------------------------------------------------
+; SNCSLH - Handle '/' : check for // or /*
+;------------------------------------------------------------
+SNCSLH:
+        ; Peek at next char
+        MOV     A,C
+        INR     A               ; next col
+        LDA     SYNLIM
+        MOV     B,A
+        MOV     A,C
+        INR     A
+        CMP     B
+        JNC     SNCSK1          ; past limit, just skip
+        ; Read next char
+        LHLD    SYNPTR
+        MOV     A,L
+        ADD     C               ; C is current col (1-based), +C = next char index
+        MOV     L,A
+        MOV     A,H
+        ACI     0
+        MOV     H,A
+        MOV     A,M             ; char at col C+1
+
+        CPI     '/'
+        JZ      SNCLC           ; line comment //
+        CPI     '*'
+        JZ      SNCBC           ; block comment /*
+SNCSK1: INR     C               ; skip the /
+        JMP     SNCLP
+
+;------------------------------------------------------------
+; SNCLC - Line comment: // to end of line (green)
+;------------------------------------------------------------
+SNCLC:
+        MOV     D,C             ; start = /
+        LDA     SYNLIM
+        MOV     E,A
+        INR     E
+        MVI     A,ATTR_GRN
+        CALL    SNFILL
+        JMP     SNCDNE
+
+;------------------------------------------------------------
+; SNCBC - Block comment start: /* ... (green)
+;------------------------------------------------------------
+SNCBC:
+        MOV     D,C             ; start col at /*
+        INR     C               ; skip /
+        INR     C               ; skip *
+        ; Scan for */
+SNCBCL:
+        LDA     SYNLIM
+        MOV     B,A
+        MOV     A,C
+        CMP     B
+        JNC     SNCBCE          ; past limit, comment continues
+        LHLD    SYNPTR
+        MOV     A,L
+        ADD     C
+        DCR     A
+        MOV     L,A
+        MOV     A,H
+        ACI     0
+        MOV     H,A
+        MOV     A,M
+        ORA     A
+        JZ      SNCBCE          ; NUL = EOL
+        CPI     CR
+        JZ      SNCBCE
+        CPI     LF
+        JZ      SNCBCE
+        CPI     '*'
+        JNZ     SNCBC2
+        ; Check if next char is /
+        INR     C
+        LDA     SYNLIM
+        MOV     B,A
+        MOV     A,C
+        CMP     B
+        JNC     SNCBCE          ; past limit
+        LHLD    SYNPTR
+        MOV     A,L
+        ADD     C
+        DCR     A
+        MOV     L,A
+        MOV     A,H
+        ACI     0
+        MOV     H,A
+        MOV     A,M
+        CPI     '/'
+        JNZ     SNCBCL          ; not */, keep scanning
+        ; Found */
+        INR     C               ; skip /
+        MOV     E,C
+        MVI     A,ATTR_GRN
+        CALL    SNFILL
+        XRA     A
+        STA     SNCMST          ; clear comment state
+        JMP     SNCLP           ; continue normal parsing
+SNCBC2: INR     C
+        JMP     SNCBCL
+SNCBCE: ; Comment extends past end of line
+        MOV     E,C
+        INR     E               ; fill to col limit
+        MVI     A,ATTR_GRN
+        CALL    SNFILL
+        MVI     A,1
+        STA     SNCMST          ; in block comment
+        JMP     SNCDNE
+
+;------------------------------------------------------------
+; SNCBLK - Continue block comment from previous line
+;------------------------------------------------------------
+SNCBLK:
+        MOV     D,C             ; start col
+SNCBLL:
+        LDA     SYNLIM
+        MOV     B,A
+        MOV     A,C
+        CMP     B
+        JNC     SNCBLE          ; past limit
+        LHLD    SYNPTR
+        MOV     A,L
+        ADD     C
+        DCR     A
+        MOV     L,A
+        MOV     A,H
+        ACI     0
+        MOV     H,A
+        MOV     A,M
+        ORA     A
+        JZ      SNCBLE          ; NUL
+        CPI     CR
+        JZ      SNCBLE
+        CPI     LF
+        JZ      SNCBLE
+        CPI     '*'
+        JNZ     SNCBL2
+        ; Check next for /
+        INR     C
+        LDA     SYNLIM
+        MOV     B,A
+        MOV     A,C
+        CMP     B
+        JNC     SNCBLE
+        LHLD    SYNPTR
+        MOV     A,L
+        ADD     C
+        DCR     A
+        MOV     L,A
+        MOV     A,H
+        ACI     0
+        MOV     H,A
+        MOV     A,M
+        CPI     '/'
+        JNZ     SNCBLL          ; not */
+        ; Found */
+        INR     C               ; skip /
+        MOV     E,C
+        MVI     A,ATTR_GRN
+        CALL    SNFILL
+        XRA     A
+        STA     SNCMST          ; clear comment state
+        JMP     SNCLP           ; continue normal parsing
+SNCBL2: INR     C
+        JMP     SNCBLL
+SNCBLE: ; Still in comment at EOL
+        MOV     E,C
+        INR     E
+        MVI     A,ATTR_GRN
+        CALL    SNFILL
+        MVI     A,1
+        STA     SNCMST
+        JMP     SNCDNE
+
+;------------------------------------------------------------
+; SNCSTR - String literal: "..." with \ escape (yellow)
+;------------------------------------------------------------
+SNCSTR:
+        MOV     D,C             ; start col
+        INR     C               ; skip opening "
+SNCSTL:
+        LDA     SYNLIM
+        MOV     B,A
+        MOV     A,C
+        CMP     B
+        JNC     SNCSTD          ; past limit
+        LHLD    SYNPTR
+        MOV     A,L
+        ADD     C
+        DCR     A
+        MOV     L,A
+        MOV     A,H
+        ACI     0
+        MOV     H,A
+        MOV     A,M
+        ORA     A
+        JZ      SNCSTD
+        CPI     CR
+        JZ      SNCSTD
+        CPI     LF
+        JZ      SNCSTD
+        CPI     '\'
+        JZ      SNCSESC
+        CPI     '"'
+        JZ      SNCSTC
+        INR     C
+        JMP     SNCSTL
+SNCSESC:
+        INR     C               ; skip backslash
+        INR     C               ; skip escaped char
+        JMP     SNCSTL
+SNCSTC: INR     C               ; include closing quote
+SNCSTD:
+        MOV     E,C
+        MVI     A,ATTR_YEL
+        CALL    SNFILL
+        JMP     SNCLP
+
+;------------------------------------------------------------
+; SNCCHR - Char literal: '.' with \ escape (yellow)
+;------------------------------------------------------------
+SNCCHR:
+        MOV     D,C             ; start col
+        INR     C               ; skip opening '
+SNCCHL:
+        LDA     SYNLIM
+        MOV     B,A
+        MOV     A,C
+        CMP     B
+        JNC     SNCCHD          ; past limit
+        LHLD    SYNPTR
+        MOV     A,L
+        ADD     C
+        DCR     A
+        MOV     L,A
+        MOV     A,H
+        ACI     0
+        MOV     H,A
+        MOV     A,M
+        ORA     A
+        JZ      SNCCHD
+        CPI     CR
+        JZ      SNCCHD
+        CPI     LF
+        JZ      SNCCHD
+        CPI     '\'
+        JZ      SNCCESC
+        CPI     0027H           ; closing '
+        JZ      SNCCHC
+        INR     C
+        JMP     SNCCHL
+SNCCESC:
+        INR     C               ; skip backslash
+        INR     C               ; skip escaped char
+        JMP     SNCCHL
+SNCCHC: INR     C               ; include closing quote
+SNCCHD:
+        MOV     E,C
+        MVI     A,ATTR_YEL
+        CALL    SNFILL
+        JMP     SNCLP
+
+;------------------------------------------------------------
+; SNCNUM - Numeric literal: decimal, hex (0x), octal (blue)
+;------------------------------------------------------------
+SNCNUM:
+        MOV     D,C             ; start col
+        ; Check for 0x prefix
+        LHLD    SYNPTR
+        MOV     A,L
+        ADD     C
+        DCR     A
+        MOV     L,A
+        MOV     A,H
+        ACI     0
+        MOV     H,A
+        MOV     A,M
+        CPI     '0'
+        JNZ     SNCNML          ; not 0, just digits
+        ; Could be 0x
+        INR     C
+        LDA     SYNLIM
+        MOV     B,A
+        MOV     A,C
+        CMP     B
+        JNC     SNCNMD          ; past limit
+        LHLD    SYNPTR
+        MOV     A,L
+        ADD     C
+        DCR     A
+        MOV     L,A
+        MOV     A,H
+        ACI     0
+        MOV     H,A
+        MOV     A,M
+        CPI     'x'
+        JZ      SNCNMX
+        CPI     'X'
+        JZ      SNCNMX
+        ; Just a 0-prefixed number, continue as normal
+        JMP     SNCNML
+SNCNMX: INR     C               ; skip x
+        ; Scan hex digits
+SNCNXL:
+        LDA     SYNLIM
+        MOV     B,A
+        MOV     A,C
+        CMP     B
+        JNC     SNCNMD
+        LHLD    SYNPTR
+        MOV     A,L
+        ADD     C
+        DCR     A
+        MOV     L,A
+        MOV     A,H
+        ACI     0
+        MOV     H,A
+        MOV     A,M
+        CALL    SNISHX
+        JNZ     SNCNMD
+        INR     C
+        JMP     SNCNXL
+SNCNML:
+        ; Scan decimal/octal digits
+        LDA     SYNLIM
+        MOV     B,A
+        MOV     A,C
+        CMP     B
+        JNC     SNCNMD
+        LHLD    SYNPTR
+        MOV     A,L
+        ADD     C
+        DCR     A
+        MOV     L,A
+        MOV     A,H
+        ACI     0
+        MOV     H,A
+        MOV     A,M
+        CPI     '0'
+        JC      SNCNMD
+        CPI     '9'+1
+        JNC     SNCNMD
+        INR     C
+        JMP     SNCNML
+SNCNMD:
+        MOV     E,C
+        MVI     A,ATTR_BLU
+        CALL    SNFILL
+        JMP     SNCLP
+
+SNCDNE:
+        ; C tokenizer done — SNCMST already set by comment handlers
+        ; If we reach here without going through a block comment handler,
+        ; ensure SNCMST is 0 (normal) unless already set
+        RET
+
+;------------------------------------------------------------
+; SNISKW - Check if token in SINTOK (length SNTLEN) is a
+; C keyword. Must be called after SNCOL (SINTOK filled by
+; the identifier collector in the ASM tokenizer's SNISREG).
+; We fill SINTOK here for C mode.
+; Entry: D = start col, C = end col (exclusive)
+; Exit: Z = keyword, NZ = not
+;------------------------------------------------------------
+SNISKW:
+        ; Token length = C - D
+        MOV     A,C
+        SUB     D
+        MOV     E,A             ; E = token length
+
+        ; Copy token to SINTOK (upper-cased, NUL-terminated)
+        ; C keywords are lowercase, but we store uppercase for comparison
+        ; Actually, C is case-sensitive. Store as-is.
+        PUSH    B               ; save C (end col)
+        PUSH    D               ; save D (start col)
+        MOV     B,E             ; B = length
+        LHLD    SYNPTR
+        MOV     A,L
+        ADD     D
+        DCR     A               ; SYNPTR + D - 1
+        MOV     L,A
+        MOV     A,H
+        ACI     0
+        MOV     H,A             ; HL = &line[D-1]
+        MOV     A,B
+        STA     SNTLEN          ; save token length
+        LXI     D,SINTOK
+SKWTOK: MOV     A,M
+        STAX    D               ; store as-is (case-sensitive)
+        INX     H
+        INX     D
+        DCR     B
+        JNZ     SKWTOK
+        XRA     A
+        STAX    D               ; NUL terminate
+        POP     D               ; restore start col
+        POP     B               ; restore end col
+
+        ; Search CKWTBL
+        LXI     H,CKWTBL
+SKWLK:  MOV     A,M             ; entry length
+        ORA     A
+        JZ      SKWNF           ; end of table
+        PUSH    H
+        LXI     H,SNTLEN
+        CMP     M               ; entry_len - token_len
+        POP     H
+        JNZ     SKWNXT          ; lengths differ
+
+        ; Lengths match; compare chars
+        INX     H
+        PUSH    D               ; save D
+        LXI     D,SINTOK
+        LDA     SNTLEN
+        MOV     B,A
+SKWCHK: LDAX    D
+        CMP     M
+        JNZ     SKWNX2
+        INX     H
+        INX     D
+        DCR     B
+        JNZ     SKWCHK
+        ; Matched
+        POP     D
+        XRA     A               ; Z = keyword
+        RET
+
+SKWNX2: ; Skip remaining chars
+        INX     H
+        DCR     B
+        JNZ     SKWNX2
+        POP     D
+        JMP     SKWLK
+
+SKWNXT: ; Skip length + chars
+        MOV     B,M
+        INX     H
+SKWSKP: INX     H
+        DCR     B
+        JNZ     SKWSKP
+        JMP     SKWLK
+
+SKWNF:  MVI     A,1
+        ORA     A               ; NZ = not keyword
+        RET
+
+;=============================================================
+; C keyword table.
+; Format: length_byte, chars (lowercase, no NUL)
+;=============================================================
+CKWTBL:
+        DB      4,'a','u','t','o'
+        DB      5,'b','r','e','a','k'
+        DB      4,'c','a','s','e'
+        DB      4,'c','h','a','r'
+        DB      5,'c','o','n','s','t'
+        DB      8,'c','o','n','t','i','n','u','e'
+        DB      7,'d','e','f','a','u','l','t'
+        DB      2,'d','o'
+        DB      6,'d','o','u','b','l','e'
+        DB      4,'e','l','s','e'
+        DB      4,'e','n','u','m'
+        DB      6,'e','x','t','e','r','n'
+        DB      5,'f','l','o','a','t'
+        DB      3,'f','o','r'
+        DB      4,'g','o','t','o'
+        DB      2,'i','f'
+        DB      3,'i','n','t'
+        DB      4,'l','o','n','g'
+        DB      8,'r','e','g','i','s','t','e','r'
+        DB      6,'r','e','t','u','r','n'
+        DB      5,'s','h','o','r','t'
+        DB      6,'s','i','g','n','e','d'
+        DB      6,'s','i','z','e','o','f'
+        DB      6,'s','t','a','t','i','c'
+        DB      6,'s','t','r','u','c','t'
+        DB      6,'s','w','i','t','c','h'
+        DB      7,'t','y','p','e','d','e','f'
+        DB      5,'u','n','i','o','n'
+        DB      8,'u','n','s','i','g','n','e','d'
+        DB      4,'v','o','i','d'
+        DB      8,'v','o','l','a','t','i','l','e'
+        DB      5,'w','h','i','l','e'
+        DB      0               ; end of table
+
+;=============================================================
+; SNCMSCAN - Pre-scan file from start to given offset,
+; tracking block comment state for multi-line /* */ comments.
+; Entry: HL = logical offset of TOPLN (scan 0..HL-1)
+; Exit:  A = comment state (0=normal, 1=in block comment)
+;        SNCMST updated
+;=============================================================
+SNCMSCAN:
+        ; If not C mode, return 0 immediately
+        PUSH    H
+        LHLD    CURBDP
+        MOV     A,L
+        ADI     BD_SYNMD
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A
+        MOV     A,M
+        POP     H
+        CPI     SYN_C
+        JZ      SCMS01
+        XRA     A
+        STA     SNCMST
+        RET
+
+SCMS01:
+        ; HL = target offset (scan 0 .. HL-1)
+        MOV     A,H
+        ORA     L
+        JNZ     SCMS02
+        ; Offset is 0: no scan needed
+        XRA     A
+        STA     SNCMST
+        RET
+
+SCMS02:
+        SHLD    SCMTGT          ; save target offset
+        XRA     A
+        STA     SNCMST          ; state = 0 (normal)
+        STA     SCMPV           ; previous char = 0
+        LXI     H,0             ; HL = current offset
+
+SCMSLP:
+        ; Compare HL with SCMTGT
+        PUSH    H
+        XCHG                    ; DE = current offset
+        LHLD    SCMTGT          ; HL = target
+        MOV     A,E
+        SUB     L
+        MOV     A,D
+        SBB     H               ; current - target
+        POP     H
+        JNC     SCMSDN          ; current >= target: done
+
+        ; Read byte at logical offset HL
+        CALL    GBLOGRD         ; A = byte, Z if past end
+        JZ      SCMSDN          ; past end of text
+
+        ; State machine
+        MOV     B,A             ; B = current byte
+        LDA     SNCMST
+        ORA     A
+        JNZ     SCMSCM          ; state 1: in block comment
+
+        ; State 0: normal text
+        MOV     A,B
+        CPI     '/'
+        JNZ     SCMSQ
+        ; Previous was also checked via SCMPV
+        ; Actually we need to check: is this the second char of /*?
+        ; We look at prev char
+        LDA     SCMPV
+        CPI     '/'             ; prev was /
+        JNZ     SCMSQ           ; no, just a /
+        ; prev=/ curr=/: this is // line comment
+        ; But // ends at LF, handle that
+        ; Actually for /*, we need prev=/ and curr=*
+        ; Let me redo: we check curr and prev together
+        JMP     SCMSQ           ; fall through to save prev
+
+SCMSQ:  ; Check for string/char literals to skip
+        MOV     A,B
+        CPI     '"'
+        JZ      SCMSST
+        CPI     0027H           ; single quote
+        JZ      SCMSCH
+
+        ; Check two-char tokens using previous char
+        LDA     SCMPV
+        CPI     '/'
+        JNZ     SCMSSV
+        ; prev was /
+        MOV     A,B
+        CPI     '*'
+        JZ      SCMSBC          ; /* -> enter block comment
+        CPI     '/'
+        JZ      SCMSLC          ; // -> line comment
+
+SCMSSV: ; Save prev and advance
+        MOV     A,B
+        STA     SCMPV
+        INX     H
+        JMP     SCMSLP
+
+SCMSBC: ; Enter block comment
+        MVI     A,1
+        STA     SNCMST
+        XRA     A
+        STA     SCMPV           ; reset prev
+        INX     H
+        JMP     SCMSLP
+
+SCMSLC: ; Line comment: skip until LF
+        INX     H
+SCMLL:  PUSH    H
+        XCHG
+        LHLD    SCMTGT
+        MOV     A,E
+        SUB     L
+        MOV     A,D
+        SBB     H
+        POP     H
+        JNC     SCMSDN          ; past target
+        CALL    GBLOGRD
+        JZ      SCMSDN
+        CPI     LF
+        JZ      SCMLLE
+        INX     H
+        JMP     SCMLL
+SCMLLE: XRA     A
+        STA     SCMPV
+        INX     H
+        JMP     SCMSLP
+
+SCMSST: ; String literal: skip until unescaped "
+        XRA     A
+        STA     SCMPV
+        INX     H
+SCMSSL: PUSH    H
+        XCHG
+        LHLD    SCMTGT
+        MOV     A,E
+        SUB     L
+        MOV     A,D
+        SBB     H
+        POP     H
+        JNC     SCMSDN
+        CALL    GBLOGRD
+        JZ      SCMSDN
+        CPI     '\'
+        JZ      SCMSSE
+        CPI     '"'
+        JZ      SCMSSQ
+        INX     H
+        JMP     SCMSSL
+SCMSSE: ; Backslash escape: skip next byte
+        INX     H
+        PUSH    H
+        XCHG
+        LHLD    SCMTGT
+        MOV     A,E
+        SUB     L
+        MOV     A,D
+        SBB     H
+        POP     H
+        JNC     SCMSDN
+        CALL    GBLOGRD         ; skip escaped char
+        INX     H
+        JMP     SCMSSL
+SCMSSQ: ; End of string
+        XRA     A
+        STA     SCMPV
+        INX     H
+        JMP     SCMSLP
+
+SCMSCH: ; Char literal: skip until unescaped '
+        XRA     A
+        STA     SCMPV
+        INX     H
+SCMSCL: PUSH    H
+        XCHG
+        LHLD    SCMTGT
+        MOV     A,E
+        SUB     L
+        MOV     A,D
+        SBB     H
+        POP     H
+        JNC     SCMSDN
+        CALL    GBLOGRD
+        JZ      SCMSDN
+        CPI     '\'
+        JZ      SCMCSE
+        CPI     0027H           ; closing '
+        JZ      SCMCSQ
+        INX     H
+        JMP     SCMSCL
+SCMCSE: INX     H
+        PUSH    H
+        XCHG
+        LHLD    SCMTGT
+        MOV     A,E
+        SUB     L
+        MOV     A,D
+        SBB     H
+        POP     H
+        JNC     SCMSDN
+        CALL    GBLOGRD
+        INX     H
+        JMP     SCMSCL
+SCMCSQ: XRA     A
+        STA     SCMPV
+        INX     H
+        JMP     SCMSLP
+
+SCMSCM: ; State 1: in block comment, scan for */
+        MOV     A,B
+        CPI     '/'
+        JNZ     SCMSC2
+        ; Check if prev was *
+        LDA     SCMPV
+        CPI     '*'
+        JNZ     SCMSC2
+        ; Found */
+        XRA     A
+        STA     SNCMST          ; back to normal
+        STA     SCMPV
+        INX     H
+        JMP     SCMSLP
+SCMSC2: MOV     A,B
+        STA     SCMPV
+        INX     H
+        JMP     SCMSLP
+
+SCMSDN: ; Done scanning
+        LDA     SNCMST          ; return comment state in A
+        RET
+
+        ENDIF                   ; SYNHI
 
 ;=============================================================
 ; DATA SEGMENT
@@ -854,7 +1777,19 @@ SNTLEN: DB      0
 ; Start column (saved across SNISREG/SNISDIR calls)
 SNSAVD: DB      0
 
-; Token buffer for register/directive comparison (NUL-terminated)
+        IF SYNHI
+; C comment state (0=normal, 1=in block comment)
+SNCMST: DB      0
+
+; Pre-scan variables
+SCMPV:  DB      0               ; previous char for two-char detection
+SCMTGT: DW      0               ; pre-scan target offset
+
+; Preprocessor flag
+SCPFLG: DB      0
+        ENDIF
+
+; Token buffer for register/directive/keyword comparison (NUL-terminated)
 ; Must be last in DSEG: overflow from long identifiers goes into
 ; safe space rather than corrupting SNTLEN/SNSAVD.
 SINTOK: DS      MAXCOLS+1       ; 129 bytes (max line width + NUL)

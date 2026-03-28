@@ -1,6 +1,6 @@
 
 
-                      SEDIT v1.10 Technical Manual
+                      SEDIT v1.11 Technical Manual
                   Build Environment and Source Reference
 
                     ================================
@@ -15,7 +15,7 @@
     a shared include file.
 
     Total source: approximately 13,500 lines across all modules.
-    Binary size: approximately 15 KB (SEDIT.COM).
+    Binary size: approximately 20-22 KB (SEDIT.COM, depending on variant).
 
 
     2.  SOURCE FILES
@@ -44,8 +44,9 @@
                            string search through gap buffer
     SEBLOCK.MAC      ~720  Block mark, copy, delete, paste with
                            2048-byte clipboard buffer
-    SESYNTAX.MAC     ~860  Assembly syntax highlighting tokenizer,
-                           keyword/register/directive tables
+    SESYNTAX.MAC    ~1800  Syntax highlighting tokenizers (ASM + C),
+                           keyword/register/directive tables,
+                           multi-line comment pre-scan
     SEKEYBND.MAC     ~500  Key binding initialization, SEDIT.KEY
                            file parser, default binding tables
     SEVIRTIO.MAC    ~1440  Virtual buffer I/O for files larger than
@@ -72,7 +73,9 @@
     2.4  Build Scripts and Tools
 
     CPMFMT.PY              Python preprocessor (see section 3)
-    build-1.bat            Windows build script using cpmulator
+    SEBUILD.PY             Python EQU patcher for variant builds
+    build-1.bat            Windows build script (single variant)
+    build-all.bat          Windows build script (all 4 variants)
     BUILD.SUB              CP/M native build script (for SUBMIT)
 
 
@@ -173,6 +176,85 @@
     BUILD.SUB does not run CPMFMT.PY; source files must be
     preprocessed before transfer to CP/M media.
 
+    3.7  Building All 4 Variants (Windows)
+
+    The build-all.bat script builds four SEDIT variants in a
+    single run:
+
+        build-all.bat
+
+    It produces:
+
+        SEDIT.COM       Mono   (COLOR=0, SYNHI=0)
+        SEDIT-CL.COM    Color  (COLOR=1, SYNHI=0)
+        SEDIT-A.COM     ASM    (COLOR=1, SYNHI=1)
+        SEDIT-C.COM     C      (COLOR=1, SYNHI=2)
+
+    The script assembles the 10 invariant modules once, then for
+    each variant:
+
+      1. Runs SEBUILD.PY to patch COLOR and SYNHI EQU values in
+         SESCREEN.MAC and SESYNTAX.MAC
+      2. Runs CPMFMT.PY on the two patched files
+      3. Assembles SESCREEN and SESYNTAX with M80
+      4. Links all 12 modules with L80
+      5. Copies the resulting SEDIT.COM to the variant filename
+
+    After all variants are built, the source files are restored to
+    the default (mono) configuration.
+
+    SEBUILD.PY usage:
+
+        python SEBUILD.PY <color> <synhi>
+
+    Where color is 0 or 1, and synhi is 0, 1, or 2.  The script
+    patches the EQU lines in SESCREEN.MAC and SESYNTAX.MAC using
+    regular expression replacement.
+
+    3.8  Building Variants on CP/M (Manual)
+
+    On a native CP/M system without Python, the EQU values must be
+    edited manually before each build.  Only two files need to be
+    changed: SESCREEN.MAC and SESYNTAX.MAC.
+
+    For each variant, edit the following EQU lines:
+
+    SEDIT.COM (Mono):
+        SESCREEN.MAC:   COLOR   EQU     0
+        SESCREEN.MAC:   SYNHI   EQU     0
+        SESYNTAX.MAC:   SYNHI   EQU     0
+
+    SEDIT-CL.COM (Color):
+        SESCREEN.MAC:   COLOR   EQU     1
+        SESCREEN.MAC:   SYNHI   EQU     0
+        SESYNTAX.MAC:   SYNHI   EQU     0
+
+    SEDIT-A.COM (ASM highlighting):
+        SESCREEN.MAC:   COLOR   EQU     1
+        SESCREEN.MAC:   SYNHI   EQU     1
+        SESYNTAX.MAC:   SYNHI   EQU     1
+
+    SEDIT-C.COM (C highlighting):
+        SESCREEN.MAC:   COLOR   EQU     1
+        SESCREEN.MAC:   SYNHI   EQU     2
+        SESYNTAX.MAC:   SYNHI   EQU     2
+
+    After editing, reassemble the two changed modules and re-link:
+
+        M80 =SESCREEN
+        M80 =SESYNTAX
+        L80 SEDIT,SESCREEN,SEKEY,SEGAPBUF,SEFILEIO,SEMENU,...
+            SESEARCH,SEBLOCK,SESYNTAX,SEKEYBND,SEVIRTIO,...
+            SEHELP,SEDIT/N/E
+
+    Then rename SEDIT.COM to the desired variant filename using
+    PIP or REN:
+
+        REN SEDIT-A.COM=SEDIT.COM
+
+    The remaining 10 modules do not depend on COLOR or SYNHI and
+    do not need to be reassembled between variants.
+
 
     4.  CONDITIONAL ASSEMBLY OPTIONS
 
@@ -201,16 +283,30 @@
 
     4.2  SYNHI
 
-        SYNHI   EQU   0        ; 0=none, 1=ASM, 2=C (future)
+        SYNHI   EQU   0        ; 0=none, 1=ASM, 2=C
 
     Controls syntax highlighting at compile time:
 
       0  No syntax highlighting (smallest binary)
       1  8080/Z80 assembly language highlighting
+      2  C language highlighting (includes ASM support)
 
-    When SYNHI=0, the syntax tokenizer code in SESYNTAX.MAC and
-    the highlighting rendering code in SESCREEN.MAC are excluded
-    via conditional assembly (IF SYNHI ... ENDIF).
+    When SYNHI=0, all tokenizer code and per-byte attribute
+    rendering in SESYNTAX.MAC and SESCREEN.MAC are excluded via
+    conditional assembly (IF SYNHI ... ENDIF).
+
+    When SYNHI=2, the C tokenizer (SNC_LP), keyword table
+    (CKWTBL), pre-scan function (SNCMSCAN), and multi-line
+    comment state tracking (CMLST array) are included in addition
+    to the ASM tokenizer.  Runtime dispatch selects the appropriate
+    tokenizer based on BD_SYNMD (set by SYNINIT from the file
+    extension).
+
+    IMPORTANT: SYNHI must be set to the same value in both
+    SESCREEN.MAC and SESYNTAX.MAC.  The SYNHI EQU in SESYNTAX.MAC
+    is defined before the imports/exports block (not inside the
+    inlined SEDIT.INC) because IF SYNHI guards appear in the
+    EXTRN/PUBLIC declarations.
 
     Note: Syntax mode detection (SYNINIT) always runs regardless
     of the SYNHI setting; it sets BD_SYNMD based on file extension
@@ -422,22 +518,44 @@
 
     6.7  SESYNTAX.MAC - Syntax Highlighting
 
-    Per-line tokenizer for 8080/Z80 assembly.  SYNLINE walks one
-    display line and builds a span table (SNTBL) of up to 16
-    attribute regions.  SESCREEN consults this table during
-    rendering to select SGR attributes.
+    Per-line tokenizer for 8080/Z80 assembly and C language.
+    SYNLINE fills a per-byte attribute buffer (SYNATTR[MAXCOLS]).
+    SESCREEN reads SYNATTR during rendering to select SGR
+    attributes for each character.
 
-    Token classification:
-      Labels at column 1    -> ATTR_YEL
-      Opcodes/directives    -> ATTR_GRN (matched against tables)
-      Registers             -> ATTR_CYN (matched against REGTBL)
-      Numbers               -> ATTR_MAG
-      Strings               -> ATTR_MAG
-      Comments (after ;)    -> ATTR_DIM
-      Other text            -> ATTR_NRM
+    SYNLINE dispatches to the appropriate tokenizer at runtime
+    based on BD_SYNMD:
 
-    SYNINIT detects file extension (.MAC, .ASM, .INC -> SYN_ASM;
-    anything else -> SYN_NONE) and sets BD_SYNMD.
+      SYN_ASM (SNASM):  8080/Z80 assembly tokenizer
+        Labels at column 1    -> ATTR_YEL
+        Opcodes/directives    -> ATTR_BLD (bold white)
+        Registers             -> ATTR_CYN
+        Numbers               -> ATTR_BLU
+        Strings               -> ATTR_MAG
+        Comments (after ;)    -> ATTR_GRN
+        Directives            -> ATTR_BLU
+
+      SYN_C (SNC_LP):  C language tokenizer
+        Keywords              -> ATTR_BLD (bold white)
+        Preprocessor (#)      -> ATTR_MAG
+        Strings / char lits   -> ATTR_YEL
+        Numbers               -> ATTR_BLU
+        Block comments /* */  -> ATTR_GRN
+        Line comments //      -> ATTR_GRN
+
+    The C tokenizer supports multi-line block comments via
+    SNCMSCAN, which pre-scans the file from byte 0 to the top
+    visible line using GBLOGRD, tracking /* */ state through
+    strings and char literals.  Per-line comment entry/exit
+    states are stored in CMLST[EDITROW+1] in SESCREEN.MAC.
+
+    SYNINIT detects file extension:
+      .MAC, .ASM, .INC      -> SYN_ASM
+      .C, .H                -> SYN_C
+      anything else          -> SYN_NONE
+
+    SNISKW checks identifiers against CKWTBL (32 ANSI C keywords,
+    case-sensitive, length-prefixed format matching REGTBL/DIRTBL).
 
     6.8  SEHELP.MAC - Help Screen and BMDATEND
 
@@ -660,6 +778,11 @@
 
     10. REVISION HISTORY
 
+    v1.11   C language syntax highlighting with multi-line block
+            comment tracking.  Four build variants (mono, color,
+            ASM highlight, C highlight).  SEBUILD.PY and
+            build-all.bat for automated variant builds.  Removed
+            Z80 IX/IY from ASM register highlight table.
     v1.10   Virtual buffer mode for files larger than TPA.
             SEVIRTIO.MAC module added.  FIOVFL overflow handler in
             SEFILEIO.MAC.  Three-phase save (VISAVALL).  VIGOTO

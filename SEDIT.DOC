@@ -1,6 +1,6 @@
 
 
-                         SEDIT v1.10 User Manual
+                         SEDIT v1.11 User Manual
                      CP/M 2.2 Full-Screen Text Editor
 
                     ================================
@@ -11,7 +11,7 @@
     SEDIT is a full-screen text editor for CP/M 2.2 systems equipped
     with a VT100-compatible terminal.  It provides WordStar-style
     control key commands, block operations, find/replace, syntax
-    highlighting for assembly language, and support for editing files
+    highlighting for assembly and C language, and support for editing files
     larger than available memory using disk-backed virtual buffers.
 
     SEDIT requires an Intel 8080 or compatible processor, a minimum of
@@ -19,7 +19,43 @@
     or emulator supporting cursor addressing and SGR attributes.
 
 
-    2.  STARTING SEDIT
+
+    2.  PROGRAM VARIANTS
+
+    SEDIT is available in four pre-built variants.  Each variant is
+    a standalone .COM file; choose the one appropriate for your
+    terminal and editing needs.
+
+    SEDIT.COM       Monochrome.  No color output, no syntax
+                    highlighting.  Compatible with all VT100
+                    terminals including those without color support.
+                    Smallest binary size.
+
+    SEDIT-CL.COM    Color.  Colored line number gutter and info bar
+                    using ANSI/VT100 SGR color sequences.  No syntax
+                    highlighting.  Requires a color-capable terminal.
+
+    SEDIT-A.COM     ASM highlighting.  Color output plus syntax
+                    highlighting for 8080/Z80 assembly language
+                    source files (.MAC, .ASM, .INC).  Highlights
+                    labels, opcodes, registers, numbers, strings,
+                    and comments in distinct colors.
+
+    SEDIT-C.COM     C highlighting.  Color output plus syntax
+                    highlighting for C language source files (.C, .H).
+                    Highlights keywords, preprocessor directives,
+                    strings, character literals, numbers, and both
+                    line (//) and block (/* */) comments.  Block
+                    comments that span multiple lines are tracked
+                    across screen redraws.
+
+    All four variants are functionally identical in editing features,
+    key bindings, virtual buffer support, and file handling.  The
+    only differences are in terminal color output and syntax
+    highlighting.  Files edited with one variant can be opened with
+    any other variant.
+
+    3.  STARTING SEDIT
 
     From the CP/M command prompt:
 
@@ -38,7 +74,7 @@
     automatic merge-split operations.
 
 
-    3.  SCREEN LAYOUT
+    4.  SCREEN LAYOUT
 
     SEDIT uses a 24-row by 80-column display (132-column mode is
     also available via the ESC menu).
@@ -59,14 +95,14 @@
     to 255 characters; horizontal scrolling is automatic.
 
 
-    4.  KEY COMMANDS
+    5.  KEY COMMANDS
 
     SEDIT uses WordStar-compatible control key sequences.  The ^
     symbol indicates the Ctrl key (e.g. ^E means Ctrl-E).  Two-key
     sequences are shown as ^K,B meaning press Ctrl-K, release, then
     press B.
 
-    4.1  Cursor Movement
+    5.1  Cursor Movement
 
         ^E          Cursor up one line
         ^X          Cursor down one line
@@ -86,7 +122,7 @@
         Arrow keys, Home, End, PgUp, PgDn, Insert, and Delete keys
         are also recognized via VT100 escape sequences.
 
-    4.2  Editing
+    5.2  Editing
 
         ^V          Toggle insert/overwrite mode (default: insert)
         ^I          Insert a tab character
@@ -99,7 +135,7 @@
     current mode is shown on the information bar as "I" (insert) or
     "OVR" (overwrite).
 
-    4.3  Deletion
+    5.3  Deletion
 
         ^H          Delete character to the left (Backspace)
         ^G          Delete character to the right
@@ -111,7 +147,7 @@
     line are joined.  If the resulting line would exceed 255
     characters, the join is refused with an error message.
 
-    4.4  Block Operations
+    5.4  Block Operations
 
         ^K,B        Block mark: set start, then set end, then clear
         ^K,C        Copy marked block to clipboard
@@ -126,7 +162,7 @@
     The marked region is highlighted during full screen redraws.
     The clipboard holds up to 2048 bytes.
 
-    4.5  Find
+    5.5  Find
 
         ^Q,F        Find text (prompts for search string)
         ^L          Find next (repeat last search)
@@ -137,7 +173,7 @@
     text is not found forward, the search does not wrap.  The status
     line displays "Found." or "Not found." as appropriate.
 
-    4.6  File Operations
+    5.6  File Operations
 
         ^K,S        Save file
         ^K,X        Exit editor (prompts to save if modified)
@@ -157,7 +193,7 @@
         Esc Cancel and return to editing
 
 
-    5.  ESC MENU
+    6.  ESC MENU
 
     Press the Escape key (or F4) to open the menu overlay.  Select
     an option by pressing the corresponding number (1-9), the first
@@ -166,13 +202,13 @@
 
         1. Open        Open a file (prompts for filename)
         2. Save        Save current file
-        3. Save As     Save to a new filename
-        4. Find        Search for text
-        5. Go To       Jump to a line number
-        6. Help        Display key reference screen
-        7. About       Show version information
-        8. 80/132 col  Toggle 80/132 column display mode
-        9. Exit        Quit the editor
+        4. Save As     Save to a new filename
+        5. Find        Search for text
+        6. Go To       Jump to a line number
+        7. Help        Display key reference screen
+        8. About       Show version information
+        9. 80/132 col  Toggle 80/132 column display mode
+        10. Exit        Quit the editor
 
     The "Go To" option prompts for a decimal line number and
     positions the cursor at that line.
@@ -183,7 +219,7 @@
     visible columns.
 
 
-    6.  FUNCTION KEYS
+    7.  FUNCTION KEYS
 
         F1          Find next (same as ^L)
         F2          Save file (same as ^K,S)
@@ -191,7 +227,7 @@
         F4          Open ESC menu
 
 
-    7.  SYNTAX HIGHLIGHTING
+    8.  SYNTAX HIGHLIGHTING
 
     SEDIT provides syntax highlighting for 8080/Z80 assembly language
     source files.  Highlighting is enabled automatically when the
@@ -206,17 +242,24 @@
         Strings                Magenta
         Comments (;)           Dim
 
+    C language highlighting is also available for .C and .H files.
+    C token colors:
+
+        Keywords               Bold white
+        Preprocessor (#)       Magenta
+        Strings / chars        Yellow
+        Numbers                Blue
+        Comments (// and /**/) Green
+        Normal text            White
+
     Syntax highlighting is a compile-time option controlled by the
-    SYNHI equate.  Set SYNHI=1 for assembly highlighting or SYNHI=0
-    to disable it (smaller binary).  Because SEDIT.INC is inlined
-    into each source file by CPMFMT.PY, this equate must be edited
-    directly in SESCREEN.MAC and SESYNTAX.MAC.
-
-    Color output is controlled by the COLOR equate in SESCREEN.MAC.
-    Set COLOR=0 for monochrome terminals.
+    SYNHI equate: 0=none, 1=ASM, 2=C.  The COLOR equate controls
+    color output (0=monochrome, 1=color).  These equates must be
+    edited directly in SESCREEN.MAC and SESYNTAX.MAC.  Pre-built
+    variants are provided for each combination (see section 2).
 
 
-    8.  KEY BINDING CUSTOMIZATION
+    9.  KEY BINDING CUSTOMIZATION
 
     SEDIT reads an optional key binding file named SEDIT.KEY from the
     current disk at startup.  This file allows reassigning control
@@ -242,7 +285,7 @@
     Action names are case-insensitive.
 
 
-    9.  VIRTUAL BUFFER MODE
+    10. VIRTUAL BUFFER MODE
 
     When a file is too large to fit in the TPA, SEDIT splits it into
     three regions:
@@ -269,11 +312,11 @@
     file being edited.
 
 
-    10. FILE SIZE LIMITS
+    11. FILE SIZE LIMITS
 
     Maximum file size depends on available TPA and disk space:
 
-      - Without virtual buffer: limited to TPA size minus ~15 KB for
+      - Without virtual buffer: limited to TPA size minus ~20-22 KB for
         SEDIT code and data (typically 40-45 KB on a 64K system)
       - With virtual buffer: limited by available disk space for the
         temporary files
@@ -286,14 +329,14 @@
     displayed and the editor exits.
 
 
-    11. BACKUP FILES
+    12. BACKUP FILES
 
     When saving, SEDIT renames the original file to have a .BAK
     extension before writing the new version.  If a .BAK file already
     exists, it is deleted first.  This provides one level of backup.
 
 
-    12. STATUS MESSAGES
+    13. STATUS MESSAGES
 
     Common messages displayed on the status line (row 24):
 
@@ -314,7 +357,7 @@
         Line NNN is wider than 255 characters.
 
 
-    13. TERMINAL REQUIREMENTS
+    14. TERMINAL REQUIREMENTS
 
     SEDIT requires a VT100/ANSI compatible terminal supporting:
 
@@ -340,7 +383,7 @@
         ESC O P/Q/R/S       F1 / F2 / F3 / F4
 
 
-    14. EXITING
+    15. EXITING
 
     To exit SEDIT, use any of:
 
@@ -352,7 +395,7 @@
     returns to CP/M via a warm boot.
 
 
-    15. UTILITY PROGRAMS
+    16. UTILITY PROGRAMS
 
     The following standalone utilities are included with SEDIT.  Each
     sends VT100/ANSI escape sequences to the terminal and returns to

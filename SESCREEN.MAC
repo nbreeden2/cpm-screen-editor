@@ -93,10 +93,10 @@ ATTR_RED EQU    31H         ; red foreground
 ATTR_BLU EQU    34H         ; blue foreground
 
 ;--- Color assembly option ---------------------------
-COLOR   EQU     1           ; 1 = color, 0 = monochrome
+COLOR   EQU     0           ; 1 = color, 0 = monochrome
 
 ;--- Syntax highlighting option ----------------------
-SYNHI   EQU     0           ; 0=none, 1=ASM, 2=C (future)
+SYNHI   EQU     0           ; 0=none, 1=ASM, 2=C
 
 ;--- Buffer descriptor field offsets -----------------
 BD_BSTAR EQU    0           ; 2: buffer base address
@@ -122,6 +122,7 @@ MINMEM  EQU     9*1024      ; minimum TPA required
 ;--- Syntax mode codes --------------------------------
 SYN_NONE EQU    0           ; plain text
 SYN_ASM  EQU    1           ; 8080/Z80 assembly
+SYN_C    EQU    2           ; C language
 
 ;--- Insert / overwrite mode --------------------------
 MODE_INS EQU    0           ; insert mode (default)
@@ -204,6 +205,9 @@ SRCHMAX EQU     64          ; max find string length
         IF SYNHI
         EXTRN   SYNLINE         ; tokenize line for highlighting
         EXTRN   SYNATTR         ; per-byte attribute buffer
+        EXTRN   SNCMST          ; comment state (from SESYNTAX)
+        EXTRN   SNCMSCAN        ; pre-scan comment state
+        EXTRN   DIRTY           ; screen redraw flag (from SEDIT)
         ENDIF
 
         PUBLIC  SCRINIT         ; init/clear screen
@@ -396,6 +400,14 @@ SDHLDN:
         MVI     A,0
         STA     SDROW           ; row counter
 
+        IF SYNHI
+        ; Pre-scan comment state from file start to TOPLN
+        LHLD    SDLOFF          ; logical offset of TOPLN
+        CALL    SNCMSCAN        ; compute comment state -> SNCMST
+        LDA     SNCMST
+        STA     CMLST           ; CMLST[0] = initial state for row 0
+        ENDIF
+
         ; --- Draw each row ---
 SDRWLP: LDA     SDROW
         CPI     EDITROW
@@ -506,6 +518,16 @@ SDHNHL: ; No highlight on this line
         STA     SDHLE
 SDHSET: POP     D               ; restore text pointer
         IF SYNHI
+        ; Set comment entry state from CMLST[row]
+        LDA     SDROW
+        LXI     H,CMLST
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A
+        MOV     A,M
+        STA     SNCMST
         ; Tokenize line for syntax highlighting
         PUSH    D               ; save text pointer
         MVI     B,MAXCOLS
@@ -708,6 +730,18 @@ SDCLR3:
         LDA     SDROW
         INR     A
         STA     SDROW
+        IF SYNHI
+        ; Store exit comment state for this row
+        ; SDROW was just incremented, so it = row+1
+        LXI     H,CMLST
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A
+        LDA     SNCMST
+        MOV     M,A             ; CMLST[row+1] = exit comment state
+        ENDIF
         JMP     SDRWLP
 
 SDRWDN: CALL    RULRDRAW        ; restore tab ruler (row 2)
@@ -822,7 +856,42 @@ SCREDCL:
         CALL    GBCURLN         ; HL = GGLBUF, A = len, NZ = exists
         XCHG                    ; DE = text ptr
         POP     B               ; B = screen row (0-based)
-        JNZ     SLEDRAW         ; line exists, render it
+        JZ      SCRECF          ; no line -> empty buffer fallback
+        IF SYNHI
+        ; Save cursor row and load comment entry state
+        MOV     A,B
+        STA     SCRCSV          ; save screen row
+        LXI     H,CMLST
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A
+        MOV     A,M             ; CMLST[row]
+        STA     SNCMST          ; set comment entry state
+        ENDIF
+        CALL    SLEDRAW
+        IF SYNHI
+        ; Check if comment state changed -> need full redraw
+        LDA     SCRCSV
+        INR     A               ; row + 1
+        LXI     H,CMLST
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A
+        MOV     A,M             ; CMLST[row+1] (old exit state)
+        MOV     B,A
+        LDA     SNCMST          ; new exit state from SYNLINE
+        CMP     B
+        JZ      SCRECR          ; same -> no action
+        MVI     A,1
+        STA     DIRTY           ; force full redraw next cycle
+SCRECR:
+        ENDIF
+        RET
+SCRECF:
         ; Empty buffer: draw gutter + clear rest of line
         LHLD    CURBDP
         MOV     A,L
@@ -1730,6 +1799,8 @@ SDSKIP: DB      0               ; horizontal skip target (HSCROL copy)
         IF SYNHI
 SDCATT: DB      0               ; current syntax attribute
 SLBYTI: DB      0               ; byte index for SCREDLN
+CMLST:  DS      EDITROW+1       ; per-line comment entry state (21 bytes)
+SCRCSV: DB      0               ; saved cursor row for SCREDCL
         ENDIF
 SLSKIP: DB      0               ; SLEDRAW horizontal skip target
         CSEG
