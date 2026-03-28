@@ -118,8 +118,10 @@
     runs only redo CR+LF normalization and EOF marking.
 
     IMPORTANT: CPMFMT.PY must be run after every edit to a .MAC
-    file.  Failure to do so may cause M80 assembly errors or
-    produce incorrect output.
+    file when editing on Windows or any non-CP/M host.  It ensures
+    proper CR+LF line endings and Ctrl-Z EOF markers required by
+    M80.  Files edited directly under CP/M already have the correct
+    format and do not need preprocessing.
 
     3.3  Step 2: Assembly
 
