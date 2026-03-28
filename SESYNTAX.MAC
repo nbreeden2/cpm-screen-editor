@@ -121,7 +121,7 @@ ATTR_RED EQU    31H         ; red foreground
 ATTR_BLU EQU    34H         ; blue foreground
 
 ;--- Syntax highlighting option ----------------------
-SYNHI   EQU     1           ; 0=none, 1=ASM, 2=C (future)
+SYNHI   EQU     0           ; 0=none, 1=ASM, 2=C (future)
 
 ;--- Buffer descriptor field offsets -----------------
 BD_BSTAR EQU    0           ; 2: buffer base address
