@@ -30,4 +30,5 @@ __pycache__/
 # Local tooling
 .claude/
 build-1.bat
+build-hdd.bat
 cpmulator.exe
