@@ -124,6 +124,8 @@ copy /y SEDIT-MONO.COM SEDIT.COM >nul
 del SEDIT-MONO.COM 2>nul
 
 REM --- Copy resulting files to a disk image folder
+REM --- These are specific to my build environment
+goto ignore
 copy sedit*.com D:\SDH\DISKS\hd-sedit.unpacked\0
 copy *.mac      D:\SDH\DISKS\hd-sedit.unpacked\0
 copy cls.com    D:\SDH\DISKS\hd-sedit.unpacked\0
@@ -131,6 +133,12 @@ copy col80.com  D:\SDH\DISKS\hd-sedit.unpacked\0
 copy col132.com D:\SDH\DISKS\hd-sedit.unpacked\0
 copy *.doc      D:\SDH\DISKS\hd-sedit.unpacked\0
 copy *.sub      D:\SDH\DISKS\hd-sedit.unpacked\0
+pushd D:\SDH\DISKS\
+if exist hd-sedit.hdd del hd-sedit.hdd
+python ..\pack.py hd-sedit.hdd
+popd
+:ignore
+
 
 echo.
 echo === All variants built ===
