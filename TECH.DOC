@@ -64,17 +64,16 @@
 
     2.3  Standalone Utilities (not linked into SEDIT.COM)
 
-    COL80.MAC         ~35  Set terminal to 80-column mode
-    COL132.MAC        ~35  Set terminal to 132-column mode
-    CLS.MAC           ~35  Clear screen and home cursor
-    GETWIDTH.MAC     ~250  Terminal width detection utility
-    KEYCODE.MAC     ~3600  Key code diagnostic tool
+    COL80.COM         ~35  Set terminal to 80-column mode
+    COL132.COM        ~35  Set terminal to 132-column mode
+    CLS.COM           ~35  Clear screen and home cursor
+    GETWIDTH.COM     ~250  Terminal width detection utility
+    KEYCODE.COM     ~3600  Key code diagnostic tool
 
     2.4  Build Scripts and Tools
 
     CPMFMT.PY              Python preprocessor (see section 3)
     SEBUILD.PY             Python EQU patcher for variant builds
-    build-1.bat            Windows build script (single variant)
     build-all.bat          Windows build script (all 4 variants)
     BUILD.SUB              CP/M native build script (for SUBMIT)
 
