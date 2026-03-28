@@ -29,6 +29,12 @@
         EXTRN   OUTSTR          ; write $-string to console
         EXTRN   OUTCHAR         ; output one character
         EXTRN   CURGOTO         ; position cursor (B=row,C=col)
+        EXTRN   VIMODE          ; virtual mode flag
+        EXTRN   VAFLN           ; lines in AFTER temp
+        EXTRN   VIOVFL          ; overflow flag
+        EXTRN   VISAVALL        ; three-phase save
+        EXTRN   VAFCB           ; AFTER temp FCB
+        EXTRN   VAFEX           ; AFTER temp existence flag
 
 ;--- Exports ----------------------------------------------
         PUBLIC  FIOPEN          ; load file into buffer
@@ -260,7 +266,49 @@ FISKIP:
         XRA     A
         STA     FICOL           ; column = 0
 
-FIRLP:  LXI     D,DMABUF        ; set DMA to our buffer
+FIRLP:
+        ; Check if gap is getting too small for another record
+        ; Gap size = GAPEN - GAPBG; if < 512, switch to overflow
+        LHLD    CURBDP
+        PUSH    H
+        MVI     A,BD_GAPEN
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A
+        MOV     E,M
+        INX     H
+        MOV     D,M             ; DE = GAPEN
+        POP     H
+        PUSH    D               ; save GAPEN
+        PUSH    H
+        MVI     A,BD_GAPBG
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A
+        MOV     E,M
+        INX     H
+        MOV     D,M             ; DE = GAPBG
+        POP     H
+        POP     H               ; HL = GAPEN
+        MOV     A,L
+        SUB     E
+        MOV     L,A
+        MOV     A,H
+        SBB     D               ; HL = gap size = GAPEN - GAPBG
+        MOV     H,A
+        ; Check if gap < 512 (high byte must be >= 2)
+        MOV     A,H
+        CPI     2
+        JNC     FIRLPN          ; gap >= 512, continue normally
+        ; Gap too small: switch to overflow mode
+        JMP     FIOVFL
+
+FIRLPN:
+        LXI     D,DMABUF        ; set DMA to our buffer
         MVI     C,BF_SETDMA
         CALL    BDOS
 
@@ -318,6 +366,9 @@ FICHR:  ; Insert byte into gap buffer
 
 FIFULL:
         ; Buffer full - close file, discard buffer, show error
+        LXI     D,CMDTAIL
+        MVI     C,BF_SETDMA
+        CALL    BDOS
         LXI     D,WRKFCB
         MVI     C,BF_FCLOSE
         CALL    BDOS
@@ -328,10 +379,131 @@ FIFULL:
         MVI     A,0FFH          ; return error code
         RET
 
+;------------------------------------------------------------
+; FIOVFL - Switch to overflow mode during file load.
+; Buffer is nearly full; remaining records go to AFTER temp.
+; Entry:  WRKFCB still open for reading.
+; Exit:   Falls through to FIEOF when source is exhausted.
+;------------------------------------------------------------
+FIOVFL:
+        ; Set overflow flags
+        MVI     A,1
+        STA     VIOVFL
+        STA     VIMODE
+
+        ; Set DMA to 0080H for directory ops
+        LXI     D,CMDTAIL
+        MVI     C,BF_SETDMA
+        CALL    BDOS
+
+        ; Build AFTER FCB directly (avoid cross-module EXTRN)
+        ; FCB: drive(1) + name(8) + ext(3) + zero(24) = 36 bytes
+        LXI     H,FIOAFN        ; local template
+        LXI     D,VAFCB
+        MVI     B,12
+FIOVF1: MOV     A,M
+        STAX    D
+        INX     H
+        INX     D
+        DCR     B
+        JNZ     FIOVF1
+        MVI     B,24
+        XRA     A
+FIOVF2: STAX    D
+        INX     D
+        DCR     B
+        JNZ     FIOVF2
+
+        ; Create the file
+        LXI     D,VAFCB
+        MVI     C,BF_FMAKE
+        CALL    BDOS
+        INR     A               ; 0FFH -> 0 means error
+        JZ      FIOVFA          ; create failed
+
+        ; Reset current record
+        XRA     A
+        STA     VAFCB+FCB_CR
+        MVI     A,1
+        STA     VAFEX
+
+        ; Show overflow status
+        LXI     D,OVFLMSG
+        CALL    STATMSG
+
+        ; Copy remaining records directly: read from source,
+        ; write to AFTER temp. No byte-by-byte processing.
+        ; Count LFs for VAFLN, detect CPMEOF for end.
+FIOVLP:
+        ; Read next source record
+        LXI     D,CMDTAIL
+        MVI     C,BF_SETDMA
+        CALL    BDOS
+        LXI     D,WRKFCB
+        MVI     C,BF_FREAD
+        CALL    BDOS
+        ORA     A
+        JNZ     FIOVDN          ; non-zero = EOF or error
+
+        ; Count LFs and detect CPMEOF
+        LXI     H,CMDTAIL
+        MVI     B,RECSIZ
+FIOVBL:
+        MOV     A,M
+        CPI     CPMEOF
+        JZ      FIOVEF          ; hit EOF marker in data
+        CPI     LF
+        JNZ     FIOVNL
+        PUSH    H
+        PUSH    B
+        LHLD    VAFLN
+        INX     H
+        SHLD    VAFLN
+        POP     B
+        POP     H
+FIOVNL:
+        INX     H
+        DCR     B
+        JNZ     FIOVBL
+
+        ; Write this record to AFTER temp (DMA still CMDTAIL)
+        LXI     D,VAFCB
+        MVI     C,BF_FWRITE
+        CALL    BDOS
+        JMP     FIOVLP          ; next record
+
+FIOVEF:
+        ; Found CPMEOF in record - write final record as-is
+        LXI     D,VAFCB
+        MVI     C,BF_FWRITE
+        CALL    BDOS
+
+FIOVDN:
+        ; Close AFTER temp (no flush needed, wrote full records)
+        ; Set DMA for directory op (BF_FCLOSE updates directory)
+        LXI     D,CMDTAIL
+        MVI     C,BF_SETDMA
+        CALL    BDOS
+        LXI     D,VAFCB
+        MVI     C,BF_FCLOSE
+        CALL    BDOS
+        ; Fall through to FIEOF (source file still open)
+        JMP     FIEOF
+
+FIOVFA:
+        ; BF_FMAKE failed (directory full?) - fall back to error
+        XRA     A
+        STA     VIMODE          ; cancel virtual mode
+        STA     VIOVFL
+        JMP     FIFULL          ; show error, close source
+
 FIWDPOP:
         POP     H               ; balance PUSH H from width check
 FIWIDE:
         ; Line too wide - close file, discard buffer, show error
+        LXI     D,CMDTAIL
+        MVI     C,BF_SETDMA
+        CALL    BDOS
         LXI     D,WRKFCB
         MVI     C,BF_FCLOSE
         CALL    BDOS
@@ -348,7 +520,11 @@ FIWIDE:
         RET
 
 FIEOF:
-        ; Close file (ignore error)
+        ; Close source file
+        ; Set DMA for directory op (BF_FCLOSE updates directory)
+        LXI     D,CMDTAIL
+        MVI     C,BF_SETDMA
+        CALL    BDOS
         LXI     D,WRKFCB
         MVI     C,BF_FCLOSE
         CALL    BDOS
@@ -395,12 +571,23 @@ FISAVE:
         ; Reset FCB current record
         CALL    FIRCB0
 
+        ; Check if virtual mode - use three-phase save
+        LDA     VIMODE
+        ORA     A
+        JNZ     FSVVRT
+
         ; Write buffer contents record by record
         CALL    FIWRITE
         ; Check for write errors (disk full, etc)
         LDA     FWERRF
         ORA     A
         JNZ     FSVERE          ; write failed
+        JMP     FSVSKP          ; normal save done
+
+FSVVRT:
+        ; Virtual mode: use three-phase save (BEFORE + buffer + AFTER)
+        CALL    VISAVALL
+        JMP     FSVSKP
 
 FSVSKP: LXI     D,SAVEMSG
         CALL    STATMSG
@@ -873,6 +1060,9 @@ FWPADL: MOV     A,B
 FWWLST: CALL    FWREC
 
 FWCLOS:
+        LXI     D,CMDTAIL
+        MVI     C,BF_SETDMA
+        CALL    BDOS
         LXI     D,WRKFCB
         MVI     C,BF_FCLOSE
         CALL    BDOS
@@ -1139,6 +1329,8 @@ LOADMSG: DB    'File loaded.$'
 SAVEMSG: DB    'File saved. $'
 ERRMSG:  DB    'Disk full or write error! Press any key.$'
 FULLMSG: DB    'File is too big.$'
+OVFLMSG: DB    'Large file: using virtual buffer...$'
+FIOAFN:  DB    0,'SEDIT00A','TMP'       ; AFTER temp FCB template
 FIWDM1:  DB    'Line $'
 FIWDM2:  DB    ' is wider than 255 characters.$'
 

@@ -205,6 +205,7 @@ SRCHMAX EQU     64          ; max find string length
         EXTRN   OUTSTR          ; write $-string
         EXTRN   OUTCHAR         ; write single char
         EXTRN   STATMSG         ; status bar message
+        EXTRN   SAVWMSG         ; "Saving file" message
         EXTRN   SYNINIT         ; detect syntax mode from filename
         EXTRN   COLMOD          ; column mode (0=80, 1=132)
         EXTRN   RTXTCL          ; runtime text columns
@@ -396,7 +397,9 @@ MNSAVE:
         JZ      MNSVDN          ; cancelled
         CALL    FISAVFN2        ; copy WRKFCB name to BD_FNAME
         CALL    SYNINIT         ; update syntax mode for new ext
-MNSVGO: CALL    FISAVE
+MNSVGO: LXI     D,SAVWMSG
+        CALL    STATMSG
+        CALL    FISAVE
 MNSVDN: RET
 
 ;--- Save As ----------------------------------------------
@@ -416,6 +419,8 @@ MNSVAS:
         ADC     H
         MOV     H,A
         MVI     M,1             ; BD_MODIF = 1
+        LXI     D,SAVWMSG
+        CALL    STATMSG
         CALL    FISAVE
 MNSADN: RET
 
@@ -799,7 +804,7 @@ MNTX9:  DB      '9. Quit / Exit        $'
 OPNPMT: DB      'Open file: $'
 SVAPMT: DB      'Save as:   $'
 GTOPMT: DB      'Go to line: $'
-ABTMSG: DB      'SEDIT v1.09 CP/M Screen Editor  (any key)$'
+ABTMSG: DB      'SEDIT v1.10 CP/M Screen Editor  (any key)$'
 DCWIDE: DB      ESC,'[','?','3','h','$'    ; DECCOLM: 132 columns
 DCNORM: DB      ESC,'[','?','3','l','$'    ; DECCOLM: 80 columns
 

@@ -1,0 +1,1440 @@
+;============================================================
+; FILE:    SEVIRTIO.MAC
+; PROJECT: SEDIT - Screen Editor for CP/M 2.2
+; VERSION: 1.0
+; DATE:    1984-01-01
+; AUTHOR:
+;------------------------------------------------------------
+; DESCRIPTION:
+;   Virtual buffer I/O module. Enables editing of files
+;   larger than available TPA by using disk-backed temp
+;   files. The file is split into three regions:
+;     BEFORE temp (lines above the in-memory buffer)
+;     Gap buffer in TPA (currently editable portion)
+;     AFTER temp (lines below the in-memory buffer)
+;   Navigation across boundaries triggers a merge-split
+;   operation via VIGOTO.
+;------------------------------------------------------------
+; REVISION HISTORY:
+;   1.0  1984-01-01  Initial release
+;============================================================
+
+;============================================================
+; FILE:    SEDIT.INC
+; PROJECT: SEDIT - Screen Editor for CP/M 2.2
+; VERSION: 1.0
+; DATE:    1984-01-01
+; AUTHOR:
+;------------------------------------------------------------
+; DESCRIPTION:
+;   Shared equates for all SEDIT modules.
+;   INCLUDE this as the first statement of every .MAC file.
+;------------------------------------------------------------
+; REVISION HISTORY:
+;   1.0  1984-01-01  Initial release
+;============================================================
+
+;--- CP/M system addresses ----------------------------
+BDOS    EQU     0005H       ; BDOS call entry
+WBOOT   EQU     0000H       ; warm boot / exit
+DFTFCB  EQU     005CH       ; default FCB (arg 1)
+CMDTAIL EQU     0080H       ; command tail buffer
+
+;--- BDOS function numbers ----------------------------
+BF_CONIN  EQU   1           ; console input (wait)
+BF_CONOUT EQU   2           ; console output: E=char
+BF_RAWIO  EQU   6           ; direct I/O: E=FFH->in
+BF_PRTSTR EQU   9           ; print $-string: DE=addr
+BF_RDLINE EQU   10          ; buffered line input
+BF_CONST  EQU   11          ; console status
+BF_FOPEN  EQU   15          ; open file: DE=FCB
+BF_FCLOSE EQU   16          ; close file: DE=FCB
+BF_FDEL   EQU   19          ; delete: DE=FCB
+BF_FREAD  EQU   20          ; seq read: DE=FCB
+BF_FWRITE EQU   21          ; seq write: DE=FCB
+BF_FMAKE  EQU   22          ; create: DE=FCB
+BF_SETDMA EQU   26          ; set DMA: DE=addr
+BF_USRNUM EQU   32          ; get/set user: E=num
+
+;--- ASCII control codes ------------------------------
+NUL     EQU     00H
+BEL     EQU     07H         ; bell
+BS      EQU     08H         ; backspace
+TAB     EQU     09H         ; horizontal tab
+LF      EQU     0AH         ; line feed
+CR      EQU     0DH         ; carriage return
+ESC     EQU     1BH         ; escape
+DEL     EQU     7FH         ; delete character
+CPMEOF  EQU     1AH         ; CP/M EOF marker (Ctrl-Z)
+CTRLK   EQU     0BH         ; Ctrl-K (prefix key)
+CTRLQ   EQU     11H         ; Ctrl-Q (prefix key)
+
+;--- Screen layout ------------------------------------
+SCRROWS EQU     24          ; terminal row count
+SCRCOLS EQU     80          ; terminal column count
+EDITROW EQU     20          ; edit rows (rows 3-22)
+EDITFR  EQU     3           ; first edit row (1-based)
+INFOROW EQU     1           ; info bar row
+RULRROW EQU     2           ; tab ruler row
+SEPRROW EQU     23          ; separator (===) row
+STATROW EQU     24          ; status/message row
+LNUMWID EQU     5           ; gutter width (4+space)
+TXTCOLS EQU     73          ; max text columns/line
+MAXCOLS EQU     255         ; max chars per line (raw bytes)
+TXTFCOL EQU     6           ; text start col (1-based)
+TABWID  EQU     4           ; tab stop interval
+
+;--- SGR attribute byte values ------------------------
+ATTR_NRM EQU    00H         ; normal
+ATTR_BLD EQU    01H         ; bold
+ATTR_DIM EQU    02H         ; dim
+ATTR_REV EQU    07H         ; reverse video
+ATTR_CYN EQU    36H         ; cyan foreground
+ATTR_GRN EQU    32H         ; green foreground
+ATTR_YEL EQU    33H         ; yellow foreground
+ATTR_MAG EQU    35H         ; magenta foreground
+
+;--- Buffer descriptor field offsets -----------------
+BD_BSTAR EQU    0           ; 2: buffer base address
+BD_BSIZE EQU    2           ; 2: capacity in bytes
+BD_GAPBG EQU    4           ; 2: gap start offset
+BD_GAPEN EQU    6           ; 2: gap end offset
+BD_TXEND EQU    8           ; 2: text end offset
+BD_TOPLN EQU    10          ; 2: top visible line
+BD_CSROW EQU    12          ; 1: cursor screen row
+BD_CSCOL EQU    13          ; 1: cursor text column
+BD_CSOFF EQU    14          ; 2: cursor byte offset
+BD_MRKBG EQU    16          ; 2: block mark start
+BD_MRKEN EQU    18          ; 2: block mark end
+BD_MODIF EQU    20          ; 1: modified flag
+BD_SYNMD EQU    21          ; 1: syntax mode
+BD_FNAME EQU    22          ; 12: drive+name+ext
+BD_SIZE  EQU    34          ; bytes per descriptor
+
+;--- Number of edit buffers ---------------------------
+MAXBUFS EQU     1           ; maximum open buffers
+MINMEM  EQU     9*1024      ; minimum TPA required
+
+;--- Syntax mode codes --------------------------------
+SYN_NONE EQU    0           ; plain text
+SYN_ASM  EQU    1           ; 8080/Z80 assembly
+
+;--- Insert / overwrite mode --------------------------
+MODE_INS EQU    0           ; insert mode (default)
+MODE_OVR EQU    1           ; overwrite mode
+
+;--- Key type codes (B reg from GETKEY) ---------------
+KT_NONE EQU     0           ; no key available
+KT_ACT  EQU     1           ; C = action code
+KT_CHAR EQU     2           ; C = printable char
+
+;--- Key action codes (C reg when B=KT_ACT) ----------
+ACT_CURUP EQU   1           ; cursor up
+ACT_CURDN EQU   2           ; cursor down
+ACT_CURLT EQU   3           ; cursor left
+ACT_CURRT EQU   4           ; cursor right
+ACT_WRDPV EQU   5           ; previous word
+ACT_WRDNX EQU   6           ; next word
+ACT_PGUP  EQU   7           ; page up
+ACT_PGDN  EQU   8           ; page down
+ACT_SCRUP EQU   9           ; scroll screen up
+ACT_SCRDN EQU   10          ; scroll screen down
+ACT_LINST EQU   11          ; jump to line start
+ACT_LINEN EQU   12          ; jump to line end
+ACT_FTOP  EQU   13          ; jump to file top
+ACT_FEND  EQU   14          ; jump to file end
+ACT_DELLF EQU   15          ; delete left (BS)
+ACT_DELRT EQU   16          ; delete right (Del)
+ACT_DELWD EQU   17          ; delete word right
+ACT_DELLN EQU   18          ; delete entire line
+ACT_INSTB EQU   19          ; insert tab
+ACT_INSNL EQU   20          ; insert newline
+ACT_TOGIN EQU   21          ; toggle insert/overwrite
+ACT_LITNX EQU   22          ; next char is literal
+ACT_FNDNX EQU   23          ; find next
+ACT_FSAVE EQU   24          ; save file
+ACT_FOPEN EQU   25          ; open file
+ACT_FEXIT EQU   26          ; exit editor
+ACT_BLKMK EQU   27          ; toggle block mark
+ACT_BLKCP EQU   28          ; copy block
+ACT_BLKDL EQU   29          ; delete block
+ACT_BLKPS EQU   30          ; paste clipboard
+ACT_MENU  EQU   31          ; open ESC menu
+ACT_FIND  EQU   32          ; find (always prompt)
+ACT_MAX   EQU   32          ; highest action code
+
+;--- Block mark sentinel ------------------------------
+NO_MARK EQU     0FFFFH      ; marks absent/unset
+
+;--- FCB field offsets --------------------------------
+FCB_DR  EQU     0           ; drive (0=default)
+FCB_FN  EQU     1           ; filename (8 bytes)
+FCB_FT  EQU     9           ; extension (3 bytes)
+FCB_EX  EQU     12          ; extent number
+FCB_S2  EQU     14          ; extent high
+FCB_RC  EQU     15          ; record count
+FCB_CR  EQU     32          ; current record
+FCB_SIZ EQU     36          ; total FCB size
+
+;--- DMA record size ----------------------------------
+RECSIZ  EQU     128         ; 128 bytes per record
+
+;--- Clipboard buffer size ----------------------------
+CLIPMAX EQU     2048        ; max paste buffer bytes
+
+;--- Search string size limit -------------------------
+SRCHMAX EQU     64          ; max find string length
+
+
+;--- Imports ----------------------------------------------
+        EXTRN   CURBDP          ; current buffer descriptor ptr
+        EXTRN   GBINIT          ; initialise gap buffer
+        EXTRN   GBMVTOP         ; move cursor to file top
+        EXTRN   GBBASE          ; DE = buffer base address
+        EXTRN   GBBSIZ          ; DE = buffer size
+        EXTRN   GBGAPEN         ; HL = gap end offset
+        EXTRN   DIRTY           ; full redraw flag
+        EXTRN   STATMSG         ; display status message
+        EXTRN   OUTSTR          ; write $-string to console
+        EXTRN   SYNINIT         ; detect syntax mode from filename
+        EXTRN   WRKFCB          ; working FCB (for VISAVALL)
+
+;--- Exports ----------------------------------------------
+        PUBLIC  VIINIT          ; initialise virtual I/O state
+        PUBLIC  VICLEAN         ; delete temp files, reset state
+        PUBLIC  VIGOTO          ; merge-split at target line
+        PUBLIC  VISAVALL        ; three-phase save
+        PUBLIC  VISTAFT         ; create AFTER temp (for FIOPEN)
+        PUBLIC  VICLAFT         ; flush+close AFTER temp
+        PUBLIC  VIWBYT          ; write byte to output (for FIOPEN)
+        PUBLIC  VIMODE          ; 0=normal, 1=virtual
+        PUBLIC  VBFLN           ; lines in BEFORE temp
+        PUBLIC  VAFLN           ; lines in AFTER temp
+        PUBLIC  VIOVFL          ; overflow flag (for FIOPEN)
+        PUBLIC  VAFNAM          ; AFTER temp filename template
+        PUBLIC  VAFCB           ; AFTER temp FCB
+        PUBLIC  VAFEX           ; AFTER temp existence flag
+        PUBLIC  VIWFCB          ; output FCB pointer
+        PUBLIC  VIOPOS          ; output buffer position
+
+;=============================================================
+; CODE SEGMENT
+;=============================================================
+        CSEG
+
+;=============================================================
+; VIINIT - Initialise virtual I/O state.
+; Entry:  (none)
+; Exit:   State zeroed; leftover temp files deleted.
+;=============================================================
+VIINIT:
+        XRA     A
+        STA     VIMODE
+        STA     VIOVFL
+        STA     VBFEX
+        STA     VAFEX
+        STA     VMGEX
+        LXI     H,0
+        SHLD    VBFLN
+        SHLD    VAFLN
+        RET
+
+;=============================================================
+; VICLEAN - Delete temp files and reset state.
+; Call before exit to CP/M.
+; Entry:  (none)
+; Exit:   Temp files deleted; state zeroed.
+;=============================================================
+VICLEAN:
+        LDA     VIMODE
+        ORA     A
+        JZ      VICLNR          ; no temp files created, skip
+        CALL    VIDLBEF
+        CALL    VIDLAFT
+        CALL    VIDLMRG
+        XRA     A
+        STA     VIMODE
+        LXI     H,0
+        SHLD    VBFLN
+        SHLD    VAFLN
+VICLNR: RET
+
+;=============================================================
+; VISTAFT - Create AFTER temp file for FIOPEN overflow.
+; Entry:  (none)
+; Exit:   AFTER temp open for writing; DMA set to VIDMA.
+;=============================================================
+VISTAFT:
+        CALL    VIMKAFT
+        ; Set output FCB to AFTER temp for VIWBYT calls
+        LXI     H,VAFCB
+        SHLD    VIWFCB
+        XRA     A
+        STA     VIOPOS          ; reset output position
+        RET
+
+;=============================================================
+; VICLAFT - Close AFTER temp file.
+; Entry:  AFTER temp open for writing.
+; Exit:   File closed.
+;=============================================================
+VICLAFT:
+        CALL    VIFLUSH         ; flush any partial record
+        CALL    VISDMA          ; set DMA for directory ops
+        LXI     D,VAFCB
+        MVI     C,BF_FCLOSE
+        CALL    BDOS
+        RET
+
+;=============================================================
+; VIGOTO - Merge current state and split at target line.
+; This is the central virtual buffer operation. It:
+;   1. Merges BEFORE + buffer + AFTER into MERGE temp
+;   2. Splits MERGE at target line into new BEFORE + buffer + AFTER
+;   3. Positions cursor at start of target line
+;
+; Entry:  HL = target line number (1-based, absolute file line)
+; Exit:   Buffer loaded with region around target line.
+;         VIMODE updated. DIRTY set.
+;         All regs clobbered.
+;=============================================================
+VIGOTO:
+        SHLD    VITGTL          ; save target line
+        XRA     A
+        STA     VIREMBYT        ; clear stale Phase A remnant
+
+        ; Show status message
+        LXI     D,VIGMSG
+        CALL    STATMSG
+
+        ;--- Phase 0: Merge everything to MERGE temp ---
+        CALL    VIMKMRG         ; create MERGE temp
+        ; Set output to MERGE FCB
+        LXI     H,VMGFCB
+        SHLD    VIWFCB
+        XRA     A
+        STA     VIOPOS          ; reset output position
+
+        ; Copy BEFORE temp if it exists
+        LHLD    VBFLN
+        MOV     A,H
+        ORA     L
+        JZ      VGT_NB          ; no BEFORE temp
+        CALL    VIOPNBEF        ; open BEFORE for reading
+        CALL    VICPFIL         ; copy to output
+        CALL    VICLSBEF        ; close BEFORE
+VGT_NB:
+        ; Write current gap buffer contents
+        CALL    VIBUFWR
+
+        ; Copy AFTER temp if it exists
+        LHLD    VAFLN
+        MOV     A,H
+        ORA     L
+        JZ      VGT_NA          ; no AFTER temp
+        CALL    VIOPNAFT        ; open AFTER for reading
+        CALL    VICPFIL         ; copy to output
+        CALL    VICLSAFT        ; close AFTER
+VGT_NA:
+        ; Flush and close MERGE
+        CALL    VIFLUSH
+        CALL    VISDMA
+        LXI     D,VMGFCB
+        MVI     C,BF_FCLOSE
+        CALL    BDOS
+
+        ; Delete old BEFORE and AFTER temps
+        CALL    VIDLBEF
+        CALL    VIDLAFT
+
+        ;--- Phase 1: Save buffer descriptor fields ---
+        CALL    VISAVBD
+
+        ;--- Phase 2: Clear buffer ---
+        CALL    VIBUFCLR
+
+        ;--- Phase 3: Restore descriptor fields ---
+        CALL    VIRSTBD
+
+        ; Reset line counts
+        LXI     H,0
+        SHLD    VBFLN
+        SHLD    VAFLN
+
+        ;--- Phase A: Read MERGE, write to new BEFORE ---
+        CALL    VIOPNMRG        ; open MERGE for reading
+
+        ; Check if target > 1 (need BEFORE temp)
+        LHLD    VITGTL
+        DCX     H               ; HL = LFs to skip
+        MOV     A,H
+        ORA     L
+        JZ      VGT_PB          ; target=1, skip Phase A
+
+        SHLD    VILFCT          ; LFs to count
+
+        ; Create BEFORE temp
+        CALL    VIMKBEF
+        LXI     H,VBFCB
+        SHLD    VIWFCB
+        XRA     A
+        STA     VIOPOS
+
+        ; Read MERGE records and write to BEFORE, counting LFs
+VGT_A:
+        LXI     D,VIDMA
+        MVI     C,BF_SETDMA
+        CALL    BDOS
+        LXI     D,VMGFCB
+        MVI     C,BF_FREAD
+        CALL    BDOS
+        ORA     A
+        JNZ     VGT_AE          ; EOF (shouldn't happen if file has enough lines)
+
+        ; Scan this record byte by byte
+        LXI     H,VIDMA
+        MVI     B,RECSIZ        ; 128 bytes per record
+VGT_AL:
+        MOV     A,M             ; read byte
+        CPI     CPMEOF
+        JZ      VGT_AE          ; hit EOF marker
+
+        ; Write byte to BEFORE via VIWBYT
+        PUSH    H
+        PUSH    B
+        CALL    VIWBYT
+        POP     B
+        POP     H
+
+        ; Check if it's a LF
+        MOV     A,M
+        CPI     LF
+        JNZ     VGT_AN
+
+        ; Count this LF
+        PUSH    H
+        PUSH    B
+        LHLD    VBFLN
+        INX     H
+        SHLD    VBFLN
+        ; Decrement LF counter
+        LHLD    VILFCT
+        DCX     H
+        SHLD    VILFCT
+        MOV     A,H
+        ORA     L
+        POP     B
+        POP     H
+        JZ      VGT_AD          ; found all target-1 LFs
+
+VGT_AN:
+        INX     H
+        DCR     B
+        JNZ     VGT_AL
+        JMP     VGT_A           ; next record
+
+VGT_AD:
+        ; Done with Phase A. Save remaining bytes in this record.
+        INX     H               ; advance past the last LF byte
+        DCR     B               ; one less byte remaining
+        MOV     A,B
+        STA     VIREMBYT        ; remaining bytes in record
+        SHLD    VIREMPTR        ; pointer to remaining bytes
+        ; Flush and close BEFORE
+        CALL    VIFLUSH
+        CALL    VISDMA
+        LXI     D,VBFCB
+        MVI     C,BF_FCLOSE
+        CALL    BDOS
+        JMP     VGT_PB
+
+VGT_AE:
+        ; Unexpected EOF during Phase A - close BEFORE if open
+        LHLD    VBFLN
+        MOV     A,H
+        ORA     L
+        JZ      VGT_PB          ; no BEFORE was created
+        CALL    VIFLUSH
+        CALL    VISDMA
+        LXI     D,VBFCB
+        MVI     C,BF_FCLOSE
+        CALL    BDOS
+
+        ;--- Phase B: Direct load into gap buffer ---
+VGT_PB:
+        ; Compute write pointer and limit
+        CALL    GBBASE          ; DE = buffer base
+        XCHG
+        SHLD    VIWPTR          ; write pointer = base
+        ; Limit = base + BSIZE - 4096 (leave room)
+        CALL    GBBSIZ          ; DE = BSIZE
+        LHLD    VIWPTR          ; HL = base
+        DAD     D               ; HL = base + BSIZE
+        LXI     D,-4096
+        DAD     D               ; HL = base + BSIZE - 4096
+        SHLD    VILIMIT
+
+        ; Process remaining bytes from Phase A record
+        LDA     VIREMBYT
+        ORA     A
+        JZ      VGT_BR          ; no remaining bytes
+
+        MOV     B,A             ; B = remaining count
+        LHLD    VIREMPTR        ; HL = source pointer
+VGT_RL:
+        MOV     A,M             ; read byte
+        CPI     CPMEOF
+        JZ      VGT_BD          ; hit EOF
+        ; Write byte directly to buffer
+        PUSH    H
+        PUSH    B
+        LHLD    VIWPTR
+        MOV     M,A             ; store byte
+        INX     H
+        SHLD    VIWPTR
+        POP     B
+        POP     H
+        INX     H
+        DCR     B
+        JNZ     VGT_RL
+
+        ; Check if buffer is getting full
+        CALL    VICKFULL
+        JNZ     VGT_BR          ; not full, continue reading
+        JMP     VGT_PC          ; full, switch to Phase C
+
+        ; Read more records into buffer
+VGT_BR:
+        LXI     D,VIDMA
+        MVI     C,BF_SETDMA
+        CALL    BDOS
+        LXI     D,VMGFCB
+        MVI     C,BF_FREAD
+        CALL    BDOS
+        ORA     A
+        JNZ     VGT_BD          ; EOF
+
+        ; Process record bytes directly into buffer
+        LXI     H,VIDMA
+        MVI     B,RECSIZ
+VGT_BL:
+        MOV     A,M             ; read byte
+        CPI     CPMEOF
+        JZ      VGT_BD          ; hit EOF
+
+        ; Write byte directly to buffer memory
+        PUSH    H
+        PUSH    B
+        LHLD    VIWPTR
+        MOV     M,A             ; store byte
+        INX     H
+        SHLD    VIWPTR
+        POP     B
+        POP     H
+
+        INX     H
+        DCR     B
+        JNZ     VGT_BL
+
+        ; Check if buffer is getting full (every record)
+        CALL    VICKFULL
+        JZ      VGT_PC1         ; full, need Phase C
+        JMP     VGT_BR          ; continue reading
+
+VGT_BD:
+        ; Phase B done (hit EOF). No AFTER needed.
+        JMP     VGT_FIN
+
+        ; Phase C: buffer full, remaining goes to AFTER
+VGT_PC1:
+        ; The last record was fully consumed but buffer is now full.
+        ; Read remaining MERGE records into AFTER.
+        JMP     VGT_PC
+
+VGT_PC:
+        ; Create AFTER temp
+        CALL    VIMKAFT
+        LXI     H,VAFCB
+        SHLD    VIWFCB
+        XRA     A
+        STA     VIOPOS
+
+        ; Read remaining MERGE and write to AFTER, counting LFs
+VGT_CL:
+        LXI     D,VIDMA
+        MVI     C,BF_SETDMA
+        CALL    BDOS
+        LXI     D,VMGFCB
+        MVI     C,BF_FREAD
+        CALL    BDOS
+        ORA     A
+        JNZ     VGT_CD          ; EOF
+
+        ; Scan record for LFs and write to AFTER
+        LXI     H,VIDMA
+        MVI     B,RECSIZ
+VGT_CB:
+        MOV     A,M
+        CPI     CPMEOF
+        JZ      VGT_CD          ; hit EOF
+
+        ; Write byte to AFTER
+        PUSH    H
+        PUSH    B
+        CALL    VIWBYT
+        POP     B
+        POP     H
+
+        ; Count LFs
+        MOV     A,M
+        CPI     LF
+        JNZ     VGT_CN
+        PUSH    H
+        LHLD    VAFLN
+        INX     H
+        SHLD    VAFLN
+        POP     H
+VGT_CN:
+        INX     H
+        DCR     B
+        JNZ     VGT_CB
+        JMP     VGT_CL          ; next record
+
+VGT_CD:
+        ; Flush and close AFTER
+        CALL    VIFLUSH
+        CALL    VISDMA
+        LXI     D,VAFCB
+        MVI     C,BF_FCLOSE
+        CALL    BDOS
+
+        ;--- Finalise ---
+VGT_FIN:
+        ; Close and delete MERGE temp
+        CALL    VISDMA
+        LXI     D,VMGFCB
+        MVI     C,BF_FCLOSE
+        CALL    BDOS
+        CALL    VIDLMRG
+
+        ; Finalise buffer descriptor after direct load
+        CALL    VIGBFIN
+
+        ; Move cursor to top of loaded region
+        ; Temporarily clear VIMODE so GBMVTOP uses normal (non-virtual) path
+        XRA     A
+        STA     VIMODE
+        CALL    GBMVTOP
+
+        ; Set VIMODE based on whether any temp files have content
+        LHLD    VBFLN
+        MOV     A,H
+        ORA     L
+        JNZ     VGT_VM
+        LHLD    VAFLN
+        MOV     A,H
+        ORA     L
+        JNZ     VGT_VM
+        ; No temp files, normal mode
+        XRA     A
+        STA     VIMODE
+        JMP     VGT_DN
+VGT_VM:
+        MVI     A,1
+        STA     VIMODE
+VGT_DN:
+        ; Force full screen redraw
+        MVI     A,1
+        STA     DIRTY
+        ; Restore syntax mode
+        CALL    SYNINIT
+        RET
+
+;=============================================================
+; VISAVALL - Three-phase save: BEFORE + buffer + AFTER.
+; Writes complete file to WRKFCB (already created by FISAVE).
+; Entry:  WRKFCB open for writing (created by FISAVE).
+; Exit:   File written and closed. BD_MODIF cleared.
+;=============================================================
+VISAVALL:
+        ; Set output to WRKFCB
+        LXI     H,WRKFCB
+        SHLD    VIWFCB
+        XRA     A
+        STA     VIOPOS
+
+        ; Phase 1: Copy BEFORE temp to output
+        LHLD    VBFLN
+        MOV     A,H
+        ORA     L
+        JZ      VSA_NB
+        CALL    VIOPNBEF
+        CALL    VICPFIL
+        CALL    VICLSBEF
+VSA_NB:
+        ; Phase 2: Write gap buffer contents
+        CALL    VIBUFWR
+
+        ; Phase 3: Copy AFTER temp to output
+        LHLD    VAFLN
+        MOV     A,H
+        ORA     L
+        JZ      VSA_NA
+        CALL    VIOPNAFT
+        CALL    VICPFIL
+        CALL    VICLSAFT
+VSA_NA:
+        ; Flush last record
+        CALL    VIFLUSH
+
+        ; Close output file
+        CALL    VISDMA
+        LXI     D,WRKFCB
+        MVI     C,BF_FCLOSE
+        CALL    BDOS
+
+        ; Clear modified flag
+        LHLD    CURBDP
+        MVI     A,BD_MODIF
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A
+        MVI     M,0
+        RET
+
+;=============================================================
+; VIWBYT - Write one byte to output, auto-flush at 128 bytes.
+; Entry:  A = byte to write.
+; Exit:   Byte buffered or record flushed+written.
+;         Preserves HL, DE, BC.
+;=============================================================
+VIWBYT:
+        PUSH    H
+        PUSH    D
+        PUSH    B
+        ; Store byte in VIOBUF at position VIOPOS
+        STA     VBTMP           ; save byte
+        LDA     VIOPOS
+        MOV     L,A
+        MVI     H,0
+        LXI     D,VIOBUF
+        DAD     D               ; HL = &VIOBUF[VIOPOS]
+        LDA     VBTMP
+        MOV     M,A             ; store byte
+        ; Increment position
+        LDA     VIOPOS
+        INR     A
+        STA     VIOPOS
+        CPI     RECSIZ          ; buffer full?
+        JNZ     VWB_DN          ; no, done
+        ; Buffer full - copy to CMDTAIL and write record
+        ; Using CMDTAIL as DMA ensures safe extent transitions
+        LXI     H,VIOBUF
+        LXI     D,CMDTAIL
+        MVI     B,RECSIZ
+VWB_CP: MOV     A,M
+        STAX    D
+        INX     H
+        INX     D
+        DCR     B
+        JNZ     VWB_CP
+        LXI     D,CMDTAIL
+        MVI     C,BF_SETDMA
+        CALL    BDOS
+        LHLD    VIWFCB          ; DE = target FCB
+        XCHG
+        MVI     C,BF_FWRITE
+        CALL    BDOS
+        ; Reset position
+        XRA     A
+        STA     VIOPOS
+VWB_DN:
+        POP     B
+        POP     D
+        POP     H
+        RET
+
+;=============================================================
+; VIFLUSH - Pad remaining VIOBUF with CPMEOF, write final record.
+; Entry:  VIOPOS = current position in VIOBUF.
+; Exit:   Final record written if any data pending.
+;=============================================================
+VIFLUSH:
+        LDA     VIOPOS
+        ORA     A
+        RZ                      ; nothing to flush
+        ; Pad remaining with CPMEOF
+        MOV     B,A             ; B = current position
+VFL_PD:
+        MOV     A,B
+        CPI     RECSIZ
+        JZ      VFL_WR          ; full, write it
+        MOV     L,B
+        MVI     H,0
+        LXI     D,VIOBUF
+        DAD     D
+        MVI     M,CPMEOF
+        INR     B
+        JMP     VFL_PD
+VFL_WR:
+        ; Copy to CMDTAIL for safe write
+        LXI     H,VIOBUF
+        LXI     D,CMDTAIL
+        MVI     B,RECSIZ
+VFL_CP: MOV     A,M
+        STAX    D
+        INX     H
+        INX     D
+        DCR     B
+        JNZ     VFL_CP
+        LXI     D,CMDTAIL
+        MVI     C,BF_SETDMA
+        CALL    BDOS
+        LHLD    VIWFCB
+        XCHG
+        MVI     C,BF_FWRITE
+        CALL    BDOS
+        ; Reset position
+        XRA     A
+        STA     VIOPOS
+        RET
+
+;=============================================================
+; VICPFIL - Copy open temp file to output via VIWBYT.
+; Reads sequential records, writes bytes until CPMEOF.
+; Entry:  Temp file FCB open for reading (DMA set to VIDMA).
+;         VIWFCB set to output FCB.
+; Exit:   All non-EOF bytes copied to output.
+;=============================================================
+VICPFIL:
+VCF_LP:
+        ; Read next record from temp file
+        LXI     D,VIDMA
+        MVI     C,BF_SETDMA
+        CALL    BDOS
+        LHLD    VICFCB          ; read FCB
+        XCHG
+        MVI     C,BF_FREAD
+        CALL    BDOS
+        ORA     A
+        JZ      VCF_OK          ; A=0: read succeeded
+        RET                     ; non-zero = EOF
+VCF_OK:
+        ; Process 128 bytes
+        LXI     H,VIDMA
+        MVI     B,RECSIZ
+VCF_BL:
+        MOV     A,M
+        CPI     CPMEOF
+        RZ                      ; hit EOF marker, done
+        PUSH    H
+        PUSH    B
+        CALL    VIWBYT          ; write byte to output
+        POP     B
+        POP     H
+        INX     H
+        DCR     B
+        JNZ     VCF_BL
+        JMP     VCF_LP          ; next record
+
+;=============================================================
+; VIBUFWR - Write gap buffer content (R1+R2) to output via VIWBYT.
+; Entry:  VIWFCB set to output FCB.
+; Exit:   All buffer text written.
+;=============================================================
+VIBUFWR:
+        ; Get buffer descriptor fields
+        LHLD    CURBDP
+
+        ; Read BSTAR
+        PUSH    H
+        MOV     A,L
+        ADI     BD_BSTAR
+        MOV     L,A
+        MOV     A,H
+        ACI     0
+        MOV     H,A
+        MOV     E,M
+        INX     H
+        MOV     D,M
+        XCHG
+        SHLD    VBWBAS          ; buffer base
+        POP     H
+
+        ; Read GAPBG
+        PUSH    H
+        MOV     A,L
+        ADI     BD_GAPBG
+        MOV     L,A
+        MOV     A,H
+        ACI     0
+        MOV     H,A
+        MOV     E,M
+        INX     H
+        MOV     D,M
+        XCHG
+        SHLD    VBWGBG          ; gap begin
+        POP     H
+
+        ; Read GAPEN
+        PUSH    H
+        MOV     A,L
+        ADI     BD_GAPEN
+        MOV     L,A
+        MOV     A,H
+        ACI     0
+        MOV     H,A
+        MOV     E,M
+        INX     H
+        MOV     D,M
+        XCHG
+        SHLD    VBWGPE          ; gap end
+        POP     H
+
+        ; Read BSIZE
+        MOV     A,L
+        ADI     BD_BSIZE
+        MOV     L,A
+        MOV     A,H
+        ACI     0
+        MOV     H,A
+        MOV     E,M
+        INX     H
+        MOV     D,M
+        XCHG
+        SHLD    VBWBSZ          ; buffer size
+
+        ; --- Write R1: base .. base+GAPBG-1 ---
+        LHLD    VBWGBG
+        MOV     A,H
+        ORA     L
+        JZ      VBW_R2          ; R1 empty, skip
+        ; R1: base .. base+GAPBG-1 (GAPBG bytes)
+        LHLD    VBWBAS
+        XCHG                    ; DE = base
+        LHLD    VBWGBG          ; HL = GAPBG (byte count)
+        MOV     B,H
+        MOV     C,L             ; BC = byte count
+        XCHG                    ; HL = base (source start)
+VBW_1L:
+        MOV     A,M             ; read byte from R1
+        PUSH    H
+        PUSH    B
+        CALL    VIWBYT          ; write to output
+        POP     B
+        POP     H
+        INX     H
+        DCX     B
+        MOV     A,B
+        ORA     C
+        JNZ     VBW_1L
+
+VBW_R2:
+        ; --- Write R2: base+GAPEN .. base+BSIZE-1 ---
+        LHLD    VBWGPE          ; HL = GAPEN
+        XCHG                    ; DE = GAPEN
+        LHLD    VBWBSZ          ; HL = BSIZE
+        MOV     A,L
+        SUB     E
+        MOV     C,A
+        MOV     A,H
+        SBB     D
+        MOV     B,A             ; BC = BSIZE - GAPEN (R2 size)
+        MOV     A,B
+        ORA     C
+        RZ                      ; R2 empty, done
+
+        ; Source = base + GAPEN
+        LHLD    VBWBAS
+        DAD     D               ; HL = base + GAPEN
+VBW_2L:
+        MOV     A,M             ; read byte from R2
+        PUSH    H
+        PUSH    B
+        CALL    VIWBYT          ; write to output
+        POP     B
+        POP     H
+        INX     H
+        DCX     B
+        MOV     A,B
+        ORA     C
+        JNZ     VBW_2L
+        RET
+
+;=============================================================
+; VIBUFCLR - Reset gap buffer to empty (calls GBINIT).
+; Entry:  CURBDP valid.
+; Exit:   Buffer descriptor reset for empty buffer.
+;=============================================================
+VIBUFCLR:
+        LHLD    CURBDP
+
+        ; Get base address
+        PUSH    H
+        LXI     D,BD_BSTAR
+        DAD     D
+        MOV     E,M
+        INX     H
+        MOV     D,M             ; DE = base
+        POP     H
+
+        ; Get size
+        PUSH    H
+        PUSH    D               ; save base
+        LXI     D,BD_BSIZE
+        DAD     D
+        MOV     C,M
+        INX     H
+        MOV     B,M             ; BC = size
+        POP     D               ; DE = base
+        POP     H               ; HL = descriptor
+
+        ; Call GBINIT (HL=desc, DE=base, BC=size)
+        CALL    GBINIT
+        RET
+
+;=============================================================
+; VIGBFIN - Finalise buffer descriptor after direct load.
+; Sets GAPBG, TXEND, CSOFF from VIWPTR (write pointer).
+; Entry:  VIWPTR = address just past last loaded byte.
+; Exit:   Descriptor updated.
+;=============================================================
+VIGBFIN:
+        ; Compute bytes loaded = VIWPTR - base
+        LHLD    VIWPTR
+        XCHG                    ; DE = write ptr
+        CALL    GBBASE          ; DE on exit = base... wait
+        ; GBBASE returns DE = base, clobbers A and HL
+        ; We need: loaded = VIWPTR - base
+        PUSH    D               ; save base
+        LHLD    VIWPTR          ; HL = write ptr
+        POP     D               ; DE = base
+        MOV     A,L
+        SUB     E
+        MOV     C,A
+        MOV     A,H
+        SBB     D
+        MOV     B,A             ; BC = bytes loaded
+
+        ; Set GAPBG = bytes loaded
+        LHLD    CURBDP
+        PUSH    H
+        MVI     A,BD_GAPBG
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A
+        MOV     M,C
+        INX     H
+        MOV     M,B
+        POP     H
+
+        ; Set TXEND = bytes loaded
+        PUSH    H
+        MVI     A,BD_TXEND
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A
+        MOV     M,C
+        INX     H
+        MOV     M,B
+        POP     H
+
+        ; Set CSOFF = 0
+        MVI     A,BD_CSOFF
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A
+        MVI     M,0
+        INX     H
+        MVI     M,0
+        RET
+
+;=============================================================
+; VISAVBD - Save BD_MODIF, BD_SYNMD, BD_FNAME to temp vars.
+; Entry:  CURBDP valid.
+; Exit:   Fields saved; regs clobbered.
+;=============================================================
+VISAVBD:
+        LHLD    CURBDP
+        ; Save BD_MODIF
+        PUSH    H
+        MVI     A,BD_MODIF
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A
+        MOV     A,M
+        STA     VISMOD
+        POP     H
+        ; Save BD_SYNMD
+        PUSH    H
+        MVI     A,BD_SYNMD
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A
+        MOV     A,M
+        STA     VISSYN
+        POP     H
+        ; Save BD_FNAME (12 bytes)
+        MVI     A,BD_FNAME
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A             ; HL -> BD_FNAME
+        LXI     D,VISFNM
+        MVI     B,12
+VSBD_L: MOV     A,M
+        STAX    D
+        INX     H
+        INX     D
+        DCR     B
+        JNZ     VSBD_L
+        RET
+
+;=============================================================
+; VIRSTBD - Restore BD_MODIF, BD_SYNMD, BD_FNAME from temp vars.
+; Entry:  CURBDP valid.
+; Exit:   Fields restored; regs clobbered.
+;=============================================================
+VIRSTBD:
+        LHLD    CURBDP
+        ; Restore BD_MODIF
+        PUSH    H
+        MVI     A,BD_MODIF
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A
+        LDA     VISMOD
+        MOV     M,A
+        POP     H
+        ; Restore BD_SYNMD
+        PUSH    H
+        MVI     A,BD_SYNMD
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A
+        LDA     VISSYN
+        MOV     M,A
+        POP     H
+        ; Restore BD_FNAME (12 bytes)
+        MVI     A,BD_FNAME
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A             ; HL -> BD_FNAME
+        LXI     D,VISFNM
+        MVI     B,12
+VRBD_L: LDAX    D
+        MOV     M,A
+        INX     H
+        INX     D
+        DCR     B
+        JNZ     VRBD_L
+        RET
+
+;=============================================================
+; VICKFULL - Check if buffer is getting full.
+; Entry:  VIWPTR and VILIMIT set.
+; Exit:   Z flag set if full (VIWPTR >= VILIMIT), NZ if not.
+;=============================================================
+VICKFULL:
+        ; Compare VIWPTR vs VILIMIT (16-bit unsigned)
+        ; Return Z if VIWPTR >= VILIMIT (full)
+        LHLD    VILIMIT
+        XCHG                    ; DE = limit
+        LHLD    VIWPTR          ; HL = wptr
+        ; Compare high bytes first
+        MOV     A,H
+        CMP     D
+        JC      VCKF_N          ; H < D: wptr < limit, not full
+        JNZ     VCKF_Y          ; H > D: wptr > limit, full
+        ; High bytes equal, compare low bytes
+        MOV     A,L
+        CMP     E
+        JC      VCKF_N          ; L < E: wptr < limit, not full
+        ; L >= E: wptr >= limit, full
+VCKF_Y:
+        XRA     A               ; Z = full
+        RET
+VCKF_N:
+        MVI     A,1
+        ORA     A               ; NZ = not full
+        RET
+
+;=============================================================
+; Temp file management helpers
+;=============================================================
+
+;------------------------------------------------------------
+; VIFCINIT - Initialise an FCB from a template.
+; Entry:  HL = 12-byte filename template (drive+name+ext)
+;         DE = FCB address (36 bytes)
+; Exit:   FCB initialised; regs clobbered.
+;------------------------------------------------------------
+VIFCINIT:
+        ; Copy 12 bytes from template to FCB
+        PUSH    D               ; save FCB address
+        MVI     B,12
+VFCI_L: MOV     A,M
+        STAX    D
+        INX     H
+        INX     D
+        DCR     B
+        JNZ     VFCI_L
+        ; Zero remaining 24 bytes (FCB_EX through FCB_CR+3)
+        MVI     B,24
+        XRA     A
+VFCI_Z: STAX    D
+        INX     D
+        DCR     B
+        JNZ     VFCI_Z
+        POP     D               ; return FCB address in DE
+        RET
+
+;------------------------------------------------------------
+; Delete temp file helpers
+; Only call BF_FDEL when the existence flag says file was
+; created. Real CP/M hardware can hang on BF_FDEL/BF_FOPEN
+; for non-existent files.
+;------------------------------------------------------------
+VIDLBEF:
+        LDA     VBFEX
+        ORA     A
+        RZ                      ; file not created, skip
+        CALL    VISDMA          ; set DMA for directory ops
+        LXI     H,VBFNAM
+        LXI     D,VBFCB
+        CALL    VIFCINIT
+        MVI     C,BF_FDEL
+        CALL    BDOS
+        XRA     A
+        STA     VBFEX           ; clear flag
+        RET
+
+VIDLAFT:
+        LDA     VAFEX
+        ORA     A
+        RZ                      ; file not created, skip
+        CALL    VISDMA          ; set DMA for directory ops
+        LXI     H,VAFNAM
+        LXI     D,VAFCB
+        CALL    VIFCINIT
+        MVI     C,BF_FDEL
+        CALL    BDOS
+        XRA     A
+        STA     VAFEX           ; clear flag
+        RET
+
+VIDLMRG:
+        LDA     VMGEX
+        ORA     A
+        RZ                      ; file not created, skip
+        CALL    VISDMA          ; set DMA for directory ops
+        LXI     H,VMGNAM
+        LXI     D,VMGFCB
+        CALL    VIFCINIT
+        MVI     C,BF_FDEL
+        CALL    BDOS
+        XRA     A
+        STA     VMGEX           ; clear flag
+        RET
+
+;------------------------------------------------------------
+; Create temp file helpers
+; Delete first only if existence flag is set, then create.
+;------------------------------------------------------------
+VIMKBEF:
+        CALL    VIDLBEF         ; delete if exists
+        CALL    VISDMA          ; set DMA to VIDMA for directory ops
+        LXI     H,VBFNAM
+        LXI     D,VBFCB
+        CALL    VIFCINIT
+        MVI     C,BF_FMAKE
+        CALL    BDOS
+        XRA     A
+        STA     VBFCB+FCB_CR
+        MVI     A,1
+        STA     VBFEX           ; mark as created
+        RET
+
+VIMKAFT:
+        CALL    VIDLAFT         ; delete if exists
+        CALL    VISDMA          ; set DMA for directory ops
+        LXI     H,VAFNAM
+        LXI     D,VAFCB
+        CALL    VIFCINIT
+        MVI     C,BF_FMAKE
+        CALL    BDOS
+        XRA     A
+        STA     VAFCB+FCB_CR
+        MVI     A,1
+        STA     VAFEX           ; mark as created
+        RET
+
+VIMKMRG:
+        CALL    VIDLMRG         ; delete if exists
+        CALL    VISDMA          ; set DMA to VIDMA for directory ops
+        LXI     H,VMGNAM
+        LXI     D,VMGFCB
+        CALL    VIFCINIT
+        MVI     C,BF_FMAKE
+        CALL    BDOS
+        XRA     A
+        STA     VMGFCB+FCB_CR
+        MVI     A,1
+        STA     VMGEX           ; mark as created
+        RET
+
+;------------------------------------------------------------
+; VISDMA - Set DMA to default CP/M address (0080H) for
+; directory operations. 0080H is guaranteed safe for hardware
+; DMA controllers on real systems.
+;------------------------------------------------------------
+VISDMA:
+        LXI     D,CMDTAIL
+        MVI     C,BF_SETDMA
+        CALL    BDOS
+        RET
+
+;------------------------------------------------------------
+; Open temp file for reading helpers
+;------------------------------------------------------------
+VIOPNBEF:
+        CALL    VISDMA          ; set DMA for directory ops
+        LXI     H,VBFNAM
+        LXI     D,VBFCB
+        CALL    VIFCINIT
+        MVI     C,BF_FOPEN
+        CALL    BDOS
+        XRA     A
+        STA     VBFCB+FCB_CR
+        ; Set VICFCB for VICPFIL
+        LXI     H,VBFCB
+        SHLD    VICFCB
+        RET
+
+VIOPNAFT:
+        CALL    VISDMA          ; set DMA for directory ops
+        LXI     H,VAFNAM
+        LXI     D,VAFCB
+        CALL    VIFCINIT
+        MVI     C,BF_FOPEN
+        CALL    BDOS
+        XRA     A
+        STA     VAFCB+FCB_CR
+        LXI     H,VAFCB
+        SHLD    VICFCB
+        RET
+
+VIOPNMRG:
+        CALL    VISDMA          ; set DMA for directory ops
+        LXI     H,VMGNAM
+        LXI     D,VMGFCB
+        CALL    VIFCINIT
+        MVI     C,BF_FOPEN
+        CALL    BDOS
+        XRA     A
+        STA     VMGFCB+FCB_CR
+        LXI     H,VMGFCB
+        SHLD    VICFCB
+        RET
+
+;------------------------------------------------------------
+; Close temp file helpers
+;------------------------------------------------------------
+VICLSBEF:
+        CALL    VISDMA          ; set DMA for directory ops
+        LXI     D,VBFCB
+        MVI     C,BF_FCLOSE
+        CALL    BDOS
+        RET
+
+VICLSAFT:
+        CALL    VISDMA          ; set DMA for directory ops
+        LXI     D,VAFCB
+        MVI     C,BF_FCLOSE
+        CALL    BDOS
+        RET
+
+;=============================================================
+; DATA SEGMENT
+;=============================================================
+        DSEG
+
+;------------------------------------------------------------
+; Temp file name templates (drive + 8-char name + 3-char ext)
+; Drive byte 0 = default drive
+;------------------------------------------------------------
+VBFNAM: DB      0,'SEDIT00B','TMP'
+VAFNAM: DB      0,'SEDIT00A','TMP'
+VMGNAM: DB      0,'SEDIT00M','TMP'
+
+;--- Status message ---
+VIGMSG: DB      'Virtual buffer: repositioning...$'
+
+; Virtual I/O state
+VIMODE: DB      0               ; 0=normal, 1=virtual mode
+VBFLN:  DW      0               ; lines in BEFORE temp
+VAFLN:  DW      0               ; lines in AFTER temp
+VIOVFL: DB      0               ; overflow flag (for FIOPEN)
+
+; Output buffering
+VIWFCB: DW      0               ; pointer to current write FCB
+VIOPOS: DB      0               ; position in VIOBUF (0-127)
+VIOBUF: DS      RECSIZ          ; output record buffer (128 bytes)
+VIDMA:  DS      RECSIZ          ; input DMA buffer (128 bytes)
+
+; Temp file FCBs (36 bytes each)
+VBFCB:  DS      FCB_SIZ         ; BEFORE temp FCB
+VAFCB:  DS      FCB_SIZ         ; AFTER temp FCB
+VMGFCB: DS      FCB_SIZ         ; MERGE temp FCB
+
+; VICPFIL read FCB pointer
+VICFCB: DW      0               ; pointer to FCB being read
+
+; VIGOTO working variables
+VITGTL: DW      0               ; target line number
+VILFCT: DW      0               ; LF counter (Phase A)
+VIWPTR: DW      0               ; buffer write pointer (Phase B)
+VILIMIT: DW     0               ; buffer load limit (Phase B)
+VIREMBYT: DB    0               ; remaining bytes in Phase A record
+VIREMPTR: DW    0               ; pointer to remaining bytes
+
+; VIBUFWR working variables
+VBWBAS: DW      0               ; buffer base address
+VBWGBG: DW      0               ; gap begin offset
+VBWGPE: DW      0               ; gap end offset
+VBWBSZ: DW      0               ; buffer size
+
+; VISAVBD/VIRSTBD save area
+VISMOD: DB      0               ; saved BD_MODIF
+VISSYN: DB      0               ; saved BD_SYNMD
+VISFNM: DS      12              ; saved BD_FNAME (12 bytes)
+
+; Temp file existence flags (0=not created, 1=exists on disk)
+VBFEX:  DB      0               ; BEFORE temp exists
+VAFEX:  DB      0               ; AFTER temp exists
+VMGEX:  DB      0               ; MERGE temp exists
+
+; Misc temp
+VBTMP:  DB      0               ; temp byte for VIWBYT
+
+        END
+

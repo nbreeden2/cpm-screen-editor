@@ -96,7 +96,7 @@ ATTR_BLU EQU    34H         ; blue foreground
 COLOR   EQU     1           ; 1 = color, 0 = monochrome
 
 ;--- Syntax highlighting option ----------------------
-SYNHI   EQU     0           ; 0=none, 1=ASM, 2=C (future)
+SYNHI   EQU     1           ; 0=none, 1=ASM, 2=C (future)
 
 ;--- Buffer descriptor field offsets -----------------
 BD_BSTAR EQU    0           ; 2: buffer base address
@@ -197,6 +197,8 @@ SRCHMAX EQU     64          ; max find string length
         EXTRN   GBGETLN         ; get ptr to line text
         EXTRN   GBCURLN         ; get current cursor line (fast)
         EXTRN   GBCNTLN         ; count lines in buffer
+        EXTRN   VBFLN           ; lines in BEFORE temp (SEVIRTIO)
+        EXTRN   VIMODE          ; virtual buffer mode (SEVIRTIO)
         EXTRN   GBFNDCS         ; find TOPLN offset via backward scan
         EXTRN   GBRDLNO         ; read line at given offset
         IF SYNHI
@@ -246,6 +248,7 @@ IBWDSTR: DB     '   Len:',' $'
 IBINSTR: DB     '   [INS]','$'
 IBOVSTR: DB     '   [OVR]','$'
 IBMDSTR: DB     ' [MOD]','$'
+IBVRSTR: DB     ' [VRT]','$'
 NAMNMST: DB     '[No Name]','$'
 
 ;=============================================================
@@ -291,6 +294,9 @@ SCRDRAW:
         INX     H
         MOV     D,M             ; DE = TOPLN
         XCHG                    ; HL = TOPLN
+        XCHG                    ; DE = TOPLN
+        LHLD    VBFLN
+        DAD     D               ; HL = VBFLN + TOPLN
         SHLD    SDTPLN          ; save for line number gutter
 
         ; --- Find TOPLN offset via backward scan from cursor ---
@@ -912,7 +918,10 @@ SCREDLN:
         MOV     A,D
         ACI     0
         MOV     H,A             ; HL = TOPLINE + row
-        INX     H               ; make 1-based (match SLEDRAW gutter)
+        INX     H               ; make 1-based
+        XCHG
+        LHLD    VBFLN
+        DAD     D               ; HL = VBFLN + TOPLINE + row + 1
         IF COLOR
         PUSH    H
         LXI     D,SGRGRN        ; green for line numbers
@@ -954,6 +963,9 @@ SLEDRAW:
         ACI     0
         MOV     H,A             ; HL = TOPLINE + row
         INX     H               ; make 1-based
+        XCHG
+        LHLD    VBFLN
+        DAD     D               ; HL = VBFLN + TOPLINE + row + 1
         IF COLOR
         PUSH    H
         LXI     D,SGRGRN        ; green for line numbers
@@ -1249,9 +1261,10 @@ IBNEXT:
         CALL    GBCNTLN         ; HL = line count
         CALL    OUTHL4          ; print 4-digit count
 
-        ; Print Row: cursor row
+        ; Print Row: absolute file line = VBFLN + TOPLN + CSROW + 1
         LXI     D,IBRNSTR
         CALL    OUTSTR
+        ; Get BD_CSROW
         LHLD    CURBDP
         MVI     A,BD_CSROW
         ADD     L
@@ -1260,8 +1273,26 @@ IBNEXT:
         ADC     H
         MOV     H,A
         MOV     L,M
-        MVI     H,0             ; HL = cursor row
+        MVI     H,0             ; HL = cursor screen row
         INX     H               ; 1-based
+        ; Add BD_TOPLN
+        PUSH    H               ; save CSROW+1
+        LHLD    CURBDP
+        MVI     A,BD_TOPLN
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A
+        MOV     E,M
+        INX     H
+        MOV     D,M             ; DE = TOPLN
+        POP     H               ; HL = CSROW+1
+        DAD     D               ; HL = TOPLN + CSROW + 1
+        ; Add VBFLN
+        XCHG                    ; DE = TOPLN + CSROW + 1
+        LHLD    VBFLN
+        DAD     D               ; HL = VBFLN + TOPLN + CSROW + 1
         CALL    OUTHL4
 
         ; Print Col: cursor col
@@ -1317,12 +1348,23 @@ IBMODIF:
         MOV     H,A
         MOV     A,M
         ORA     A
-        JZ      IBCLEAR
+        JZ      IBVIRT
         IF COLOR
         LXI     D,SGRYEL        ; yellow for [MOD]
         CALL    OUTSTR
         ENDIF
         LXI     D,IBMDSTR
+        CALL    OUTSTR
+        ; Print virtual buffer indicator
+IBVIRT:
+        LDA     VIMODE
+        ORA     A
+        JZ      IBCLEAR
+        IF COLOR
+        LXI     D,SGRCYN        ; cyan for [VRT]
+        CALL    OUTSTR
+        ENDIF
+        LXI     D,IBVRSTR
         CALL    OUTSTR
 IBCLEAR:
         LXI     D,CLREOL        ; clear to end of row

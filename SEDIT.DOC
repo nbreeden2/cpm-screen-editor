@@ -1,0 +1,356 @@
+
+
+                         SEDIT v1.10 User Manual
+                     CP/M 2.2 Full-Screen Text Editor
+
+                    ================================
+
+
+    1.  INTRODUCTION
+
+    SEDIT is a full-screen text editor for CP/M 2.2 systems equipped
+    with a VT100-compatible terminal.  It provides WordStar-style
+    control key commands, block operations, find/replace, syntax
+    highlighting for assembly language, and support for editing files
+    larger than available memory using disk-backed virtual buffers.
+
+    SEDIT requires an Intel 8080 or compatible processor, a minimum of
+    9 KB free TPA (Transient Program Area), and a VT100/ANSI terminal
+    or emulator supporting cursor addressing and SGR attributes.
+
+
+    2.  STARTING SEDIT
+
+    From the CP/M command prompt:
+
+        A>SEDIT                     Start with empty buffer
+        A>SEDIT MYFILE.TXT          Open MYFILE.TXT for editing
+
+    If the named file exists, it is loaded into the edit buffer.  If
+    it does not exist, an empty buffer is created with that filename
+    assigned.
+
+    When a file is too large to fit entirely in the TPA, SEDIT
+    automatically switches to virtual buffer mode.  The status line
+    displays "Large file: using virtual buffer..." and the file is
+    split across disk-backed temporary files.  Editing proceeds
+    normally; page-up and page-down across buffer boundaries trigger
+    automatic merge-split operations.
+
+
+    3.  SCREEN LAYOUT
+
+    SEDIT uses a 24-row by 80-column display (132-column mode is
+    also available via the ESC menu).
+
+        Row  1    Information bar: filename, line count, cursor
+                  position (row:col), file length, insert/overwrite
+                  mode indicator
+        Row  2    Tab ruler (: marks every 4 columns)
+        Rows 3-22 Edit area (20 lines of text)
+                  Columns 1-5: line number gutter
+                  Columns 6-78: text area
+        Row 23    Separator bar (=== line)
+        Row 24    Status/message line (prompts and messages)
+
+    Line numbers in the gutter are 1-based and track the actual file
+    line number.  The text area displays up to 73 characters per line
+    in 80-column mode (125 in 132-column mode).  Lines may contain up
+    to 255 characters; horizontal scrolling is automatic.
+
+
+    4.  KEY COMMANDS
+
+    SEDIT uses WordStar-compatible control key sequences.  The ^
+    symbol indicates the Ctrl key (e.g. ^E means Ctrl-E).  Two-key
+    sequences are shown as ^K,B meaning press Ctrl-K, release, then
+    press B.
+
+    4.1  Cursor Movement
+
+        ^E          Cursor up one line
+        ^X          Cursor down one line
+        ^S          Cursor left one character
+        ^D          Cursor right one character
+        ^A          Move to previous word
+        ^F          Move to next word
+        ^R          Page up (scroll up 20 lines)
+        ^C          Page down (scroll down 20 lines)
+        ^W          Scroll up one line
+        ^Z          Scroll down one line
+        ^Q,S        Jump to beginning of line (Home)
+        ^Q,D        Jump to end of line (End)
+        ^Q,R        Jump to beginning of file
+        ^Q,C        Jump to end of file
+
+        Arrow keys, Home, End, PgUp, PgDn, Insert, and Delete keys
+        are also recognized via VT100 escape sequences.
+
+    4.2  Editing
+
+        ^V          Toggle insert/overwrite mode (default: insert)
+        ^I          Insert a tab character
+        ^M          Insert a new line (carriage return)
+        ^N          Insert a new line (alternate binding)
+
+    In insert mode, typed characters are inserted at the cursor and
+    text to the right shifts over.  In overwrite mode, typed
+    characters replace the character at the cursor position.  The
+    current mode is shown on the information bar as "I" (insert) or
+    "OVR" (overwrite).
+
+    4.3  Deletion
+
+        ^H          Delete character to the left (Backspace)
+        ^G          Delete character to the right
+        Del         Delete character to the right
+        ^Y          Delete entire current line
+        ^K,W        Delete word to the right
+
+    When deleting at a line boundary, the current line and the next
+    line are joined.  If the resulting line would exceed 255
+    characters, the join is refused with an error message.
+
+    4.4  Block Operations
+
+        ^K,B        Block mark: set start, then set end, then clear
+        ^K,C        Copy marked block to clipboard
+        ^K,D        Delete marked block
+        ^K,P        Paste clipboard at cursor position
+
+    Block marking is a three-state toggle:
+      - First ^K,B sets the block start at the cursor ("Mark start.")
+      - Second ^K,B sets the block end at the cursor ("Mark end.")
+      - Third ^K,B clears all marks ("Mark clear.")
+
+    The marked region is highlighted during full screen redraws.
+    The clipboard holds up to 2048 bytes.
+
+    4.5  Find
+
+        ^Q,F        Find text (prompts for search string)
+        ^L          Find next (repeat last search)
+        F1          Find next (repeat last search)
+
+    The search string may be up to 64 characters.  Search is case-
+    insensitive and starts from the current cursor position.  If the
+    text is not found forward, the search does not wrap.  The status
+    line displays "Found." or "Not found." as appropriate.
+
+    4.6  File Operations
+
+        ^K,S        Save file
+        ^K,X        Exit editor (prompts to save if modified)
+        ^K,Q        Quit editor (prompts to save if modified)
+        F2          Save file
+
+    When saving, the original file is renamed to .BAK before the new
+    version is written.  If the file has no name yet, you are
+    prompted to enter one.
+
+    When exiting with unsaved changes, SEDIT prompts:
+
+        Save changes? (Y/N/Esc)
+
+        Y   Save the file, then exit
+        N   Discard changes and exit
+        Esc Cancel and return to editing
+
+
+    5.  ESC MENU
+
+    Press the Escape key (or F4) to open the menu overlay.  Select
+    an option by pressing the corresponding number (1-9), the first
+    letter of the option, or by using arrow keys and Enter.  Press
+    Escape to close the menu without selecting.
+
+        1. Open        Open a file (prompts for filename)
+        2. Save        Save current file
+        3. Save As     Save to a new filename
+        4. Find        Search for text
+        5. Go To       Jump to a line number
+        6. Help        Display key reference screen
+        7. About       Show version information
+        8. 80/132 col  Toggle 80/132 column display mode
+        9. Exit        Quit the editor
+
+    The "Go To" option prompts for a decimal line number and
+    positions the cursor at that line.
+
+    The 80/132 column toggle sends VT100 DECCOLM escape sequences.
+    The screen is cleared on mode change (this is normal VT100
+    behavior).  In 132-column mode, the text area expands to 125
+    visible columns.
+
+
+    6.  FUNCTION KEYS
+
+        F1          Find next (same as ^L)
+        F2          Save file (same as ^K,S)
+        F3          Block mark (same as ^K,B)
+        F4          Open ESC menu
+
+
+    7.  SYNTAX HIGHLIGHTING
+
+    SEDIT provides syntax highlighting for 8080/Z80 assembly language
+    source files.  Highlighting is enabled automatically when the
+    file extension is .MAC, .ASM, or .INC.
+
+    Token colors:
+
+        Labels (column 1)      Yellow
+        Opcodes/directives     Green
+        Registers              Cyan
+        Numbers                Magenta
+        Strings                Magenta
+        Comments (;)           Dim
+
+    Syntax highlighting is a compile-time option controlled by the
+    SYNHI equate.  Set SYNHI=1 for assembly highlighting or SYNHI=0
+    to disable it (smaller binary).  Because SEDIT.INC is inlined
+    into each source file by CPMFMT.PY, this equate must be edited
+    directly in SESCREEN.MAC and SESYNTAX.MAC.
+
+    Color output is controlled by the COLOR equate in SESCREEN.MAC.
+    Set COLOR=0 for monochrome terminals.
+
+
+    8.  KEY BINDING CUSTOMIZATION
+
+    SEDIT reads an optional key binding file named SEDIT.KEY from the
+    current disk at startup.  This file allows reassigning control
+    key actions.
+
+    File format (plain text, one binding per line):
+
+        $ This is a comment line
+        CTRL 5 WRDPV
+        CTRL 6 WRDNX
+        CTRL 18 PGUP
+
+    Each CTRL line maps a control character (0-31) to an action name.
+    Action names correspond to the internal action codes:
+
+        CURUP   CURDN   CURLT   CURRT   WRDPV   WRDNX
+        PGUP    PGDN    SCRUP   SCRDN   LINST   LINEN
+        FTOP    FEND    DELLF   DELRT   DELWD   DELLN
+        INSTB   INSNL   TOGIN   LITNX   FNDNX   FSAVE
+        FOPEN   FEXIT   BLKMK   BLKCP   BLKDL   BLKPS
+        MENU
+
+    Action names are case-insensitive.
+
+
+    9.  VIRTUAL BUFFER MODE
+
+    When a file is too large to fit in the TPA, SEDIT splits it into
+    three regions:
+
+        BEFORE temp file    Lines above the in-memory buffer
+        Gap buffer in TPA   Currently visible/editable portion
+        AFTER temp file     Lines below the in-memory buffer
+
+    Temporary files are created on the current disk:
+
+        SEDIT00B.TMP        BEFORE temp
+        SEDIT00A.TMP        AFTER temp
+        SEDIT00M.TMP        MERGE temp (used during repositioning)
+
+    Navigation (page up/down, go-to-line) across buffer boundaries
+    triggers an automatic merge-split operation.  The status line
+    shows "Virtual buffer: repositioning..." during this process.
+
+    On save, all three regions are written to the output file in
+    sequence.  Temporary files are deleted on exit.
+
+    Note: Virtual buffer mode requires sufficient free disk space for
+    the temporary files, which together hold a complete copy of the
+    file being edited.
+
+
+    10. FILE SIZE LIMITS
+
+    Maximum file size depends on available TPA and disk space:
+
+      - Without virtual buffer: limited to TPA size minus ~15 KB for
+        SEDIT code and data (typically 40-45 KB on a 64K system)
+      - With virtual buffer: limited by available disk space for the
+        temporary files
+      - Maximum line length: 255 characters
+      - Maximum clipboard size: 2048 bytes
+      - Maximum search string: 64 characters
+
+    SEDIT requires a minimum of 9 KB free TPA.  If insufficient
+    memory is available, the message "Insufficient memory" is
+    displayed and the editor exits.
+
+
+    11. BACKUP FILES
+
+    When saving, SEDIT renames the original file to have a .BAK
+    extension before writing the new version.  If a .BAK file already
+    exists, it is deleted first.  This provides one level of backup.
+
+
+    12. STATUS MESSAGES
+
+    Common messages displayed on the status line (row 24):
+
+        Please wait, loading file...
+        File loaded.
+        File saved.
+        Saving file, please wait...
+        Large file: using virtual buffer...
+        Virtual buffer: repositioning...
+        Disk full or write error! Press any key.
+        File is too big.
+        Insufficient memory.
+        Mark start. / Mark end. / Mark clear.
+        No block. / Block copied / Block del.
+        Pasted. / Clip empty.
+        Found. / Not found.
+        Save changes? (Y/N/Esc)
+        Line NNN is wider than 255 characters.
+
+
+    13. TERMINAL REQUIREMENTS
+
+    SEDIT requires a VT100/ANSI compatible terminal supporting:
+
+      - Cursor addressing:  ESC [ row ; col H
+      - Erase screen:       ESC [ 2 J
+      - Erase to end of line: ESC [ K
+      - Show/hide cursor:   ESC [ ? 25 h / ESC [ ? 25 l
+      - SGR attributes:     ESC [ Ps m  (0=reset, 1=bold, 2=dim,
+                            7=reverse, 31-37=foreground colors)
+      - DECCOLM (optional): ESC [ ? 3 h / ESC [ ? 3 l
+                            (for 80/132 column toggle)
+
+    The terminal must support at least 80 columns by 24 rows.
+
+    Input escape sequences recognized:
+
+        ESC [ A/B/C/D       Arrow keys (up/down/right/left)
+        ESC [ H / ESC [ F   Home / End (xterm)
+        ESC [ 1~ / ESC [ 4~ Home / End (VT220)
+        ESC [ 2~            Insert
+        ESC [ 3~            Delete
+        ESC [ 5~ / ESC [ 6~ Page Up / Page Down
+        ESC O P/Q/R/S       F1 / F2 / F3 / F4
+
+
+    14. EXITING
+
+    To exit SEDIT, use any of:
+
+        ^K,X        Exit with save prompt
+        ^K,Q        Quit with save prompt
+        ESC -> 9    Menu exit
+
+    If the file has been modified, you are prompted to save.  SEDIT
+    returns to CP/M via a warm boot.
+
+
+                         ================================
+                              End of SEDIT.DOC

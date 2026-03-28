@@ -196,6 +196,10 @@ SRCHMAX EQU     64          ; max find string length
 
 
         EXTRN   CURBDP          ; ptr to active descriptor
+        EXTRN   VIMODE          ; virtual mode flag (SEVIRTIO)
+        EXTRN   VBFLN           ; lines in BEFORE temp
+        EXTRN   VAFLN           ; lines in AFTER temp
+        EXTRN   VIGOTO          ; merge-split at target line
 
         PUBLIC  GBINIT          ; init an empty buffer
         PUBLIC  GBINSRT         ; insert char at cursor
@@ -822,6 +826,18 @@ GLEDN:  RET
 ; Exit:   Cursor at offset 0; all regs clobbered
 ;=============================================================
 GBMVTOP:
+        ; Check virtual mode: if active, goto line 1
+        LDA     VIMODE
+        ORA     A
+        JZ      GVTNRM
+        LHLD    VBFLN
+        MOV     A,H
+        ORA     L
+        JZ      GVTNRM          ; no BEFORE lines, use normal path
+        LXI     H,1
+        CALL    VIGOTO
+        RET
+GVTNRM:
         ; Bulk move: copy entire R1 to end of gap (backward copy)
         CALL    GBGAPBG
         MOV     A,H
@@ -898,6 +914,23 @@ GVTPOS: ; Set cursor to top of file
 ; Exit:   Cursor at last char; all regs clobbered
 ;=============================================================
 GBMVEND:
+        ; Check virtual mode: if active, goto last line
+        LDA     VIMODE
+        ORA     A
+        JZ      GVENRM
+        LHLD    VAFLN
+        MOV     A,H
+        ORA     L
+        JZ      GVENRM          ; no AFTER lines, use normal path
+        ; Total lines = VBFLN + buffer_lines + VAFLN
+        ; Call GBCNTLN for buffer lines (no recursion since VIMODE
+        ; goto will be handled before reaching GBMVEND again)
+        ; Actually just use a large target line: VBFLN+buf+VAFLN
+        ; We can get total from GBCNTLN (which we'll modify to include VBFLN+VAFLN)
+        CALL    GBCNTLN         ; HL = total lines (includes VBFLN+VAFLN)
+        CALL    VIGOTO
+        RET
+GVENRM:
         ; Compute N = BSIZE - GAPEN (entire R2 region)
         CALL    GBGAPEN
         PUSH    H
@@ -1002,11 +1035,102 @@ GBGOTOL:
         MOV     A,H
         ORA     L
         RZ                      ; line 0 = no-op
+        ; In virtual mode, check if target is in buffer range
+        LDA     VIMODE
+        ORA     A
+        JZ      GGTLNRM         ; normal mode
+        ; Virtual mode: HL = absolute target line (1-based)
+        ; Buffer holds lines VBFLN+1 .. VBFLN+buf_lines
+        SHLD    GPGTMP          ; save target
+        ; Compute BC = target - VBFLN
+        XCHG                    ; DE = target
+        LHLD    VBFLN           ; HL = VBFLN
+        MOV     A,E
+        SUB     L
+        MOV     C,A             ; C = low byte of (target - VBFLN)
+        MOV     A,D
+        SBB     H
+        MOV     B,A             ; B = high byte
+        JC      GGTVIG          ; target < VBFLN, outside buffer
+        ; BC = target - VBFLN. If BC = 0, target = VBFLN (outside: that's in BEFORE)
+        MOV     A,B
+        ORA     C
+        JZ      GGTVIG          ; target = VBFLN, outside buffer
+        ; BC = buffer-relative line (1-based). Check if within buffer.
+        ; Need buffer line count from GBCNTLN (raw, not including VBFLN/VAFLN)
+        PUSH    B               ; save buffer-relative target
+        ; Temporarily clear VIMODE to get raw buffer line count
+        XRA     A
+        STA     VIMODE
+        CALL    GBCNTLN         ; HL = buffer lines only
+        MVI     A,1
+        STA     VIMODE          ; restore VIMODE
+        POP     B               ; BC = buffer-relative target
+        ; Check BC <= HL (target <= buffer lines)
+        MOV     A,L
+        SUB     C
+        MOV     A,H
+        SBB     B               ; HL - BC
+        JC      GGTVIG          ; buffer_lines < target, outside buffer
+        ; Target is in buffer. Use normal GBGOTOL with BC as line number.
+        MOV     H,B
+        MOV     L,C
+        JMP     GGTLNRM
+GGTVIG:
+        ; Reposition buffer with margin: VIGOTO(max(1, target-EDITROW))
+        ; This keeps EDITROW lines before target in the buffer
+        LHLD    GPGTMP          ; HL = absolute target
+        LXI     D,-EDITROW
+        DAD     D               ; HL = target - EDITROW
+        JNC     GGTVI1          ; underflow: target < EDITROW
+        MOV     A,H
+        ORA     L
+        JNZ     GGTVI2          ; result > 0, use it
+GGTVI1: LXI     H,1             ; clamp to 1
+GGTVI2: CALL    VIGOTO          ; reposition with margin
+        ; Navigate within buffer to actual target line
+        LHLD    GPGTMP          ; HL = absolute target
+        XCHG                    ; DE = target
+        LHLD    VBFLN           ; HL = lines in BEFORE
+        MOV     A,E
+        SUB     L
+        MOV     L,A
+        MOV     A,D
+        SBB     H
+        MOV     H,A             ; HL = target - VBFLN (buffer-relative)
+        JMP     GGTLNRM        ; position cursor within buffer
+GGTLNRM:
+        ; Clamp target to buffer line count
+        PUSH    H               ; save target
+        LDA     VIMODE
+        STA     GPGTM2          ; save current VIMODE
+        XRA     A
+        STA     VIMODE          ; raw count mode
+        CALL    GBCNTLN         ; HL = buffer lines only
+        LDA     GPGTM2
+        STA     VIMODE          ; restore VIMODE
+        XCHG                    ; DE = buffer lines
+        POP     H               ; HL = target
+        MOV     A,D
+        CMP     H
+        JC      GGTCLM          ; buf_lines < target (high)
+        JNZ     GGTCOK          ; buf_lines > target (high)
+        MOV     A,E
+        CMP     L
+        JNC     GGTCOK          ; buf_lines >= target
+GGTCLM: XCHG                    ; HL = clamped to buf_lines
+GGTCOK:
         SHLD    GGTLIN          ; save target line number
         DCX     H               ; HL = LFs to skip
         SHLD    GGTCNT          ; save LF count
         ; Move to top first (one bulk copy)
+        LDA     VIMODE
+        STA     GPGTM2          ; save current VIMODE
+        XRA     A
+        STA     VIMODE
         CALL    GBMVTOP
+        LDA     GPGTM2
+        STA     VIMODE          ; restore VIMODE
         ; If target is line 1, already at top
         LHLD    GGTCNT
         MOV     A,H
@@ -1150,7 +1274,35 @@ GBPGUP:
         CALL    GBGAPBG
         MOV     A,H
         ORA     L
-        RZ                      ; GAPBG=0, at BOF
+        JNZ     GPUNRM          ; GAPBG>0, continue normally
+        ; GAPBG=0: check virtual mode for more content above
+        LDA     VIMODE
+        ORA     A
+        RZ                      ; normal mode, true BOF
+        LHLD    VBFLN
+        MOV     A,H
+        ORA     L
+        RZ                      ; no BEFORE lines, true BOF
+        ; Virtual: compute target = VBFLN + TOPLN - EDITROW + 1
+        ; (go back one page in the BEFORE region)
+        CALL    GBTOPLN         ; HL = TOPLN
+        XCHG                    ; DE = TOPLN
+        LHLD    VBFLN           ; HL = VBFLN
+        DAD     D               ; HL = VBFLN + TOPLN
+        LXI     D,-EDITROW+1
+        DAD     D               ; HL = VBFLN + TOPLN - EDITROW + 1
+        ; Clamp to minimum 1
+        MOV     A,H
+        ORA     A
+        JP      GPUVGO          ; positive high byte, ok
+        LXI     H,1             ; clamp to line 1
+GPUVGO: MOV     A,H
+        ORA     L
+        JNZ     GPUVG1
+        LXI     H,1             ; if zero, clamp to 1
+GPUVG1: CALL    VIGOTO
+        RET
+GPUNRM:
         ; Save base address
         CALL    GBBASE
         XCHG
@@ -1324,7 +1476,25 @@ GBPGDN:
         SUB     E
         MOV     A,H
         SBB     D
-        RNC                     ; GAPEN >= BSIZE, at EOF
+        JC      GPDNRM          ; GAPEN < BSIZE, not at EOF
+        ; GAPEN >= BSIZE: check virtual mode for more content below
+        LDA     VIMODE
+        ORA     A
+        RZ                      ; normal mode, true EOF
+        LHLD    VAFLN
+        MOV     A,H
+        ORA     L
+        RZ                      ; no AFTER lines, true EOF
+        ; Virtual: target = VBFLN + TOPLN + EDITROW + 1
+        CALL    GBTOPLN         ; HL = TOPLN
+        XCHG                    ; DE = TOPLN
+        LHLD    VBFLN           ; HL = VBFLN
+        DAD     D               ; HL = VBFLN + TOPLN
+        LXI     D,EDITROW+1
+        DAD     D               ; HL = VBFLN + TOPLN + EDITROW + 1
+        CALL    VIGOTO
+        RET
+GPDNRM:
         ; Save base address
         CALL    GBBASE
         XCHG
@@ -1464,16 +1634,47 @@ GBMVUP:
         ORA     L
         JZ      GVUBOT          ; already at file top
         CALL    GBMLNS         ; go to line start
-        CALL    GBMVLT          ; go to end of prev line (TOPLN adjusted by GBMVLT)
+        CALL    GVUSKP          ; step over LF (and CR if present)
         CALL    GBMLNS         ; go to start of that line
         RET
 GVUROW:
         ; Move to start of current line, then prev line
         CALL    GBMLNS
-        CALL    GBMVLT          ; step over LF (CSROW adjusted by GBMVLT)
+        CALL    GVUSKP          ; step over LF (and CR if present)
         CALL    GBMLNS         ; start of prev line
         RET
-GVUBOT: RET
+;------------------------------------------------------------
+; GVUSKP - Step backward over line ending (LF, then CR if present)
+;------------------------------------------------------------
+GVUSKP:
+        CALL    GBMVLT          ; step over LF
+        ; Check if char to left of gap is CR
+        CALL    GBGAPBG
+        MOV     A,H
+        ORA     L
+        RZ                      ; at BOF, done
+        CALL    GBBASE          ; DE = base
+        CALL    GBGAPBG         ; HL = GAPBG
+        DCX     H
+        DAD     D               ; HL = base + GAPBG - 1
+        MOV     A,M
+        CPI     CR
+        RNZ                     ; not CR, done
+        CALL    GBMVLT          ; skip CR too
+        RET
+GVUBOT:
+        ; Check virtual mode for content above buffer
+        LDA     VIMODE
+        ORA     A
+        RZ                      ; normal mode, true BOF
+        LHLD    VBFLN
+        MOV     A,H
+        ORA     L
+        RZ                      ; no BEFORE lines, true BOF
+        ; Virtual: target = VBFLN (last line of BEFORE = current TOPLN)
+        LHLD    VBFLN           ; target = VBFLN (positions us at that line)
+        CALL    VIGOTO
+        RET
 
 ;=============================================================
 ; GBMVDN - Move cursor down one line.
@@ -1492,7 +1693,7 @@ GBMVDN:
         SUB     E
         MOV     A,H
         SBB     D
-        JNC     GVDNDN          ; GAPEN >= BSIZE, at EOF
+        JNC     GVDNEF          ; GAPEN >= BSIZE, at buffer EOF
         ; Try to step over CR+LF
         CALL    GBBASE
         CALL    GBGAPEN
@@ -1511,7 +1712,7 @@ GVDNLF:
         SUB     E
         MOV     A,H
         SBB     D
-        JNC     GVDNDN          ; at EOF after CR
+        JNC     GVDNEF          ; at buffer EOF after CR
         CALL    GBBASE
         CALL    GBGAPEN
         DAD     D
@@ -1519,6 +1720,31 @@ GVDNLF:
         CPI     LF
         JNZ     GVDNDN
         CALL    GBMVRT          ; skip LF (CSROW/scroll adjusted)
+        JMP     GVDNDN          ; successfully moved down
+GVDNEF:
+        ; Buffer EOF: check virtual mode for content below
+        LDA     VIMODE
+        ORA     A
+        JZ      GVDNDN          ; normal mode, true EOF
+        LHLD    VAFLN
+        MOV     A,H
+        ORA     L
+        JZ      GVDNDN          ; no AFTER lines, true EOF
+        ; Virtual: target = VBFLN + TOPLN + CSROW + 2
+        CALL    GBTOPLN
+        XCHG                    ; DE = TOPLN
+        LHLD    VBFLN
+        DAD     D               ; HL = VBFLN + TOPLN
+        SHLD    GPGTMP          ; save partial sum
+        CALL    GBCSROW         ; HL = CSROW
+        XCHG                    ; DE = CSROW
+        LHLD    GPGTMP          ; HL = VBFLN + TOPLN
+        DAD     D               ; HL = VBFLN + TOPLN + CSROW
+        INX     H
+        INX     H               ; HL = VBFLN + TOPLN + CSROW + 2
+        CALL    VIGOTO
+        RET
+
 GVDNDN:
         ; Safety: recalculate CSCOL from scratch.
         ; Corrects any drift in incremental column tracking
@@ -1847,9 +2073,9 @@ GBCNTLN:
         LDA     GLNVAL
         ORA     A
         JZ      GCNFULL         ; cache invalid, do full scan
-        ; Return cached value
+        ; Return cached value + virtual lines
         LHLD    GLNCNT
-        RET
+        JMP     GCNVRT          ; add VBFLN + VAFLN
 GCNFULL:
         ; --- Fast direct memory scan ---
         ; Region 1: base .. base+GAPBG (pre-gap text)
@@ -1910,6 +2136,18 @@ GCNDN:  MOV     H,B
         SHLD    GLNCNT
         MVI     A,1
         STA     GLNVAL
+        ; Add virtual line counts
+GCNVRT:
+        ; HL = buffer line count; add VBFLN + VAFLN if virtual
+        LDA     VIMODE
+        ORA     A
+        RZ                      ; normal mode: return raw count
+        XCHG                    ; DE = buffer lines
+        LHLD    VBFLN
+        DAD     D               ; HL = buffer_lines + VBFLN
+        XCHG                    ; DE = partial sum
+        LHLD    VAFLN
+        DAD     D               ; HL = buffer_lines + VBFLN + VAFLN
         RET
 
 ;=============================================================
@@ -2910,6 +3148,10 @@ GCNBAS: DW      0               ; buffer base address
 GCNR1E: DW      0               ; region 1 end (base + GAPBG)
 GCNR2S: DW      0               ; region 2 start (base + GAPEN)
 GCNR2E: DW      0               ; region 2 end (base + BSIZE)
+
+; Virtual buffer temp variables
+GPGTMP: DW      0               ; temp for VIGOTO target calculation
+GPGTM2: DB      0               ; saved VIMODE during GBGOTOL
 
 ; GBJLCHK working variables
 GJKLPTR: DW     0               ; left scan pointer

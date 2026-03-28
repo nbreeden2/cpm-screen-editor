@@ -15,7 +15,7 @@
 ```
 python CPMFMT.PY                    # preprocess all .MAC
 M80 =<module>                       # assemble (one per .MAC)
-L80 SEDIT,SESCREEN,SEKEY,SEGAPBUF,SEFILEIO,SEMENU,SESEARCH,SEBLOCK,SESYNTAX,SEKEYBND,SEHELP,SEBUFMGR,SEDIT/N/E
+L80 SEDIT,SESCREEN,SEKEY,SEGAPBUF,SEFILEIO,SEMENU,SESEARCH,SEBLOCK,SESYNTAX,SEKEYBND,SEVIRTIO,SEHELP,SEDIT/N/E
 ```
 
 ## Screen Layout (VT100/ANSI, 80x24)
@@ -40,7 +40,7 @@ Row 24: STATROW  — status messages / prompts
 
 INFOBAR and CURPOS always run at MLDONE regardless of flags.
 
-## Module Map (12 linked modules + 1 standalone)
+## Module Map (12 linked modules + 2 standalone)
 
 | File | Purpose | Key Exports |
 |------|---------|-------------|
@@ -52,11 +52,12 @@ INFOBAR and CURPOS always run at MLDONE regardless of flags.
 | SEMENU.MAC | ESC menu overlay | MNUSHOW |
 | SESEARCH.MAC | Find / replace | SRFNDNX, SRREPLACE |
 | SEBLOCK.MAC | Block mark, copy, delete, paste | BLMARK, BLCOPY, BLDEL, BLPASTE |
-| SEBUFMGR.MAC | Buffer allocation (2 buffers in TPA) | BMINIT, BMSWITCH, BMGETCUR, BDESC0, BDESC1 |
 | SESYNTAX.MAC | Assembly syntax highlighting | SYNINIT, SYNLINE, SNTBL, SNCNT |
 | SEKEYBND.MAC | Key binding init from SEDIT.KEY | KBINIT |
-| SEHELP.MAC | Help screen overlay | HLPSHOW |
+| SEVIRTIO.MAC | Virtual buffer I/O for large files | VIMODE, VISAVALL, VIGOTO, VAFLN, VAFCB, VAFEX, VIOVFL |
+| SEHELP.MAC | Help screen overlay, BMDATEND | HLPSHOW |
 | KEYCODE.MAC | Standalone key diagnostic (not linked) | — |
+| GETWIDTH.MAC | Standalone terminal width detection (not linked) | — |
 
 ## Gap Buffer Architecture (SEGAPBUF.MAC)
 

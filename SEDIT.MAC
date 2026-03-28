@@ -25,7 +25,7 @@
 ;   Link (one command, split here for readability):
 ;     L80 SEDIT,SESCREEN,SEKEY,SEGAPBUF,SEFILEIO,
 ;         SEMENU,SESEARCH,SEBLOCK,SESYNTAX,
-;         SEKEYBND,SEHELP,SEDIT/N/E
+;         SEKEYBND,SEVIRTIO,SEHELP,SEDIT/N/E
 ;   Or run: SUBMIT BUILD
 ;------------------------------------------------------------
 ; REVISION HISTORY:
@@ -244,10 +244,13 @@ SRCHMAX EQU     64          ; max find string length
         EXTRN   BLDEL           ; delete block
         EXTRN   BLPASTE         ; paste clipboard
         EXTRN   HLPSHOW         ; show help screen
+        EXTRN   VIINIT          ; init virtual I/O (SEVIRTIO)
+        EXTRN   VICLEAN         ; cleanup virtual I/O
 
 ;--- Exported symbols ---------------------------------
         PUBLIC  INSMODE         ; insert/overwrite flag
         PUBLIC  DIRTY           ; screen redraw needed
+        PUBLIC  SAVWMSG         ; "Saving file" message
         PUBLIC  CURBDP          ; current buf desc ptr
         PUBLIC  TPATOP          ; TPA top address
         PUBLIC  DOEXIT          ; exit handler (for SEMENU)
@@ -318,6 +321,9 @@ BFINLP: MVI     M,' '
 
         ; Initialize and clear screen, draw chrome
         CALL    SCRINIT
+
+        ; Initialize virtual buffer I/O (delete leftover temps)
+        CALL    VIINIT
 
         ; Load file from command line arg if present
         LDA     DFTFCB+1        ; first char of filename
@@ -625,6 +631,7 @@ DXSAVE:
         CALL    FISAVE
 
 DXEXIT:
+        CALL    VICLEAN
         LXI     D,CLRMSG
         CALL    STATMSG
         JMP     WBOOT           ; return to CP/M

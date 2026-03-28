@@ -1,0 +1,675 @@
+
+
+                      SEDIT v1.10 Technical Manual
+                  Build Environment and Source Reference
+
+                    ================================
+
+
+    1.  OVERVIEW
+
+    SEDIT is a modular full-screen editor for CP/M 2.2, written
+    entirely in Intel 8080 assembly language.  It is assembled with
+    Microsoft Macro-80 (M80) and linked with Microsoft Link-80 (L80).
+    The source is organized into 12 separately assembled modules plus
+    a shared include file.
+
+    Total source: approximately 13,500 lines across all modules.
+    Binary size: approximately 15 KB (SEDIT.COM).
+
+
+    2.  SOURCE FILES
+
+    2.1  Linked Modules (in link order)
+
+    Module          Lines  Purpose
+    -------         -----  -------
+    SEDIT.MAC        ~860  Entry point, main loop, action dispatch,
+                           TPA detection, buffer descriptor, dirty
+                           flag management
+    SESCREEN.MAC    ~1740  Terminal I/O, screen rendering (SCRDRAW,
+                           SCREDCL), info bar, cursor positioning,
+                           VT100 escape sequence output, SGR color
+    SEKEY.MAC        ~610  Keyboard input, VT100 escape sequence
+                           decoding, key type/action classification
+    SEGAPBUF.MAC    ~3160  Gap buffer text engine: insert, delete,
+                           cursor movement, line operations, word
+                           movement, page up/down, line counting
+    SEFILEIO.MAC    ~1340  File load (FIOPEN) and save (FISAVE),
+                           FCB management, .BAK file handling,
+                           overflow to virtual buffer (FIOVFL)
+    SEMENU.MAC       ~850  ESC menu overlay, 9 menu options with
+                           handlers, column mode toggle, about box
+    SESEARCH.MAC     ~620  Find and find-next, case-insensitive
+                           string search through gap buffer
+    SEBLOCK.MAC      ~720  Block mark, copy, delete, paste with
+                           2048-byte clipboard buffer
+    SESYNTAX.MAC     ~860  Assembly syntax highlighting tokenizer,
+                           keyword/register/directive tables
+    SEKEYBND.MAC     ~500  Key binding initialization, SEDIT.KEY
+                           file parser, default binding tables
+    SEVIRTIO.MAC    ~1440  Virtual buffer I/O for files larger than
+                           TPA: temp file management, VIGOTO merge-
+                           split, three-phase save (VISAVALL)
+    SEHELP.MAC       ~420  Help screen overlay, BMDATEND marker
+                           (must be linked last)
+
+    2.2  Include File
+
+    SEDIT.INC              Shared equates: BDOS function numbers,
+                           ASCII codes, screen layout constants,
+                           buffer descriptor field offsets, key
+                           action codes, conditional assembly flags
+
+    2.3  Standalone Utilities (not linked into SEDIT.COM)
+
+    GETWIDTH.MAC     ~250  Terminal width detection utility
+    KEYCODE.MAC            Key code diagnostic tool
+
+    2.4  Build Scripts and Tools
+
+    CPMFMT.PY              Python preprocessor (see section 3)
+    build-1.bat            Windows build script using cpmulator
+    BUILD.SUB              CP/M native build script (for SUBMIT)
+
+
+    3.  BUILD PROCESS
+
+    3.1  Prerequisites
+
+    To build on a modern system (Windows):
+      - Python 3.x (for CPMFMT.PY)
+      - cpmulator.exe (CP/M emulator for running M80/L80)
+      - M80.COM (Microsoft Macro-80 assembler)
+      - L80.COM (Microsoft Link-80 linker)
+
+    To build natively on CP/M:
+      - M80.COM and L80.COM on an accessible disk
+      - SUBMIT.COM (for BUILD.SUB) or manual commands
+
+    3.2  Step 1: Preprocessing with CPMFMT.PY
+
+        python CPMFMT.PY SEDIT.MAC SESCREEN.MAC SEKEY.MAC ...
+
+    Or to process all .MAC files:
+
+        python CPMFMT.PY
+
+    CPMFMT.PY performs three operations:
+
+    a) INCLUDE expansion: Replaces any line containing
+       "INCLUDE SEDIT.INC" with the literal contents of SEDIT.INC.
+       This is necessary because M80 terminates input when it
+       encounters the Ctrl-Z EOF marker in an included file.
+
+    b) Line ending normalization: Converts all line endings to
+       CR+LF (0DH 0AH) as required by CP/M text files.
+
+    c) EOF marker: Appends a Ctrl-Z (1AH) byte at the end of the
+       file.
+
+    CPMFMT.PY is idempotent: after the first run, the INCLUDE
+    directive has been replaced by inlined content, so subsequent
+    runs only redo CR+LF normalization and EOF marking.
+
+    IMPORTANT: CPMFMT.PY must be run after every edit to a .MAC
+    file.  Failure to do so may cause M80 assembly errors or
+    produce incorrect output.
+
+    3.3  Step 2: Assembly
+
+    Each module is assembled separately to produce a .REL
+    (relocatable object) file:
+
+        M80 =SEDIT
+        M80 =SESCREEN
+        M80 =SEKEY
+        M80 =SEGAPBUF
+        M80 =SEFILEIO
+        M80 =SEMENU
+        M80 =SESEARCH
+        M80 =SEBLOCK
+        M80 =SESYNTAX
+        M80 =SEKEYBND
+        M80 =SEVIRTIO
+        M80 =SEHELP
+
+    The "=filename" syntax tells M80 to read filename.MAC and
+    produce filename.REL.
+
+    3.4  Step 3: Linking
+
+        L80 SEDIT,SESCREEN,SEKEY,SEGAPBUF,SEFILEIO,SEMENU,...
+            SESEARCH,SEBLOCK,SESYNTAX,SEKEYBND,SEVIRTIO,...
+            SEHELP,SEDIT/N/E
+
+    The /N flag suppresses the symbol table listing.  The /E flag
+    tells L80 to produce the .COM file and exit.  The last argument
+    before /N/E is the output filename (SEDIT.COM).
+
+    CRITICAL: SEHELP must be the LAST module in the link order.
+    See section 5.3 for the reason.
+
+    3.5  Quick Build (Windows)
+
+    The build-1.bat script automates all three steps:
+
+        build-1.bat
+
+    It runs CPMFMT.PY, assembles all modules via cpmulator, links,
+    cleans up .REL files, and copies the result to the disk image
+    directory.
+
+    3.6  Quick Build (CP/M native)
+
+    Copy BUILD.SUB to the disk containing the source and tools:
+
+        SUBMIT BUILD
+
+    This runs all M80 and L80 commands in sequence.  Note that
+    BUILD.SUB does not run CPMFMT.PY; source files must be
+    preprocessed before transfer to CP/M media.
+
+
+    4.  CONDITIONAL ASSEMBLY OPTIONS
+
+    Two equates in SEDIT.INC control compile-time features.  Since
+    CPMFMT.PY inlines SEDIT.INC into each .MAC file, these values
+    are present in every module.  To change them, either:
+
+    a) Edit SEDIT.INC and re-run CPMFMT.PY on all .MAC files
+       (requires restoring the INCLUDE directive first), or
+
+    b) Edit the inlined equates directly in each .MAC file that
+       uses them (SESCREEN.MAC and SESYNTAX.MAC).
+
+    4.1  COLOR
+
+        COLOR   EQU   1        ; 1 = color, 0 = monochrome
+
+    Controls whether SGR color escape sequences (foreground colors)
+    are included in the binary.  Set to 0 for monochrome terminals
+    that do not support ANSI color.  When COLOR=0, the color escape
+    sequence strings (SGRMAG, SGRGRN, etc.) are omitted, saving
+    space and avoiding garbled output on non-color terminals.
+
+    Bold (SGR 1), dim (SGR 2), and reverse video (SGR 7) are always
+    available regardless of the COLOR setting.
+
+    4.2  SYNHI
+
+        SYNHI   EQU   0        ; 0=none, 1=ASM, 2=C (future)
+
+    Controls syntax highlighting at compile time:
+
+      0  No syntax highlighting (smallest binary)
+      1  8080/Z80 assembly language highlighting
+
+    When SYNHI=0, the syntax tokenizer code in SESYNTAX.MAC and
+    the highlighting rendering code in SESCREEN.MAC are excluded
+    via conditional assembly (IF SYNHI ... ENDIF).
+
+    Note: Syntax mode detection (SYNINIT) always runs regardless
+    of the SYNHI setting; it sets BD_SYNMD based on file extension
+    but the value is only acted upon if SYNHI is nonzero.
+
+
+    5.  MEMORY LAYOUT
+
+    5.1  CP/M Memory Map
+
+        0000H-00FFH     CP/M page zero (warm boot, BDOS entry,
+                        default FCB at 005CH, command tail at 0080H)
+        0100H           Program load address (START entry point)
+        0100H-xxxx      SEDIT code and data (DSEG + CSEG per module)
+        BMDATEND        End of static code/data; start of gap buffer
+        ....            Gap buffer (grows toward TPATOP)
+        TPATOP          Top of TPA (read from CP/M page zero at 0006H)
+        TPATOP+         BDOS, BIOS (not available to SEDIT)
+
+    5.2  L80 Segment Layout
+
+    L80 lays out memory in link order.  For each module, it places
+    the module's DSEG first, then CSEG:
+
+        [SEDIT DSEG][SEDIT CSEG]
+        [SESCREEN DSEG][SESCREEN CSEG]
+        [SEKEY DSEG][SEKEY CSEG]
+        ...
+        [SEHELP DSEG][SEHELP CSEG]
+
+    L80 generates a 3-byte JMP instruction at 0100H that jumps past
+    the first module's DSEG to reach the CSEG entry point.
+
+    5.3  BMDATEND and Link Order
+
+    BMDATEND is defined as EQU $ (current address) at the end of
+    SEHELP.MAC's CSEG section, after all help strings and pointer
+    tables.  Because SEHELP is linked last, BMDATEND captures the
+    true end of all code and data across all modules.
+
+    SEDIT.MAC reads BMDATEND at startup to calculate available
+    buffer space:
+
+        Buffer size = TPATOP - BMDATEND
+
+    If BMDATEND is wrong (e.g. because SEHELP is not linked last),
+    the gap buffer will start inside code/data and overwrite it,
+    causing crashes.
+
+    BMDATEND MUST be in CSEG (not DSEG) because L80 places DSEG
+    before CSEG for each module.  If it were in DSEG, it would miss
+    the module's own CSEG content.
+
+    5.4  Gap Buffer
+
+    The gap buffer occupies all memory from BMDATEND to TPATOP:
+
+        [Text before cursor (R1)] [---GAP---] [Text after cursor (R2)]
+        BMDATEND                  GAPBG GAPEN                   TPATOP
+
+    Insertion writes at GAPBG and advances it.  Deletion adjusts
+    gap boundaries.  Cursor movement copies bytes across the gap.
+    This gives O(1) insert/delete at the cursor position.
+
+    Line delimiter in the buffer is LF (0AH).  Files are stored on
+    disk as CR+LF; the CR is inserted on save and stripped on load.
+
+    5.5  Buffer Descriptor
+
+    A 34-byte structure (BDESC0 in SEDIT.MAC DSEG) holds all state
+    for the current buffer.  CURBDP points to it.  Fields:
+
+        Offset  Size  Name       Description
+        0       2     BD_BSTAR   Buffer base address
+        2       2     BD_BSIZE   Buffer capacity (bytes)
+        4       2     BD_GAPBG   Gap start offset
+        6       2     BD_GAPEN   Gap end offset
+        8       2     BD_TXEND   Logical text length
+        10      2     BD_TOPLN   Top visible line number
+        12      1     BD_CSROW   Cursor screen row (0-based)
+        13      1     BD_CSCOL   Cursor text column (0-based)
+        14      2     BD_CSOFF   Cursor byte offset
+        16      2     BD_MRKBG   Block mark start (FFFFH=unset)
+        18      2     BD_MRKEN   Block mark end (FFFFH=unset)
+        20      1     BD_MODIF   Modified flag
+        21      1     BD_SYNMD   Syntax mode (0=none, 1=ASM)
+        22      12    BD_FNAME   Filename (drive + 8-char name + 3-char ext)
+
+
+    6.  MODULE REFERENCE
+
+    6.1  SEDIT.MAC - Main Module
+
+    Entry point: START (at 0100H via L80 JMP)
+
+    Initialization sequence:
+      1. Save incoming stack pointer
+      2. Set stack to private STKTOP
+      3. Read TPATOP from CP/M page zero (0006H)
+      4. Calculate buffer size, check minimum (9 KB)
+      5. Initialize gap buffer (GBINIT)
+      6. Initialize key bindings (KBINIT)
+      7. Initialize screen (SCRINIT)
+      8. Initialize virtual I/O (VIINIT)
+      9. Load file from command-line FCB if present (FIOPEN)
+      10. Enter main loop (MAINLP)
+
+    Main loop (MAINLP):
+      1. Auto-scroll if cursor outside visible columns
+      2. Check DIRTY flag -> full redraw (SCRDRAW)
+      3. Check DRTLINE flag -> current line redraw (SCREDCL)
+      4. Update info bar (INFOBAR)
+      5. Position hardware cursor (CURPOS)
+      6. Wait for key (GETKEY, blocking)
+      7. Dispatch: KT_CHAR -> insert/overwrite character
+                   KT_ACT  -> jump via ACTTBL[action * 2]
+      8. Loop
+
+    Key exports: INSMODE, DIRTY, DRTLINE, CURBDP, TPATOP, DOEXIT
+
+    6.2  SESCREEN.MAC - Screen Rendering
+
+    All terminal output goes through this module.  VT100 escape
+    sequences are emitted as $-terminated strings via BDOS function
+    9 (print string) or character-by-character via BDOS function 6
+    (direct console I/O).
+
+    Key functions:
+      SCRINIT   Initialize terminal (hide cursor, clear, draw chrome)
+      SCRDRAW   Full 20-line redraw with line number gutter
+      SCREDCL   Redraw current line only (performance optimization)
+      INFOBAR   Update row 1 with file statistics
+      CURPOS    Position hardware cursor via ESC[row;colH
+      STATMSG   Display message on row 24
+      OUTSTR    Output $-terminated string
+      OUTCHAR   Output single character
+
+    6.3  SEKEY.MAC - Keyboard Input
+
+    GETKEY reads one logical keystroke and classifies it:
+      B = KT_NONE (0): no key available
+      B = KT_ACT  (1): C = action code (1-31)
+      B = KT_CHAR (2): C = printable ASCII character
+
+    Escape sequence decoding handles:
+      CSI sequences (ESC [ ...): arrow keys, Home, End, PgUp, PgDn,
+                                 Insert, Delete
+      SS3 sequences (ESC O ...): F1-F4
+      Bare ESC (no following sequence within timeout): menu action
+
+    Two-key prefix sequences:
+      Ctrl-K followed by a letter -> block/file operations
+      Ctrl-Q followed by a letter -> navigation/find operations
+
+    6.4  SEGAPBUF.MAC - Gap Buffer Engine
+
+    Core text storage and manipulation.  All buffer operations work
+    through the buffer descriptor pointed to by CURBDP.
+
+    Key exports:
+      GBINIT    Initialize buffer (set gap = entire buffer)
+      GBINSRT   Insert byte at cursor (returns FFH if full)
+      GBDLFT    Delete left (backspace); auto-absorbs CR before LF
+      GBDELRT   Delete right
+      GBMVUP/DN/LT/RT  Cursor movement (copy bytes across gap)
+      GBPGUP/DN Page up/down (move by EDITROW lines)
+      GBMLNS/E  Move to line start/end
+      GBMVTOP   Move to file top
+      GBMVEND   Move to file end
+      GBDLLN    Delete entire current line
+      GBWRDPV/NX  Word left/right
+      GBGETLN   Get current line text into LINEBUF
+      GBCNTLN   Count total lines in buffer
+      GBCURLN   Find start of current line (O(line_length))
+      GBFNDCS   Find cursor screen position
+      GBRDLNO   Read line number at offset
+
+    6.5  SEFILEIO.MAC - File I/O
+
+    Uses CP/M FCB-based file operations (BDOS functions 15-26).
+
+    FIOPEN: Opens and loads a file into the gap buffer.  If the file
+    is too large, triggers FIOVFL which switches to virtual buffer
+    mode and writes remaining data to the AFTER temp file.
+
+    FISAVE: Saves buffer to disk.  In virtual mode, delegates to
+    VISAVALL (three-phase save).  In normal mode, writes directly.
+    Always creates a .BAK backup of the original file first.
+
+    6.6  SEVIRTIO.MAC - Virtual Buffer I/O
+
+    Manages disk-backed temp files for files larger than TPA.
+
+    Three-region model:
+      BEFORE temp (SEDIT00B.TMP) - lines above the buffer
+      Gap buffer in TPA           - currently editable portion
+      AFTER temp  (SEDIT00A.TMP) - lines below the buffer
+
+    VIGOTO: Merge-split operation for crossing buffer boundaries.
+      Phase 0: Write all three regions to MERGE temp
+      Phase 1: Re-read MERGE, split at target line
+      Phase 2: Cleanup, position cursor
+
+    VISAVALL: Three-phase save for virtual mode.
+      Phase 1: Copy BEFORE temp to output file
+      Phase 2: Write gap buffer contents to output file
+      Phase 3: Copy AFTER temp to output file
+      Then flush, close, and delete temp files.
+
+    6.7  SESYNTAX.MAC - Syntax Highlighting
+
+    Per-line tokenizer for 8080/Z80 assembly.  SYNLINE walks one
+    display line and builds a span table (SNTBL) of up to 16
+    attribute regions.  SESCREEN consults this table during
+    rendering to select SGR attributes.
+
+    Token classification:
+      Labels at column 1    -> ATTR_YEL
+      Opcodes/directives    -> ATTR_GRN (matched against tables)
+      Registers             -> ATTR_CYN (matched against REGTBL)
+      Numbers               -> ATTR_MAG
+      Strings               -> ATTR_MAG
+      Comments (after ;)    -> ATTR_DIM
+      Other text            -> ATTR_NRM
+
+    SYNINIT detects file extension (.MAC, .ASM, .INC -> SYN_ASM;
+    anything else -> SYN_NONE) and sets BD_SYNMD.
+
+    6.8  SEHELP.MAC - Help Screen and BMDATEND
+
+    HLPSHOW displays a two-column key reference overlay using
+    pointer tables (HLPLTBL, HLPRTBL) for the left and right
+    column text.  Waits for any keypress, then returns.
+
+    Contains BMDATEND EQU $ at the end of CSEG - the critical
+    end-of-code marker.  See section 5.3.
+
+    6.9  Other Modules
+
+    SEMENU.MAC:    ESC menu overlay with 9 options and handlers.
+    SESEARCH.MAC:  Case-insensitive forward search through the gap
+                   buffer.  Handles gap crossing transparently.
+    SEBLOCK.MAC:   Block mark, copy (to CLIPBUF), delete, paste.
+    SEKEYBND.MAC:  Reads SEDIT.KEY at startup to customize Ctrl-key
+                   bindings.  Falls back to compiled-in defaults.
+
+
+    7.  ADAPTING FOR DIFFERENT TERMINALS
+
+    7.1  Escape Sequences (Output)
+
+    All terminal escape sequences are defined as $-terminated string
+    constants in SESCREEN.MAC DSEG:
+
+        ESCSTR  ESC [           CSI introducer
+        HOMSTR  ESC [ H         Cursor home
+        CLRSTR  ESC [ 2 J       Clear screen
+        CLREOL  ESC [ K         Erase to end of line
+        HIDCUR  ESC [ ? 25 l    Hide cursor
+        SHWCUR  ESC [ ? 25 h    Show cursor
+        SGRRES  ESC [ 0 m       Reset attributes
+        SGRBLD  ESC [ 1 m       Bold
+        SGRDIM  ESC [ 2 m       Dim
+        SGRREV  ESC [ 7 m       Reverse video
+
+    Color strings (conditional on COLOR+SYNHI):
+        SGRMAG  ESC [ 3 5 m     Magenta foreground
+        SGRGRN  ESC [ 3 2 m     Green foreground
+        SGRBLU  ESC [ 9 4 m     Bright blue foreground
+        SGRRED  ESC [ 3 1 m     Red foreground
+        SGRYEL  ESC [ 3 3 m     Yellow foreground
+        SGRCYN  ESC [ 3 6 m     Cyan foreground
+        SGRWHT  ESC [ 0 ; 3 7 m Reset + white
+
+    To adapt for a non-VT100 terminal, replace these string constants
+    with the equivalent sequences for your terminal.  The strings are
+    all in the DSEG section of SESCREEN.MAC and are easy to locate.
+
+    Cursor positioning (CURGOTO) builds the sequence ESC[row;colH
+    dynamically.  For terminals that use a different cursor
+    addressing scheme, modify the CURGOTO routine.
+
+    Column mode toggle sequences are in SEMENU.MAC:
+        DCWIDE  ESC [ ? 3 h     Set 132 columns (DECCOLM)
+        DCNORM  ESC [ ? 3 l     Set 80 columns (DECCOLM)
+
+    If your terminal does not support column mode switching, the
+    80/132 toggle menu option can be left as-is (it will simply
+    have no effect) or the menu handler can be modified.
+
+    7.2  Escape Sequences (Input)
+
+    Key input decoding is in SEKEY.MAC.  The escape sequence tables
+    are:
+
+    CSITBL: CSI (ESC [) sequences
+      Maps final byte -> action code.  Entries for A-F (arrows,
+      Home, End) and tilde sequences (1~..6~ for Home, Ins, Del,
+      End, PgUp, PgDn).
+
+    SS3TBL: SS3 (ESC O) sequences
+      Maps P/Q/R/S -> F1/F2/F3/F4 actions.
+
+    To add keys for a different terminal, add entries to these
+    tables following the existing pattern.  Each entry is a byte
+    pair: (character, action_code).  Tables are terminated by a
+    zero byte.
+
+    7.3  Screen Dimensions
+
+    Screen size constants are in SEDIT.INC:
+
+        SCRROWS  EQU  24       Terminal rows
+        SCRCOLS  EQU  80       Terminal columns
+        EDITROW  EQU  20       Number of edit area rows
+        EDITFR   EQU  3        First edit row (1-based)
+        SEPRROW  EQU  23       Separator row
+        STATROW  EQU  24       Status line row
+
+    To adapt for a different screen size (e.g. 25 rows), adjust
+    these constants.  EDITROW controls how many text lines are
+    displayed; increase it by the number of added rows.
+
+    Note: EDITROW affects the size of several arrays (e.g. the
+    CMLST comment state array in SESCREEN.MAC when syntax
+    highlighting is enabled).  Search for EDITROW references
+    when changing this value.
+
+    7.4  Monochrome Terminals
+
+    Set COLOR EQU 0 in SEDIT.INC (and in the inlined copies in
+    SESCREEN.MAC and SESYNTAX.MAC).  This eliminates all SGR color
+    sequences.  Bold, dim, and reverse video are still used for
+    the info bar, ruler, and separator.
+
+    For terminals that do not support even bold/dim/reverse, replace
+    the SGR strings with empty sequences (just "$" terminators).
+
+    7.5  Single-Byte Key Codes
+
+    SEKEY.MAC includes a table (SBYTBL) for terminals that send
+    single high-byte codes (>= 80H) for special keys instead of
+    escape sequences:
+
+        0EDH -> Cursor up       0ECH -> Cursor down
+        0EBH -> Cursor left     0EAH -> Cursor right
+        0EFH -> Page up         0EEH -> Page down
+        0F3H -> Insert toggle   0F2H -> Delete right
+        0F1H -> Home            0F0H -> End
+
+    Modify this table for terminals with different high-byte key
+    encodings.
+
+
+    8.  CODING CONVENTIONS
+
+    8.1  Register Usage
+
+    BDOS calls (CALL 0005H) clobber ALL registers.  Any value
+    needed after a BDOS call must be saved to memory (STA) or
+    the stack (PUSH) beforehand.
+
+    Gap buffer accessor functions (GBBASE, GBBSIZ, GBGAPEN, etc.)
+    clobber register A.  Save A before calling if needed.
+
+    GBBASE and GBBSIZ return results in DE and clobber A and HL.
+    All other accessors return results in HL.
+
+    8.2  Buffer Descriptor Access Pattern
+
+        LHLD    CURBDP          ; HL = descriptor base
+        MVI     A,BD_field      ; A = field offset
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A             ; HL -> field
+        MOV     E,M             ; read low byte
+        INX     H
+        MOV     D,M             ; read high byte (for word fields)
+
+    8.3  Dirty Flag Protocol
+
+        MVI     A,1
+        STA     DIRTY           ; request full screen redraw
+        ; or
+        STA     DRTLINE         ; request current line redraw only
+
+    The main loop checks DIRTY first (full redraw), then DRTLINE
+    (line redraw), then does nothing (cursor-only update).
+
+    8.4  No Z80 Instructions
+
+    SEDIT must run on an Intel 8080.  Do not use any Z80-only
+    instructions including but not limited to: EX, DJNZ, JR,
+    LDIR, IX, IY, or alternate register sets.
+
+    8.5  SEDIT.INC Inlining Caveat
+
+    CPMFMT.PY expands INCLUDE SEDIT.INC on the first run only.
+    After that, the INCLUDE directive is replaced by inlined content.
+    Subsequent runs of CPMFMT.PY only normalize line endings.
+
+    If SEDIT.INC is edited, the inlined copies in .MAC files are
+    NOT automatically updated.  You must either:
+      - Restore the INCLUDE directive in each affected .MAC file
+        and re-run CPMFMT.PY, or
+      - Manually update the inlined EQUs in each .MAC file
+
+    In practice, the constants that differ between modules are
+    COLOR and SYNHI (only used by SESCREEN.MAC and SESYNTAX.MAC).
+    Most other constants are used by all modules identically.
+
+
+    9.  BUILD TROUBLESHOOTING
+
+    9.1  Unresolved External
+
+    If L80 reports an unresolved external symbol, check:
+      - The symbol is declared PUBLIC in the providing module
+      - The symbol is declared EXTRN in the consuming module
+      - The providing module is included in the L80 link command
+      - The symbol spelling matches exactly (M80 is case-insensitive
+        but L80 may preserve case in error messages)
+
+    9.2  Assembly Errors After Editing
+
+    If M80 reports errors after editing a .MAC file:
+      - Run python CPMFMT.PY on the file first
+      - Check that the Ctrl-Z EOF marker is present (CPMFMT.PY
+        adds it automatically)
+      - Check that line endings are CR+LF
+
+    9.3  BMDATEND Wrong / Buffer Overwrites Code
+
+    If the editor crashes or displays corrupted help text:
+      - Verify SEHELP is the last module in the L80 link command
+      - Verify BMDATEND EQU $ is in CSEG (not DSEG) in SEHELP.MAC
+      - Verify no other module defines code or data after SEHELP
+
+    9.4  DSEG Variable Placement
+
+    M80 may fail to resolve labels defined after large DS or DW
+    blocks in DSEG.  Define labels near the top of each module's
+    DSEG section, before large tables or buffers.
+
+
+    10. REVISION HISTORY
+
+    v1.10   Virtual buffer mode for files larger than TPA.
+            SEVIRTIO.MAC module added.  FIOVFL overflow handler in
+            SEFILEIO.MAC.  Three-phase save (VISAVALL).  VIGOTO
+            merge-split for cross-boundary navigation.
+    v1.09   Exit on file-too-large error at startup.
+    v1.08   80/132 column toggle.  GBCURLN and SCREDCL bug fixes.
+    v1.03   Multiple bug fixes: backspace CR orphan, filename/drive
+            display, string highlight ordering, GBMVLT register
+            clobber, BMDATEND DSEG/CSEG placement.
+    v1.02   TPATOP address fix (0006H).  SCREDCL performance fix
+            (O(line_length) via GBCURLN instead of O(line_number)).
+    v1.0    Initial release.
+
+
+                         ================================
+                              End of TECH.DOC
