@@ -139,7 +139,6 @@ python ..\pack.py hd-sedit.hdd
 popd
 :ignore
 
-
 echo.
 echo === All variants built ===
 echo   SEDIT.COM    - Mono  (no color, no highlighting)
