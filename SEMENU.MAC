@@ -20,7 +20,7 @@
 ;     6. Go To Line
 ;     7. Help
 ;     8. About
-;     9. Quit / Exit
+;     9. Exit
 ;------------------------------------------------------------
 ; REVISION HISTORY:
 ;   1.0  1984-01-01  Initial release
@@ -306,10 +306,10 @@ MNULSC: ORI     20H             ; force lowercase
         MVI     B,7             ; Toggle columns
         JZ      MNULSL
         CPI     'x'
-        MVI     B,8             ; Quit
+        MVI     B,8             ; Exit
         JZ      MNULSL
         CPI     'q'
-        MVI     B,8             ; Quit
+        MVI     B,8             ; Exit
         JZ      MNULSL
         JMP     MNULP           ; unrecognised, ignore
 
@@ -517,7 +517,7 @@ MNTGDN: ; DECCOLM clears screen on real VT100, full redraw
         STA     DIRTY           ; force full content redraw
         RET
 
-;--- Quit / Exit -----------------------------------------
+;--- Exit ------------------------------------------------
 MNQUIT:
         JMP     DOEXIT          ; prompts to save, exits or cancels
 
@@ -798,7 +798,7 @@ MNTX5:  DB      '5. Go To Line...      $'
 MNTX6:  DB      '6. Help               $'
 MNTX7:  DB      '7. About              $'
 MNTX8:  DB      '8. Toggle 80/132 col  $'
-MNTX9:  DB      '9. Quit / Exit        $'
+MNTX9:  DB      '9. Exit               $'
 
 ; Prompt strings
 OPNPMT: DB      'Open file: $'
@@ -819,7 +819,7 @@ MNUTBL:
         DW      MNHELP          ; 5 Help
         DW      MNABUT          ; 6 About
         DW      MNTGCL          ; 7 Toggle 80/132 col
-        DW      MNQUIT          ; 8 Quit
+        DW      MNQUIT          ; 8 Exit
 
 ; Item text pointer table in CSEG
 MNUTXP:

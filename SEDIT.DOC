@@ -208,13 +208,13 @@
 
         1. Open        Open a file (prompts for filename)
         2. Save        Save current file
-        4. Save As     Save to a new filename
-        5. Find        Search for text
-        6. Go To       Jump to a line number
-        7. Help        Display key reference screen
-        8. About       Show version information
-        9. 80/132 col  Toggle 80/132 column display mode
-        10. Exit        Quit the editor
+        3. Save As     Save to a new filename
+        4. Find        Search for text
+        5. Go To       Jump to a line number
+        6. Help        Display key reference screen
+        7. About       Show version information
+        8. 80/132 col  Toggle 80/132 column display mode
+        9. Exit        Exit the editor
 
     The "Go To" option prompts for a decimal line number and
     positions the cursor at that line.
