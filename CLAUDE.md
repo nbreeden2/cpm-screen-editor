@@ -87,7 +87,7 @@ Memory:  [pre-gap text R1][---GAP---][post-gap text R2]
 | 16 | 2 | BD_MRKBG | Block mark start (FFFF=unset) |
 | 18 | 2 | BD_MRKEN | Block mark end (FFFF=unset) |
 | 20 | 1 | BD_MODIF | Modified flag |
-| 21 | 1 | BD_SYNMD | Syntax mode (0=none, 1=asm) |
+| 21 | 1 | BD_SYNMD | Syntax mode (0=none, 1=asm, 2=C) |
 | 22 | 12 | BD_FNAME | Drive + filename + ext |
 
 ## Key Action Dispatch (SEDIT.MAC)

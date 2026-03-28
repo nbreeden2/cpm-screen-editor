@@ -248,11 +248,12 @@
     Token colors:
 
         Labels (column 1)      Yellow
-        Opcodes/directives     Green
+        Opcodes                Bold white
+        Directives             Blue
         Registers              Cyan
-        Numbers                Magenta
+        Numbers                Blue
         Strings                Magenta
-        Comments (;)           Dim
+        Comments (;)           Green
 
     C language highlighting is also available for .C and .H files.
     C token colors:
