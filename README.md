@@ -4,7 +4,7 @@
 **Assembler:** Microsoft M80 / L80
 **Terminal:** VT100 / ANSI
 **Editing Model:** Full-screen, ESC-menu driven, WordStar-compatible control keys
-**Version:** 1.05
+**Version:** 1.11
 
 ---
 
@@ -15,18 +15,17 @@ SEDIT is a full-screen plain-text editor for CP/M 2.2 written in Intel 8080 asse
 ### 1.1 Goals
 
 - Fast, responsive screen editing on a 2 MHz 8080 system
-- Single edit buffer with full TPA utilization
+- Single edit buffer with full TPA utilization; virtual buffer mode for files larger than RAM
 - ESC-driven command menu with keyboard navigation
 - Find text search
 - Block mark, copy, paste, and delete
-- Optional syntax highlighting for assembly language (`.MAC`, `.ASM`, `.INC`) files (compile-time option)
+- Optional syntax highlighting for assembly language (`.MAC`, `.ASM`, `.INC`) and C (`.C`, `.H`) files (compile-time option)
 - User-configurable key bindings loaded from `SEDIT.KEY` on startup
 - Horizontal scrolling for lines wider than the visible text area
 - Clean return to CP/M on exit; no file corruption on abort
 
 ### 1.2 Non-Goals
 
-- Files larger than available TPA RAM
 - Mouse support
 - Undo history
 - Binary file editing
@@ -104,7 +103,7 @@ COL:  1  2  3  4  5  6 ---------------------------------------------------- 80
 
 #### 2.3.2 Line Width and Horizontal Scrolling
 
-- Maximum stored line width: **128 characters** (MAXCOLS=128, excluding line terminator)
+- Maximum stored line width: **255 characters** (MAXCOLS=255, excluding line terminator)
 - Visible text area: **73 columns** (TXTCOLS=73, terminal columns 6-78)
 - Lines longer than the visible area are handled by horizontal scrolling (HSCROL variable)
 - Horizontal scroll auto-adjusts as the cursor moves beyond the visible range
@@ -155,19 +154,20 @@ Pressing `ESC` at any time opens the command menu. The menu overlays the edit ar
          |  5. Go To Line...        |
          |  6. Help                 |
          |  7. About                |
-         |  8. Quit / Exit          |
+         |  8. Toggle 80/132 col    |
+         |  9. Exit                 |
          +==========================+
 ```
 
-Menu geometry: top-left at row 6/col 28, bottom-right at row 17/col 54.
+Menu geometry: top-left at row 6/col 28, bottom-right at row 18/col 54.
 
 ### 3.2 Menu Navigation
 
 | Key | Action |
 |-----|--------|
 | Up / Down arrow, `^E` / `^X`, `K` / `J` | Move highlight |
-| Enter or digit `1`-`8` | Execute item |
-| Shortcut letter (O/S/A/F/G/H/B/X/Q) | Execute item directly |
+| Enter or digit `1`-`9` | Execute item |
+| Shortcut letter (O/S/A/F/G/H/B/W/X/Q) | Execute item directly |
 | ESC | Cancel menu, return to editing |
 
 ### 3.3 Menu Item Details
@@ -207,10 +207,13 @@ Menu geometry: top-left at row 6/col 28, bottom-right at row 17/col 54.
 - Press any key to return to editing
 
 #### 7. About (B)
-- Displays `SEDIT v1.05 CP/M Screen Editor` on the status bar
+- Displays `SEDIT v1.11 CP/M Screen Editor` on the status bar
 - Press any key to dismiss
 
-#### 8. Quit / Exit (X/Q)
+#### 8. Toggle 80/132 col (W)
+- Toggles between 80 and 132 column display modes via VT100 DECCOLM escape sequences
+
+#### 9. Exit (X/Q)
 - If buffer is modified, prompts to save
 - Clears screen and warm boots via `JMP 0000H`
 
@@ -402,7 +405,7 @@ Offset  Size  Field       Description
  16      2    BD_MRKBG    Block mark start offset (FFFFH = no mark)
  18      2    BD_MRKEN    Block mark end offset (FFFFH = no mark)
  20      1    BD_MODIF    Non-zero if buffer has unsaved changes
- 21      1    BD_SYNMD    Syntax mode: 0=plain, 1=ASM
+ 21      1    BD_SYNMD    Syntax mode: 0=plain, 1=ASM, 2=C
  22     12    BD_FNAME    Drive (1) + name (8) + ext (3)
 ```
 
@@ -444,7 +447,7 @@ FFFF +-------------------------------------------+
      |  Gap buffer (single edit buffer)           |  All remaining TPA
      |                                           |
      +-------------------------------------------+  BMDATEND
-     |  SEDIT code (CSEG) + data (DSEG)          |  ~16 KB
+     |  SEDIT code (CSEG) + data (DSEG)          |  ~20-22 KB
 0100 +-------------------------------------------+
 ```
 
@@ -462,7 +465,7 @@ Two compile-time options control feature inclusion:
 | Option | Values | Effect |
 |--------|--------|--------|
 | `COLOR` | 0 or 1 | Color SGR strings for info bar, gutter, ruler, separator |
-| `SYNHI` | 0 or 1 | Syntax highlighting for ASM files (tokenizer + SGR rendering) |
+| `SYNHI` | 0, 1, or 2 | Syntax highlighting (0=none, 1=ASM, 2=C) |
 
 These are defined as EQU constants in the inlined SEDIT.INC within SESCREEN.MAC and SESYNTAX.MAC. Code is conditionally assembled with `IF COLOR`, `IF SYNHI`, and `IF COLOR+SYNHI` guards.
 
@@ -470,16 +473,27 @@ When SYNHI=1, the following ASM token classes are highlighted:
 
 | Token Type | SGR | Color/Style |
 |------------|-----|-------------|
-| Label (col 1 identifier) | bold | Bold white |
-| Opcode / mnemonic | 36 | Cyan |
-| Directive (EQU, DB, DW, DS, ORG, etc.) | 33 | Yellow |
-| Register (A B C D E H L M SP PSW HL DE BC AF) | 32 | Green |
-| Numeric literal | 35 | Magenta |
+| Label (col 1 identifier) | 33 | Yellow |
+| Opcode / mnemonic | bold | Bold white |
+| Directive (EQU, EXTRN, PUBLIC) | 34 | Blue |
+| Register (A B C D E H L M SP PC HL DE BC AF) | 36 | Cyan |
+| Numeric literal | 34 | Blue |
 | String literal (`'...'` or `"..."`) | 35 | Magenta |
-| Comment (`;` to EOL) | 2 | Dim |
+| Comment (`;` to EOL) | 32 | Green |
 | Normal text | 0 | Normal |
 
-Syntax mode is set automatically by SYNINIT based on file extension (`.MAC`, `.ASM`, `.INC` -> SYN_ASM; all others -> SYN_NONE).
+When SYNHI=2, the following C token classes are highlighted:
+
+| Token Type | SGR | Color/Style |
+|------------|-----|-------------|
+| Keyword | bold | Bold white |
+| Preprocessor directive (`#`) | 35 | Magenta |
+| String / character literal | 33 | Yellow |
+| Numeric literal | 34 | Blue |
+| Comment (`//` or `/* ... */`) | 32 | Green |
+| Normal text | 0 | Normal |
+
+Syntax mode is set automatically by SYNINIT based on file extension (`.MAC`, `.ASM`, `.INC` -> SYN_ASM; `.C`, `.H` -> SYN_C; all others -> SYN_NONE).
 
 ---
 
@@ -495,7 +509,7 @@ Syntax mode is set automatically by SYNINIT based on file extension (`.MAC`, `.A
    - Skip CPMEOF (`1AH`) markers
    - CR stored as-is (invisible in display)
    - LF marks line boundary
-   - Lines wider than MAXCOLS (128) chars generate a warning
+   - Lines wider than MAXCOLS (255) chars generate a warning
 6. Close file; move cursor to top; clear MODIFIED flag
 7. Call SYNINIT to detect syntax mode from extension
 
@@ -561,7 +575,7 @@ Returns: B = key type (KT_NONE, KT_ACT, KT_CHAR), C = action code or ASCII chara
 
 ## 11. Module Structure
 
-All source files follow CP/M 8.3 naming. SEDIT is built from 11 modules plus a shared include file.
+All source files follow CP/M 8.3 naming. SEDIT is built from 12 modules plus a shared include file.
 
 | Source File | Purpose |
 |-------------|---------|
@@ -574,11 +588,12 @@ All source files follow CP/M 8.3 naming. SEDIT is built from 11 modules plus a s
 | `SEMENU.MAC` | ESC menu overlay, item dispatch, row 24 prompts |
 | `SESEARCH.MAC` | Find text search |
 | `SEBLOCK.MAC` | Block mark, copy, delete, paste, clipboard buffer |
-| `SESYNTAX.MAC` | Syntax highlighting tokenizer, ASM keyword tables |
+| `SESYNTAX.MAC` | Syntax highlighting tokenizer, ASM and C keyword tables |
 | `SEKEYBND.MAC` | Key binding init from `SEDIT.KEY` |
+| `SEVIRTIO.MAC` | Virtual buffer I/O for large files |
 | `SEHELP.MAC` | Help screen overlay, BMDATEND marker |
 
-Additionally: `KEYCODE.MAC` is a standalone key diagnostic tool (not linked into SEDIT).
+Standalone utilities (not linked into SEDIT): `KEYCODE.MAC` (key diagnostic), `GETWIDTH.MAC` (terminal width detection), `COL80.MAC` (set 80-column mode), `COL132.MAC` (set 132-column mode), `CLS.MAC` (clear screen).
 
 ### 11.1 Build Process
 
@@ -597,10 +612,11 @@ M80 =SESEARCH
 M80 =SEBLOCK
 M80 =SESYNTAX
 M80 =SEKEYBND
+M80 =SEVIRTIO
 M80 =SEHELP
 
 ; Link (SEHELP must be last — BMDATEND is at end of its CSEG):
-L80 SEDIT,SESCREEN,SEKEY,SEGAPBUF,SEFILEIO,SEMENU,SESEARCH,SEBLOCK,SESYNTAX,SEKEYBND,SEHELP,SEDIT/N/E
+L80 SEDIT,SESCREEN,SEKEY,SEGAPBUF,SEFILEIO,SEMENU,SESEARCH,SEBLOCK,SESYNTAX,SEKEYBND,SEVIRTIO,SEHELP,SEDIT/N/E
 ```
 
 Or use `SUBMIT BUILD` with `BUILD.SUB` on CP/M.
@@ -640,7 +656,7 @@ SEHELP must be the **last** module in the link order. `BMDATEND EQU $` is define
 | Condition | Response |
 |-----------|----------|
 | Buffer full | BEL; status message |
-| File load: line > 128 chars | Warning in status bar |
+| File load: line > 255 chars | Warning in status bar |
 | Disk full on save | `Disk error` in status bar; buffer stays modified |
 | File not found on open | Open empty buffer; `New file` in status bar |
 | TPA too small (< 9 KB) | Print message to console; exit immediately |
@@ -651,9 +667,9 @@ SEHELP must be the **last** module in the link order. `BMDATEND EQU $` is define
 
 ## 15. Limitations
 
-- Maximum stored line length: 128 characters (MAXCOLS)
+- Maximum stored line length: 255 characters (MAXCOLS)
 - Maximum visible line width: 73 characters without scrolling (TXTCOLS)
-- Maximum file size: limited by available TPA (~30-38 KB typical)
+- Maximum file size: in-memory limited by available TPA (~30-38 KB typical); virtual buffer mode supports larger files by paging to disk (requires ~3x the file size in disk space)
 - Single edit buffer (no split view or buffer switching)
 - No undo
 - No find-and-replace (find only)
