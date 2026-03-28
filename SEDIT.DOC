@@ -442,6 +442,15 @@
         Queries the terminal using VT100 Device Status Report and
         displays the detected column count.
 
+    KEYCODE.COM     Display key codes for terminal input.
+
+        A>KEYCODE
+
+        Displays the decimal value of each key pressed, including
+        multi-byte escape sequences.  Useful for diagnosing which
+        codes your terminal sends for special keys (arrows, function
+        keys, Home, End, etc.).  Press Ctrl-C to exit.
+
 
                          ================================
                               End of SEDIT.DOC
