@@ -159,13 +159,16 @@
 
     3.5  Quick Build (Windows)
 
-    The build-1.bat script automates all three steps:
+    The build-all.bat script automates the full build:
 
-        build-1.bat
+        build-all.bat
 
-    It runs CPMFMT.PY, assembles all modules via cpmulator, links,
-    cleans up .REL files, and copies the result to the disk image
-    directory.
+    It runs CPMFMT.PY, assembles all modules via cpmulator, links
+    all four SEDIT variants, and cleans up .REL files.  The script
+    includes an optional section for copying results to a disk
+    image directory which is disabled by default (edit the paths
+    to match your environment if needed).  See section 3.7 for
+    details on variant builds.
 
     3.6  Quick Build (CP/M native)
 
