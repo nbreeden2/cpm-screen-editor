@@ -1,0 +1,91 @@
+; SEDIT.CNF - Tera Term keyboard mapping for SEDIT CP/M Screen Editor
+;
+; Install:
+;   1. Copy this file to your Tera Term directory
+;   2. In Tera Term: Setup -> Keyboard -> Read keyboard file -> SEDIT.CNF
+;   Or set KeyCnfFN=SEDIT.CNF in TERATERM.INI
+;
+; SEDIT expects VT100/VT220 escape sequences for special keys.
+; This file maps PC keyboard keys to the sequences SEDIT recognizes.
+;
+; Key code format:  User<N>=<scancode>,<flag>,<string>
+;   scancode = PC scan code + modifier bits
+;              +512 = Shift, +1024 = Ctrl, +2048 = Alt
+;   flag     = 0 (send string as-is)
+;   string   = bytes to send ($XX for hex)
+;
+; PC Scan Codes:
+;   Up=328 Down=336 Left=331 Right=333
+;   Home=327 End=335 Insert=338 Delete=339
+;   PgUp=329 PgDn=337
+;   F1=59 F2=60 F3=61 F4=62
+
+; Disable default key assignments that conflict
+[VT editor keypad]
+; Turn off defaults so [User keys] can reassign them
+Up=off
+Down=off
+Left=off
+Right=off
+Home=off
+End=off
+Insert=off
+Delete=off
+PageUp=off
+PageDown=off
+
+[VT numeric keypad]
+; Turn off default PF1-PF4 so F1-F4 can be reassigned
+PF1=off
+PF2=off
+PF3=off
+PF4=off
+
+[User keys]
+
+; --- Arrow keys: ESC [ A/B/C/D ---
+; Up arrow
+User1=328,0,$1B[A
+; Down arrow
+User2=336,0,$1B[B
+; Right arrow
+User3=333,0,$1B[C
+; Left arrow
+User4=331,0,$1B[D
+
+; --- Home / End: VT220 sequences ---
+; Home -> ESC [ 1 ~
+User5=327,0,$1B[1~
+; End -> ESC [ 4 ~
+User6=335,0,$1B[4~
+
+; --- Insert / Delete ---
+; Insert -> ESC [ 2 ~
+User7=338,0,$1B[2~
+; Delete -> ESC [ 3 ~
+User8=339,0,$1B[3~
+
+; --- Page Up / Page Down ---
+; PgUp -> ESC [ 5 ~
+User9=329,0,$1B[5~
+; PgDn -> ESC [ 6 ~
+User10=337,0,$1B[6~
+
+; --- Function keys: VT100 SS3 sequences ---
+; F1 -> ESC O P  (SEDIT: Find next)
+User11=59,0,$1BOP
+; F2 -> ESC O Q  (SEDIT: Save file)
+User12=60,0,$1BOQ
+; F3 -> ESC O R  (SEDIT: Block mark)
+User13=61,0,$1BOR
+; F4 -> ESC O S  (SEDIT: ESC menu)
+User14=62,0,$1BOS
+
+; --- Ctrl+Home -> Ctrl-Q R  (SEDIT: file top) ---
+User15=1351,0,$11R
+; --- Ctrl+End -> Ctrl-Q C  (SEDIT: file end) ---
+User16=1359,0,$11C
+; --- Ctrl+PgUp -> Ctrl-Q R  (SEDIT: file top) ---
+User17=1353,0,$11R
+; --- Ctrl+PgDn -> Ctrl-Q C  (SEDIT: file end) ---
+User18=1361,0,$11C
