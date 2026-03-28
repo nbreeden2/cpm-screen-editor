@@ -73,6 +73,12 @@
     normally; page-up and page-down across buffer boundaries trigger
     automatic merge-split operations.
 
+    Virtual buffer mode requires approximately 3x the original file
+    size in free disk space to accommodate the temporary buffer
+    files, the .BAK backup, and the saved output file.  If the disk
+    runs out of space during editing or saving, an error message is
+    displayed.
+
 
     4.  SCREEN LAYOUT
 
