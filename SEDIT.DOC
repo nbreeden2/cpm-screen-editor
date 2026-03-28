@@ -232,6 +232,12 @@
         F3          Block mark (same as ^K,B)
         F4          Open ESC menu
 
+    Note: SEDIT recognizes F1-F4 via the original VT100 SS3
+    sequences (ESC O P through ESC O S).  Many modern terminal
+    emulators do not send these sequences for F1-F4, so these
+    keys may not work on all systems.  The equivalent control key
+    commands listed above are always available.
+
 
     8.  SYNTAX HIGHLIGHTING
 
