@@ -1,0 +1,36 @@
+;============================================================
+; FILE:    COL132.MAC
+; PROJECT: SEDIT - Screen Editor for CP/M 2.2
+; VERSION: 1.00
+; DATE:    1984-01-01
+;------------------------------------------------------------
+; DESCRIPTION:
+;   Standalone utility to set the terminal to 132-column mode.
+;   Sends the VT100 DECCOLM set sequence: ESC [ ? 3 h
+;
+; BUILD:
+;   M80 =COL132
+;   L80 COL132,COL132/N/E
+;
+; USAGE:
+;   A>COL132
+;------------------------------------------------------------
+; REVISION HISTORY:
+;   1.00  1984-01-01  Initial version
+;============================================================
+
+BDOS    EQU     0005H
+BF_PRTSTR EQU  9               ; print $-string
+ESC     EQU     1BH
+
+        CSEG
+
+START:  LXI     D,COLSEQ
+        MVI     C,BF_PRTSTR
+        CALL    BDOS
+        RET
+
+COLSEQ: DB      ESC,'[?3h$'
+
+        END     START
+

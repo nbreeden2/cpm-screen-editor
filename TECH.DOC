@@ -63,8 +63,11 @@
 
     2.3  Standalone Utilities (not linked into SEDIT.COM)
 
+    COL80.MAC         ~35  Set terminal to 80-column mode
+    COL132.MAC        ~35  Set terminal to 132-column mode
+    CLS.MAC           ~35  Clear screen and home cursor
     GETWIDTH.MAC     ~250  Terminal width detection utility
-    KEYCODE.MAC            Key code diagnostic tool
+    KEYCODE.MAC     ~3600  Key code diagnostic tool
 
     2.4  Build Scripts and Tools
 

@@ -352,5 +352,41 @@
     returns to CP/M via a warm boot.
 
 
+    15. UTILITY PROGRAMS
+
+    The following standalone utilities are included with SEDIT.  Each
+    sends VT100/ANSI escape sequences to the terminal and returns to
+    CP/M.
+
+    COL80.COM       Set terminal to 80-column mode.
+
+        A>COL80
+
+        Sends the VT100 DECCOLM reset sequence (ESC [ ? 3 l) to
+        switch the terminal to 80-column display mode.
+
+    COL132.COM      Set terminal to 132-column mode.
+
+        A>COL132
+
+        Sends the VT100 DECCOLM set sequence (ESC [ ? 3 h) to
+        switch the terminal to 132-column display mode.
+
+    CLS.COM         Clear screen and home cursor.
+
+        A>CLS
+
+        Sends the VT100 erase-screen sequence (ESC [ 2 J) followed
+        by the cursor-home sequence (ESC [ H).
+
+    GETWIDTH.COM    Detect and display terminal width.
+
+        A>GETWIDTH
+        Terminal width: 80 columns
+
+        Queries the terminal using VT100 Device Status Report and
+        displays the detected column count.
+
+
                          ================================
                               End of SEDIT.DOC
