@@ -222,6 +222,7 @@ SRCHMAX EQU     64          ; max find string length
         PUBLIC  OUTSTR          ; output $-string
         PUBLIC  CURGOTO         ; goto row,col
         PUBLIC  OUTN4DG         ; output 4-digit number
+        PUBLIC  ISLOAD          ; loading flag (for info bar)
 
 ;--- ESC sequence string constants --------------------
 ESCSTR:  DB     ESC,'[','$'     ; ESC [  (CSI intro)
@@ -251,9 +252,9 @@ IBCNSTR: DB     '   Col:',' $'
 IBWDSTR: DB     '   Len:',' $'
 IBINSTR: DB     '   [INS]','$'
 IBOVSTR: DB     '   [OVR]','$'
-IBMDSTR: DB     ' [MOD]','$'
 IBVRSTR: DB     ' [VRT]','$'
 NAMNMST: DB     '[No Name]','$'
+LDNGMST: DB     '[Loading]','$'
 
 ;=============================================================
 ; SCRINIT - Initialize terminal and draw screen chrome.
@@ -1239,6 +1240,10 @@ INFOBAR:
         MVI     A,0
         ADC     H
         MOV     H,A             ; HL -> BD_FNAME
+        ; Check if file is loading
+        LDA     ISLOAD
+        ORA     A
+        JNZ     IBLDNG
         ; Check if name is blank (BD_FNAME+1 == space)
         INX     H               ; HL -> BD_FNAME+1
         MOV     A,M
@@ -1266,6 +1271,13 @@ IBDRVOK:
         POP     H               ; restore BD_FNAME ptr
         INX     H               ; HL -> BD_FNAME+1 (name start)
         JMP     IBNAME
+IBLDNG:
+        ; File loading in progress - skip filename, ext, and * indicator
+        PUSH    H
+        LXI     D,LDNGMST       ; "[Loading]"
+        CALL    OUTSTR
+        POP     H
+        JMP     IBLNCT
 IBNONAME:
         ; No file loaded - print placeholder
         PUSH    H
@@ -1320,7 +1332,30 @@ IBEXTL: MOV     A,M
         DCR     B
         JNZ     IBEXTL
 IBNEXT:
-        ; Print Lines: count
+        ; Print modified indicator (* after filename)
+        LHLD    CURBDP
+        MVI     A,BD_MODIF
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A
+        MOV     A,M
+        ORA     A
+        JZ      IBMOD0
+        IF COLOR
+        LXI     D,SGRYEL        ; bright yellow for *
+        CALL    OUTSTR
+        ENDIF
+        MVI     A,'*'
+        JMP     IBMOD1
+IBMOD0: MVI     A,' '           ; overwrite stale * after save
+IBMOD1: CALL    OUTCHAR
+        IF COLOR
+        LXI     D,SGRRES        ; reset after * indicator
+        CALL    OUTSTR
+        ENDIF
+IBLNCT: ; Print Lines: count
         IF COLOR
         LXI     D,SGRBLU        ; blue for stats
         CALL    OUTSTR
@@ -1397,7 +1432,7 @@ IBNEXT:
         ENDIF
         LXI     D,IBINSTR
         CALL    OUTSTR
-        JMP     IBMODIF
+        JMP     IBVIRT
 IBOVRMD:
         IF COLOR
         LXI     D,SGRRED        ; red for [OVR]
@@ -1406,24 +1441,6 @@ IBOVRMD:
         LXI     D,IBOVSTR
         CALL    OUTSTR
 
-        ; Print modified indicator
-IBMODIF:
-        LHLD    CURBDP
-        MVI     A,BD_MODIF
-        ADD     L
-        MOV     L,A
-        MVI     A,0
-        ADC     H
-        MOV     H,A
-        MOV     A,M
-        ORA     A
-        JZ      IBVIRT
-        IF COLOR
-        LXI     D,SGRYEL        ; yellow for [MOD]
-        CALL    OUTSTR
-        ENDIF
-        LXI     D,IBMDSTR
-        CALL    OUTSTR
         ; Print virtual buffer indicator
 IBVIRT:
         LDA     VIMODE
@@ -1803,6 +1820,7 @@ CMLST:  DS      EDITROW+1       ; per-line comment entry state (21 bytes)
 SCRCSV: DB      0               ; saved cursor row for SCREDCL
         ENDIF
 SLSKIP: DB      0               ; SLEDRAW horizontal skip target
+ISLOAD: DB      0               ; non-zero = file loading in progress
         CSEG
 
         END

@@ -52,17 +52,17 @@ Row 24  +-- Status / operation bar ---------------------------------------------
 Displays file metadata for the active buffer.
 
 ```
-A:MAIN    .MAC  Lines:1024  Row: 142  Col:  35  [INS]  [MOD]
+A:MAIN    .MAC*  Lines:1024  Row: 142  Col:  35  [INS]
 ```
 
 | Field | Description |
 |-------|-------------|
 | Drive + filename | `A:MAIN    .MAC` — CP/M drive letter and 8.3 filename (magenta if COLOR enabled) |
+| `*` after filename | Shown when the buffer has unsaved changes |
 | `Lines:nnnn` | Total number of lines in the file (blue if COLOR enabled) |
 | `Row:nnnn` | Current cursor line, 1-based (blue) |
 | `Col:nnnn` | Current cursor column within the text, 1-based (blue) |
 | `[INS]` / `[OVR]` | Insert mode (green) or Overwrite mode (red) |
-| `[MOD]` | Shown only when the buffer has unsaved changes |
 
 All numeric fields are 4-digit, right-justified with leading spaces (max 9999). If no file is loaded, the filename area shows `[No Name]`. Drive byte 0 (default) queries the current disk via BDOS.
 

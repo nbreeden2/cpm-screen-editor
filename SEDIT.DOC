@@ -85,9 +85,9 @@
     SEDIT uses a 24-row by 80-column display (132-column mode is
     also available via the ESC menu).
 
-        Row  1    Information bar: filename, line count, cursor
-                  position (row:col), file length, insert/overwrite
-                  mode indicator
+        Row  1    Information bar: filename (* if modified), line
+                  count, cursor position (row:col), file length,
+                  insert/overwrite mode indicator
         Row  2    Tab ruler (: marks every 4 columns)
         Rows 3-22 Edit area (20 lines of text)
                   Columns 1-5: line number gutter

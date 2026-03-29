@@ -308,7 +308,7 @@ MNULSC: ORI     20H             ; force lowercase
         CPI     'x'
         MVI     B,8             ; Exit
         JZ      MNULSL
-        CPI     'q'
+        CPI     'e'
         MVI     B,8             ; Exit
         JZ      MNULSL
         JMP     MNULP           ; unrecognised, ignore

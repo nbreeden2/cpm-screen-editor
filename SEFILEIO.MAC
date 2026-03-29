@@ -26,6 +26,8 @@
         EXTRN   GBMVTOP         ; move cursor to file top
         EXTRN   SYNINIT         ; detect syntax mode from filename
         EXTRN   STATMSG         ; display status message
+        EXTRN   ISLOAD          ; loading flag (for info bar)
+        EXTRN   INFOBAR         ; update info bar
         EXTRN   OUTSTR          ; write $-string to console
         EXTRN   OUTCHAR         ; output one character
         EXTRN   CURGOTO         ; position cursor (B=row,C=col)
@@ -256,7 +258,11 @@ FISKIP:
         INR     A               ; 0FFH -> 0 means not found
         JZ      FIOOPN          ; file does not exist - ok
 
-        ; File opened; show loading message and read records
+        ; File opened; show loading indicator on info bar
+        MVI     A,1
+        STA     ISLOAD
+        CALL    INFOBAR
+        ; Show loading message on status row
         LXI     D,LDNGMSG
         CALL    STATMSG
 
@@ -373,6 +379,8 @@ FIFULL:
         MVI     C,BF_FCLOSE
         CALL    BDOS
         CALL    FIBUFCLR        ; reset gap buffer to empty
+        XRA     A
+        STA     ISLOAD          ; clear loading flag
         CALL    SYNINIT
         LXI     D,FULLMSG
         CALL    STATMSG
@@ -508,8 +516,10 @@ FIWIDE:
         MVI     C,BF_FCLOSE
         CALL    BDOS
         CALL    FIBUFCLR        ; reset gap buffer to empty
+        XRA     A
+        STA     ISLOAD          ; clear loading flag
         CALL    SYNINIT
-        ; Print "Line N is wider than 73 characters"
+        ; Print "Line N is wider than 255 characters"
         LXI     D,FIWDM1        ; "Line "
         CALL    STATMSG         ; positions cursor, resets SGR
         LHLD    FILNUM
@@ -530,6 +540,8 @@ FIEOF:
         CALL    BDOS
 
 FIOOPN: ; New or loaded: move cursor to top, clear modified
+        XRA     A
+        STA     ISLOAD          ; clear loading flag
         CALL    GBMVTOP
         CALL    FICLRMOD
         CALL    SYNINIT         ; set BD_SYNMD based on extension
