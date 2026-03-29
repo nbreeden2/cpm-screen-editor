@@ -199,6 +199,7 @@ SRCHMAX EQU     64          ; max find string length
         EXTRN   GBCURLN         ; get current cursor line (fast)
         EXTRN   GBCNTLN         ; count lines in buffer
         EXTRN   VBFLN           ; lines in BEFORE temp (SEVIRTIO)
+        EXTRN   VAFLN           ; lines in AFTER temp (SEVIRTIO)
         EXTRN   VIMODE          ; virtual buffer mode (SEVIRTIO)
         EXTRN   GBFNDCS         ; find TOPLN offset via backward scan
         EXTRN   GBRDLNO         ; read line at given offset
@@ -250,9 +251,8 @@ IBLNSTR: DB     '   Lines:',' $'
 IBRNSTR: DB     '   Row:',' $'
 IBCNSTR: DB     '   Col:',' $'
 IBWDSTR: DB     '   Len:',' $'
-IBINSTR: DB     '   [INS]','$'
-IBOVSTR: DB     '   [OVR]','$'
-IBVRSTR: DB     ' [VRT]','$'
+IBINSTR: DB     '  [INS]','$'
+IBOVSTR: DB     '  [OVR]','$'
 NAMNMST: DB     '[No Name]','$'
 LDNGMST: DB     '[Loading]','$'
 
@@ -1441,17 +1441,38 @@ IBOVRMD:
         LXI     D,IBOVSTR
         CALL    OUTSTR
 
-        ; Print virtual buffer indicator
+        ; Print virtual buffer indicator [Vssss,eeee]
 IBVIRT:
         LDA     VIMODE
         ORA     A
         JZ      IBCLEAR
         IF COLOR
-        LXI     D,SGRCYN        ; cyan for [VRT]
+        LXI     D,SGRCYN        ; cyan for [V...]
         CALL    OUTSTR
         ENDIF
-        LXI     D,IBVRSTR
-        CALL    OUTSTR
+        MVI     A,'['
+        CALL    OUTCHAR
+        MVI     A,'V'
+        CALL    OUTCHAR
+        ; First line = VBFLN + 1
+        LHLD    VBFLN
+        INX     H
+        CALL    OUTHL4
+        MVI     A,','
+        CALL    OUTCHAR
+        ; Last line = GBCNTLN(total) - VAFLN
+        CALL    GBCNTLN         ; HL = total lines (buf+VBFLN+VAFLN)
+        XCHG                    ; DE = total
+        LHLD    VAFLN           ; HL = VAFLN
+        MOV     A,E
+        SUB     L
+        MOV     L,A
+        MOV     A,D
+        SBB     H
+        MOV     H,A             ; HL = total - VAFLN = last line
+        CALL    OUTHL4
+        MVI     A,']'
+        CALL    OUTCHAR
 IBCLEAR:
         LXI     D,CLREOL        ; clear to end of row
         CALL    OUTSTR
