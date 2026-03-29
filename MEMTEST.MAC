@@ -101,10 +101,6 @@ TMLP:
         MVI     C,BF_PRTSTR
         CALL    BDOS
 
-        ; Reset error counter
-        LXI     H,0
-        SHLD    ERRCNT
-
         ;--- Pass 1: 00H ---
         LXI     D,P1MSG
         MVI     C,BF_PRTSTR
@@ -429,8 +425,10 @@ RPTSKP: RET
 ; PRTHEX4 - Print HL as 4-digit hex.
 ;=============================================================
 PRTHEX4:
+        PUSH    H               ; save HL (BDOS clobbers all)
         MOV     A,H
         CALL    PRTHEX2
+        POP     H               ; restore HL
         MOV     A,L
         CALL    PRTHEX2
         RET
