@@ -198,6 +198,9 @@ SRCHMAX EQU     64          ; max find string length
         EXTRN   OUTSTR          ; write $-string to console
         EXTRN   SYNINIT         ; detect syntax mode from filename
         EXTRN   WRKFCB          ; working FCB (for VISAVALL)
+        EXTRN   SCRDRAW         ; full screen redraw
+        EXTRN   INFOBAR         ; update info bar
+        EXTRN   CURPOS          ; position hardware cursor
 
 ;--- Exports ----------------------------------------------
         PUBLIC  VIINIT          ; initialise virtual I/O state
@@ -643,11 +646,14 @@ VGT_VM:
         MVI     A,1
         STA     VIMODE
 VGT_DN:
-        ; Force full screen redraw
-        MVI     A,1
-        STA     DIRTY
         ; Restore syntax mode
         CALL    SYNINIT
+        ; Immediate screen redraw (don't wait for main loop)
+        CALL    SCRDRAW
+        CALL    INFOBAR
+        CALL    CURPOS
+        XRA     A
+        STA     DIRTY           ; clear dirty (already drawn)
         RET
 
 ;=============================================================

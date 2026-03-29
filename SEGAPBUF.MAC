@@ -871,14 +871,16 @@ GVTNRM:
         POP     H               ; HL = src end
         POP     D               ; DE = dest end
         ; Copy backward (dest > src, safe)
-GVTCLP: MOV     A,M
+GVTCLP: MOV     A,B
+        ORA     C
+        JZ      GVTCLD
+        MOV     A,M
         STAX    D
         DCX     H
         DCX     D
         DCX     B
-        MOV     A,B
-        ORA     C
-        JNZ     GVTCLP
+        JMP     GVTCLP
+GVTCLD:
         ; --- Update descriptor fields ---
         LHLD    GPGCNT
         MOV     B,H
@@ -972,14 +974,16 @@ GVENRM:
         POP     H               ; HL = src
         POP     D               ; DE = dest
         ; Copy forward (dest < src, safe)
-GVECLP: MOV     A,M
+GVECLP: MOV     A,B
+        ORA     C
+        JZ      GVECLD
+        MOV     A,M
         STAX    D
         INX     H
         INX     D
         DCX     B
-        MOV     A,B
-        ORA     C
-        JNZ     GVECLP
+        JMP     GVECLP
+GVECLD:
         ; --- Update descriptor fields ---
         LHLD    GPGCNT
         MOV     B,H
@@ -1067,7 +1071,18 @@ GBGOTOL:
         MVI     A,1
         STA     VIMODE          ; restore VIMODE
         POP     B               ; BC = buffer-relative target
-        ; Check BC <= HL (target <= buffer lines)
+        ; If VAFLN > 0, subtract 1 from buffer lines (phantom line)
+        PUSH    H               ; save buffer_lines
+        PUSH    B               ; save target
+        LHLD    VAFLN
+        MOV     A,H
+        ORA     L
+        POP     B               ; restore target
+        POP     H               ; restore buffer_lines
+        JZ      GGTCHK          ; VAFLN=0, no phantom
+        DCX     H               ; HL = buffer_lines - 1
+GGTCHK:
+        ; Check BC <= HL (target <= usable buffer lines)
         MOV     A,L
         SUB     C
         MOV     A,H
@@ -1214,14 +1229,16 @@ GGTSDN: ; HL = one past last LF (or end of text)
         POP     D               ; DE = dst
         POP     H               ; HL = src
         ; Copy forward (src > dst, safe)
-GGTCLP: MOV     A,M
+GGTCLP: MOV     A,B
+        ORA     C
+        JZ      GGTCLD
+        MOV     A,M
         STAX    D
         INX     H
         INX     D
         DCX     B
-        MOV     A,B
-        ORA     C
-        JNZ     GGTCLP
+        JMP     GGTCLP
+GGTCLD:
         ; --- Update descriptor fields ---
         LHLD    GPGCNT
         MOV     B,H
@@ -1284,8 +1301,7 @@ GBPGUP:
         MOV     A,H
         ORA     L
         RZ                      ; no BEFORE lines, true BOF
-        ; Virtual: compute target = VBFLN + TOPLN - EDITROW + 1
-        ; (go back one page in the BEFORE region)
+        ; Virtual: compute display target = VBFLN + TOPLN - EDITROW + 1
         CALL    GBTOPLN         ; HL = TOPLN
         XCHG                    ; DE = TOPLN
         LHLD    VBFLN           ; HL = VBFLN
@@ -1301,8 +1317,35 @@ GPUVGO: MOV     A,H
         ORA     L
         JNZ     GPUVG1
         LXI     H,1             ; if zero, clamp to 1
-GPUVG1: CALL    VIGOTO
-        RET
+GPUVG1:
+        ; Save display target, then load with EDITROW margin
+        SHLD    GPGTMP          ; save display target
+        LXI     D,-EDITROW
+        DAD     D               ; HL = target - EDITROW (margin)
+        JNC     GPUVC1          ; underflow: clamp to 1
+        MOV     A,H
+        ORA     L
+        JNZ     GPUVC2
+GPUVC1: LXI     H,1
+GPUVC2: CALL    VIGOTO          ; load buffer with margin
+        ; Navigate cursor to display target within buffer
+        LHLD    GPGTMP          ; HL = absolute display target
+        XCHG                    ; DE = target
+        LHLD    VBFLN           ; HL = VBFLN
+        MOV     A,E
+        SUB     L
+        MOV     L,A
+        MOV     A,D
+        SBB     H
+        MOV     H,A             ; HL = buffer-relative target
+        ; Clamp to 1 if zero or negative
+        MOV     A,H
+        ORA     A
+        JM      GPUVC3
+        ORA     L
+        JNZ     GGTLNRM         ; position cursor within buffer
+GPUVC3: LXI     H,1
+        JMP     GGTLNRM         ; position cursor at line 1
 GPUNRM:
         ; Save base address
         CALL    GBBASE
@@ -1387,14 +1430,16 @@ GPUCPY: ; HL = absolute target address, GPGLFS = LFs crossed
         POP     H               ; HL = src end
         POP     D               ; DE = dest end
         ; Copy backward (safe: dest > src)
-GPUCLP: MOV     A,M
+GPUCLP: MOV     A,B
+        ORA     C
+        JZ      GPUCLD
+        MOV     A,M
         STAX    D
         DCX     H
         DCX     D
         DCX     B
-        MOV     A,B
-        ORA     C
-        JNZ     GPUCLP
+        JMP     GPUCLP
+GPUCLD:
         ; --- Update descriptor fields ---
         LHLD    GPGCNT
         MOV     B,H
@@ -1571,14 +1616,16 @@ GPDCNT: ; HL = copy-end position, B = remaining LF count
         POP     H               ; HL = src
         POP     D               ; DE = dest
         ; Copy forward (safe: src > dest)
-GPDCLP: MOV     A,M
+GPDCLP: MOV     A,B
+        ORA     C
+        JZ      GPDCLD
+        MOV     A,M
         STAX    D
         INX     H
         INX     D
         DCX     B
-        MOV     A,B
-        ORA     C
-        JNZ     GPDCLP
+        JMP     GPDCLP
+GPDCLD:
         ; --- Update descriptor fields ---
         LHLD    GPGCNT
         MOV     B,H
@@ -1617,6 +1664,31 @@ GPDNSC: ; No scroll: CSROW = R + L
         CALL    GBSETCSROW
 GPDCOL: CALL    GBCURLNL
         CALL    GBSETCSCOL
+        ; Check if page-down landed on phantom line at buffer end
+        CALL    GBGAPEN
+        PUSH    H
+        CALL    GBBSIZ
+        POP     H
+        MOV     A,L
+        SUB     E
+        MOV     A,H
+        SBB     D
+        RC                      ; GAPEN < BSIZE, all good
+        ; GAPEN >= BSIZE: trigger VIGOTO if virtual with AFTER data
+        LDA     VIMODE
+        ORA     A
+        RZ                      ; normal mode
+        LHLD    VAFLN
+        MOV     A,H
+        ORA     L
+        RZ                      ; no AFTER lines
+        ; Reposition: target = VBFLN + TOPLN + 1
+        CALL    GBTOPLN
+        XCHG                    ; DE = TOPLN
+        LHLD    VBFLN
+        DAD     D
+        INX     H               ; HL = VBFLN + TOPLN + 1
+        CALL    VIGOTO
         RET
 
 ;=============================================================
@@ -1672,9 +1744,17 @@ GVUBOT:
         MOV     A,H
         ORA     L
         RZ                      ; no BEFORE lines, true BOF
-        ; Virtual: target = VBFLN (last line of BEFORE = current TOPLN)
-        LHLD    VBFLN           ; target = VBFLN (positions us at that line)
-        CALL    VIGOTO
+        ; Virtual: target = max(1, VBFLN - EDITROW + 1)
+        ; Load buffer with margin so target line is near bottom of screen
+        LHLD    VBFLN
+        LXI     D,-EDITROW+1
+        DAD     D               ; HL = VBFLN - EDITROW + 1
+        JNC     GVUB1           ; underflow: clamp to 1
+        MOV     A,H
+        ORA     L
+        JNZ     GVUB2           ; > 0, use it
+GVUB1:  LXI     H,1             ; clamp to 1
+GVUB2:  CALL    VIGOTO
         RET
 
 ;=============================================================
@@ -1721,7 +1801,40 @@ GVDNLF:
         CPI     LF
         JNZ     GVDNDN
         CALL    GBMVRT          ; skip LF (CSROW/scroll adjusted)
+        ; Check if we landed on phantom line at buffer end
+        CALL    GBGAPEN
+        PUSH    H
+        CALL    GBBSIZ
+        POP     H
+        MOV     A,L
+        SUB     E
+        MOV     A,H
+        SBB     D
+        JNC     GVDNPH          ; GAPEN >= BSIZE, phantom line
         JMP     GVDNDN          ; successfully moved down
+GVDNPH:
+        ; Phantom line after LF skip: CSROW already incremented.
+        ; Use +1 (not +2) since we're already past the newline.
+        LDA     VIMODE
+        ORA     A
+        JZ      GVDNDN          ; normal mode, true EOF
+        LHLD    VAFLN
+        MOV     A,H
+        ORA     L
+        JZ      GVDNDN          ; no AFTER lines, true EOF
+        ; target = VBFLN + TOPLN + CSROW + 1
+        CALL    GBTOPLN
+        XCHG                    ; DE = TOPLN
+        LHLD    VBFLN
+        DAD     D               ; HL = VBFLN + TOPLN
+        SHLD    GPGTMP
+        CALL    GBCSROW         ; HL = CSROW
+        XCHG                    ; DE = CSROW
+        LHLD    GPGTMP
+        DAD     D               ; HL = VBFLN + TOPLN + CSROW
+        INX     H               ; HL = VBFLN + TOPLN + CSROW + 1
+        CALL    VIGOTO
+        RET
 GVDNEF:
         ; Buffer EOF: check virtual mode for content below
         LDA     VIMODE

@@ -1,0 +1,586 @@
+;============================================================
+; FILE:    MEMTEST.MAC
+; VERSION: 1.0
+; PROJECT: SEDIT - CP/M 2.2 Utilities
+; DATE:    2026-03-29
+;------------------------------------------------------------
+; DESCRIPTION:
+;   TPA memory test for CP/M 2.2. Tests all free RAM from
+;   end of program to BDOS entry point. Writes byte patterns,
+;   reads back and verifies. Reports errors with address,
+;   expected value, and actual value.
+;
+;   Patterns tested:
+;     Pass 1: 00H (all zeros)
+;     Pass 2: FFH (all ones)
+;     Pass 3: 55H (alternating bits)
+;     Pass 4: AAH (alternating bits inverted)
+;     Pass 5: address low byte (unique per byte)
+;     Pass 6: walking 1 (01,02,04,08,10,20,40,80 repeat)
+;
+;   Usage: A>MEMTEST
+;   Press Ctrl-C to abort at any time.
+;------------------------------------------------------------
+
+BDOS    EQU     0005H
+WBOOT   EQU     0000H
+BF_CONOUT EQU   2
+BF_RAWIO  EQU   6
+BF_PRTSTR EQU   9
+
+CR      EQU     0DH
+LF      EQU     0AH
+
+        CSEG
+
+START:
+        LXI     SP,STACK
+
+        ; Print banner
+        LXI     D,BANNER
+        MVI     C,BF_PRTSTR
+        CALL    BDOS
+
+        ; Compute test range
+        LXI     H,DATEND
+        SHLD    TSTBEG
+        LHLD    0006H           ; BDOS entry address
+        DCX     H
+        SHLD    TSTEND
+
+        ; Print range
+        LXI     D,RNGMSG
+        MVI     C,BF_PRTSTR
+        CALL    BDOS
+        LHLD    TSTBEG
+        CALL    PRTHEX4
+        LXI     D,TOMSG
+        MVI     C,BF_PRTSTR
+        CALL    BDOS
+        LHLD    TSTEND
+        CALL    PRTHEX4
+        LXI     D,CRLFS
+        MVI     C,BF_PRTSTR
+        CALL    BDOS
+
+        ; Print size
+        LHLD    TSTEND
+        XCHG
+        LHLD    TSTBEG
+        MOV     A,E
+        SUB     L
+        MOV     L,A
+        MOV     A,D
+        SBB     H
+        MOV     H,A
+        INX     H               ; inclusive
+        PUSH    H
+        LXI     D,SIZMSG
+        MVI     C,BF_PRTSTR
+        CALL    BDOS
+        POP     H
+        CALL    PRTDEC
+        LXI     D,BYTMSG
+        MVI     C,BF_PRTSTR
+        CALL    BDOS
+
+        ; Init loop counter
+        LXI     H,0
+        SHLD    LOOPCNT
+
+TMLP:
+        ; Print loop number
+        LXI     D,LOOPMSG
+        MVI     C,BF_PRTSTR
+        CALL    BDOS
+        LHLD    LOOPCNT
+        INX     H
+        SHLD    LOOPCNT
+        CALL    PRTDEC
+        LXI     D,CRLFS
+        MVI     C,BF_PRTSTR
+        CALL    BDOS
+
+        ; Reset error counter
+        LXI     H,0
+        SHLD    ERRCNT
+
+        ;--- Pass 1: 00H ---
+        LXI     D,P1MSG
+        MVI     C,BF_PRTSTR
+        CALL    BDOS
+        MVI     A,00H
+        CALL    TSTPAT
+        CALL    PRTOK
+        CALL    CHKKEY
+
+        ;--- Pass 2: FFH ---
+        LXI     D,P2MSG
+        MVI     C,BF_PRTSTR
+        CALL    BDOS
+        MVI     A,0FFH
+        CALL    TSTPAT
+        CALL    PRTOK
+        CALL    CHKKEY
+
+        ;--- Pass 3: 55H ---
+        LXI     D,P3MSG
+        MVI     C,BF_PRTSTR
+        CALL    BDOS
+        MVI     A,55H
+        CALL    TSTPAT
+        CALL    PRTOK
+        CALL    CHKKEY
+
+        ;--- Pass 4: AAH ---
+        LXI     D,P4MSG
+        MVI     C,BF_PRTSTR
+        CALL    BDOS
+        MVI     A,0AAH
+        CALL    TSTPAT
+        CALL    PRTOK
+        CALL    CHKKEY
+
+        ;--- Pass 5: address low byte ---
+        LXI     D,P5MSG
+        MVI     C,BF_PRTSTR
+        CALL    BDOS
+        CALL    TSTADDR
+        CALL    PRTOK
+        CALL    CHKKEY
+
+        ;--- Pass 6: walking 1 ---
+        LXI     D,P6MSG
+        MVI     C,BF_PRTSTR
+        CALL    BDOS
+        CALL    TSTWALK
+        CALL    PRTOK
+        CALL    CHKKEY
+
+        ;--- Pass 7: alternating AA/55 ---
+        LXI     D,P7MSG
+        MVI     C,BF_PRTSTR
+        CALL    BDOS
+        CALL    TSTALT
+        CALL    PRTOK
+        CALL    CHKKEY
+
+        ;--- Summary ---
+        LXI     D,CRLFS
+        MVI     C,BF_PRTSTR
+        CALL    BDOS
+        LHLD    ERRCNT
+        MOV     A,H
+        ORA     L
+        JNZ     TSFAIL
+        LXI     D,PASSMSG
+        MVI     C,BF_PRTSTR
+        CALL    BDOS
+        JMP     TMLP            ; loop again
+
+TSFAIL:
+        LXI     D,FAILMSG
+        MVI     C,BF_PRTSTR
+        CALL    BDOS
+        LHLD    ERRCNT
+        CALL    PRTDEC
+        LXI     D,ERRMSG2
+        MVI     C,BF_PRTSTR
+        CALL    BDOS
+        JMP     TMLP            ; loop again even on failure
+
+;=============================================================
+; PRTOK - Print "ok" if no new errors in this pass.
+;=============================================================
+PRTOK:
+        LXI     D,OKMSG
+        MVI     C,BF_PRTSTR
+        CALL    BDOS
+        RET
+
+;=============================================================
+; TSTPAT - Write constant pattern, then verify.
+; Entry: A = byte pattern
+;=============================================================
+TSTPAT:
+        STA     CURPAT
+
+        ; Write phase
+        LHLD    TSTBEG
+        XCHG                    ; DE = begin
+        LHLD    TSTEND          ; HL = end
+        SHLD    TPLIM           ; save limit
+        XCHG                    ; HL = begin
+TPWLP:  LDA     CURPAT
+        MOV     M,A
+        INX     H
+        PUSH    D
+        XCHG
+        LHLD    TPLIM
+        INX     H
+        MOV     A,E
+        SUB     L
+        MOV     A,D
+        SBB     H
+        XCHG
+        POP     D
+        JC      TPWLP
+
+        ; Verify phase
+        LHLD    TSTBEG
+TPRLP:  MOV     A,M             ; A = actual byte
+        MOV     B,A             ; B = actual (save)
+        LDA     CURPAT          ; A = expected
+        CMP     B               ; compare expected vs actual
+        JZ      TPROK
+        ; Error: A = expected, B = actual, HL = address
+        SHLD    ERRADDR
+        STA     ERREXP
+        MOV     A,B
+        STA     ERRACT
+        PUSH    H
+        CALL    REPORT
+        POP     H
+TPROK:  INX     H
+        PUSH    D
+        XCHG
+        LHLD    TPLIM
+        INX     H
+        MOV     A,E
+        SUB     L
+        MOV     A,D
+        SBB     H
+        XCHG
+        POP     D
+        JC      TPRLP
+        RET
+
+;=============================================================
+; TSTADDR - Write low byte of address, then verify.
+;=============================================================
+TSTADDR:
+        ; Write phase
+        LHLD    TSTBEG
+TAWLP:  MOV     M,L
+        CALL    NEXTHL
+        JC      TAWLP
+
+        ; Verify phase
+        LHLD    TSTBEG
+TARLP:  MOV     A,M             ; A = actual
+        MOV     B,A             ; B = actual
+        MOV     A,L             ; A = expected (low byte of addr)
+        CMP     B
+        JZ      TAROK
+        SHLD    ERRADDR
+        STA     ERREXP
+        MOV     A,B
+        STA     ERRACT
+        PUSH    H
+        CALL    REPORT
+        POP     H
+TAROK:  CALL    NEXTHL
+        JC      TARLP
+        RET
+
+;=============================================================
+; TSTWALK - Walking 1 pattern, then verify.
+;=============================================================
+TSTWALK:
+        ; Write phase
+        LHLD    TSTBEG
+        MVI     B,01H
+TWWLP:  MOV     M,B
+        CALL    NEXTHL
+        JNC     TWWDN
+        ; Rotate walking bit
+        MOV     A,B
+        RLC
+        MOV     B,A
+        JMP     TWWLP
+TWWDN:
+
+        ; Verify phase
+        LHLD    TSTBEG
+        MVI     B,01H
+TWRLP:  MOV     A,M             ; A = actual
+        CMP     B               ; compare actual vs expected (B)
+        JZ      TWROK
+        SHLD    ERRADDR
+        MOV     A,B             ; expected
+        STA     ERREXP
+        MOV     A,M             ; actual
+        STA     ERRACT
+        PUSH    H
+        PUSH    B
+        CALL    REPORT
+        POP     B
+        POP     H
+TWROK:  CALL    NEXTHL
+        JNC     TWRDN
+        MOV     A,B
+        RLC
+        MOV     B,A
+        JMP     TWRLP
+TWRDN:
+        RET
+
+;=============================================================
+; TSTALT - Alternating AA/55 pattern, then verify.
+; Writes AAH to even addresses, 55H to odd addresses.
+;=============================================================
+TSTALT:
+        ; Write phase
+        LHLD    TSTBEG
+        MVI     B,0AAH          ; first byte AA
+TALWLP: MOV     M,B
+        ; Toggle pattern: AA->55->AA->55
+        MOV     A,B
+        XRI     0FFH            ; complement: AA->55, 55->AA
+        MOV     B,A
+        CALL    NEXTHL
+        JC      TALWLP
+
+        ; Verify phase
+        LHLD    TSTBEG
+        MVI     B,0AAH
+TALRLP: MOV     A,M             ; actual
+        CMP     B               ; compare with expected
+        JZ      TALROK
+        SHLD    ERRADDR
+        MOV     A,B
+        STA     ERREXP
+        MOV     A,M
+        STA     ERRACT
+        PUSH    H
+        PUSH    B
+        CALL    REPORT
+        POP     B
+        POP     H
+TALROK: ; Toggle pattern
+        MOV     A,B
+        XRI     0FFH
+        MOV     B,A
+        CALL    NEXTHL
+        JC      TALRLP
+        RET
+
+;=============================================================
+; NEXTHL - Advance HL, return C set if still in range.
+;=============================================================
+NEXTHL:
+        INX     H
+        PUSH    D
+        XCHG                    ; DE = current, HL = old DE
+        LHLD    TSTEND
+        INX     H               ; HL = end+1
+        MOV     A,E
+        SUB     L
+        MOV     A,D
+        SBB     H               ; carry if current < end+1
+        XCHG                    ; HL = current (restored from DE)
+        POP     D
+        RET
+
+;=============================================================
+; REPORT - Print one error line.
+; Uses ERRADDR, ERREXP, ERRACT.
+; Caps display at 20 errors per pass.
+;=============================================================
+REPORT:
+        ; Increment error counter
+        LHLD    ERRCNT
+        INX     H
+        SHLD    ERRCNT
+
+        ; Cap display at 20 errors
+        MOV     A,H
+        ORA     A
+        JNZ     RPTSKP          ; > 255, skip
+        MOV     A,L
+        CPI     21
+        JNC     RPTSKP          ; > 20, skip
+
+        LXI     D,CRLFS
+        MVI     C,BF_PRTSTR
+        CALL    BDOS
+
+        LXI     D,AMSG
+        MVI     C,BF_PRTSTR
+        CALL    BDOS
+        LHLD    ERRADDR
+        CALL    PRTHEX4
+
+        LXI     D,EXMSG
+        MVI     C,BF_PRTSTR
+        CALL    BDOS
+        LDA     ERREXP
+        CALL    PRTHEX2
+
+        LXI     D,GTMSG
+        MVI     C,BF_PRTSTR
+        CALL    BDOS
+        LDA     ERRACT
+        CALL    PRTHEX2
+
+RPTSKP: RET
+
+;=============================================================
+; PRTHEX4 - Print HL as 4-digit hex.
+;=============================================================
+PRTHEX4:
+        MOV     A,H
+        CALL    PRTHEX2
+        MOV     A,L
+        CALL    PRTHEX2
+        RET
+
+;=============================================================
+; PRTHEX2 - Print A as 2-digit hex.
+;=============================================================
+PRTHEX2:
+        PUSH    PSW
+        RRC
+        RRC
+        RRC
+        RRC
+        CALL    PRTNIB
+        POP     PSW
+        CALL    PRTNIB
+        RET
+
+PRTNIB: ANI     0FH
+        CPI     10
+        JC      PRTND
+        ADI     'A'-10
+        JMP     PRTNCH
+PRTND:  ADI     '0'
+PRTNCH: MOV     E,A
+        MVI     C,BF_CONOUT
+        CALL    BDOS
+        RET
+
+;=============================================================
+; PRTDEC - Print HL as unsigned decimal.
+;=============================================================
+PRTDEC:
+        PUSH    H
+        PUSH    D
+        PUSH    B
+        XRA     A
+        STA     PLZF
+        LXI     D,10000
+        CALL    PDDIG
+        LXI     D,1000
+        CALL    PDDIG
+        LXI     D,100
+        CALL    PDDIG
+        LXI     D,10
+        CALL    PDDIG
+        MOV     A,L
+        ADI     '0'
+        MOV     E,A
+        MVI     C,BF_CONOUT
+        CALL    BDOS
+        POP     B
+        POP     D
+        POP     H
+        RET
+
+PDDIG:  MVI     B,'0'
+PDDLP:  MOV     A,L
+        SUB     E
+        MOV     C,A
+        MOV     A,H
+        SBB     D
+        JC      PDDDN
+        MOV     H,A
+        MOV     L,C
+        INR     B
+        JMP     PDDLP
+PDDDN:  MOV     A,B
+        CPI     '0'
+        JNZ     PDDPR
+        LDA     PLZF
+        ORA     A
+        RZ
+PDDPR:  MVI     A,1
+        STA     PLZF
+        MOV     E,B
+        MVI     C,BF_CONOUT
+        CALL    BDOS
+        RET
+
+;=============================================================
+; CHKKEY - Check for Ctrl-C abort.
+;=============================================================
+CHKKEY:
+        MVI     E,0FFH
+        MVI     C,BF_RAWIO
+        CALL    BDOS
+        CPI     03H
+        JZ      ABORT
+        RET
+
+ABORT:
+        LXI     D,ABTMSG
+        MVI     C,BF_PRTSTR
+        CALL    BDOS
+        JMP     WBOOT
+
+;=============================================================
+; Strings
+;=============================================================
+BANNER: DB      CR,LF
+        DB      'MEMTEST v1.0 - CP/M TPA Memory Test'
+        DB      CR,LF
+        DB      '==================================='
+        DB      CR,LF,'$'
+RNGMSG: DB      'Test range: $'
+TOMSG:  DB      ' - $'
+SIZMSG: DB      'Test size:  $'
+BYTMSG: DB      ' bytes',CR,LF,CR,LF,'$'
+P1MSG:  DB      'Pass 1: 00H ..........$'
+P2MSG:  DB      CR,LF,'Pass 2: FFH ..........$'
+P3MSG:  DB      CR,LF,'Pass 3: 55H ..........$'
+P4MSG:  DB      CR,LF,'Pass 4: AAH ..........$'
+P5MSG:  DB      CR,LF,'Pass 5: Addr low .....$'
+P6MSG:  DB      CR,LF,'Pass 6: Walking 1 ....$'
+P7MSG:  DB      CR,LF,'Pass 7: Alt AAH/55H ..$'
+OKMSG:  DB      ' ok','$'
+AMSG:   DB      '  addr=$'
+EXMSG:  DB      ' exp=$'
+GTMSG:  DB      ' got=$'
+CRLFS:  DB      CR,LF,'$'
+PASSMSG: DB     CR,LF,'PASSED - No errors detected.',CR,LF,'$'
+FAILMSG: DB     CR,LF,'FAILED - $'
+ERRMSG2: DB     ' error(s) detected.',CR,LF,'$'
+ABTMSG: DB      CR,LF,'Aborted.',CR,LF,'$'
+LOOPMSG: DB     CR,LF,'--- Loop $'
+
+;=============================================================
+; DATA SEGMENT
+;=============================================================
+        DSEG
+
+TSTBEG: DW      0
+TSTEND: DW      0
+ERRCNT: DW      0
+CURPAT: DB      0
+ERRADDR: DW     0
+ERREXP: DB      0
+ERRACT: DB      0
+PLZF:   DB      0
+TPLIM:  DW      0               ; end address for TSTPAT loops
+LOOPCNT: DW     0               ; loop iteration counter
+
+        DS      64
+STACK:
+
+; DATEND must be in CSEG because L80 places [DSEG][CSEG].
+; If in DSEG, the test range would overwrite our own code.
+        CSEG
+DATEND  EQU     $
+
+        END     START
+

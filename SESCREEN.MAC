@@ -1460,7 +1460,8 @@ IBVIRT:
         CALL    OUTHL4
         MVI     A,','
         CALL    OUTCHAR
-        ; Last line = GBCNTLN(total) - VAFLN
+        ; Last line = GBCNTLN(total) - VAFLN - (1 if VAFLN>0)
+        ; Subtract extra 1 to exclude phantom empty line after last LF
         CALL    GBCNTLN         ; HL = total lines (buf+VBFLN+VAFLN)
         XCHG                    ; DE = total
         LHLD    VAFLN           ; HL = VAFLN
@@ -1469,7 +1470,16 @@ IBVIRT:
         MOV     L,A
         MOV     A,D
         SBB     H
-        MOV     H,A             ; HL = total - VAFLN = last line
+        MOV     H,A             ; HL = total - VAFLN
+        ; If VAFLN > 0, subtract 1 more for phantom line
+        PUSH    H
+        LHLD    VAFLN
+        MOV     A,H
+        ORA     L
+        POP     H
+        JZ      IBVDN           ; VAFLN=0, no phantom
+        DCX     H               ; subtract 1
+IBVDN:
         CALL    OUTHL4
         MVI     A,']'
         CALL    OUTCHAR
