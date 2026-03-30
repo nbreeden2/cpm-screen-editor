@@ -281,6 +281,15 @@ TAROK:  CALL    NEXTHL
 
 ;=============================================================
 ; TSTWALK - Walking 1 pattern, then verify.
+;
+; The verify phase recomputes the expected walking bit from the
+; address offset each iteration instead of carrying it in a
+; register across REPORT/BDOS calls.  Passes 1-5 are immune
+; because they reload the expected value from memory (LDA) or
+; derive it from the address pointer (MOV A,L) each iteration.
+; Passes 6-7 carry the expected value in register B, which can
+; be corrupted if a transient RAM error during PUSH/POP or BDOS
+; internals alters B.  Recomputing from the address avoids this.
 ;=============================================================
 TSTWALK:
         ; Write phase
@@ -289,7 +298,6 @@ TSTWALK:
 TWWLP:  MOV     M,B
         CALL    NEXTHL
         JNC     TWWDN
-        ; Rotate walking bit
         MOV     A,B
         RLC
         MOV     B,A
@@ -298,40 +306,53 @@ TWWDN:
 
         ; Verify phase
         LHLD    TSTBEG
-        MVI     B,01H
-TWRLP:  MOV     A,M             ; A = actual
-        MOV     C,A             ; C = actual (save before compare)
-        CMP     B               ; compare actual vs expected (B)
+TWRLP:  ; Compute expected walking bit from address offset
+        ; bit_pos = (HL - TSTBEG) AND 7, expected = 1 << bit_pos
+        PUSH    H               ; save address pointer
+        XCHG                    ; DE = current addr
+        LHLD    TSTBEG
+        MOV     A,E
+        SUB     L               ; low byte of (addr - TSTBEG)
+        ANI     7               ; A = bit position (0-7)
+        MOV     C,A             ; C = shift count
+        MVI     B,01H           ; B = walking bit, start at 01H
+        ORA     A               ; count == 0?
+        JZ      TWRGOT          ; yes, B=01 is correct
+TWRSH:  MOV     A,B
+        RLC
+        MOV     B,A             ; B <<= 1
+        DCR     C
+        JNZ     TWRSH
+TWRGOT: POP     H               ; restore address pointer
+        MOV     A,M             ; A = actual
+        MOV     C,A             ; C = actual (save)
+        CMP     B               ; compare actual vs expected
         JZ      TWROK
         SHLD    ERRADDR
-        MOV     A,B             ; expected
+        MOV     A,B
         STA     ERREXP
-        MOV     A,C             ; actual (saved, not re-read)
+        MOV     A,C
         STA     ERRACT
         PUSH    H
-        PUSH    B
         CALL    REPORT
-        POP     B
         POP     H
 TWROK:  CALL    NEXTHL
-        JNC     TWRDN
-        MOV     A,B
-        RLC
-        MOV     B,A
-        JMP     TWRLP
-TWRDN:
+        JC      TWRLP
         RET
 
 ;=============================================================
 ; TSTALT - Alternating AA/55 pattern, then verify.
-; Writes AAH to even addresses, 55H to odd addresses.
+; Writes AAH to even offsets, 55H to odd offsets.
+;
+; Like TSTWALK, the verify phase recomputes the expected value
+; from the address offset instead of carrying it in B across
+; REPORT/BDOS calls.  See TSTWALK comment for rationale.
 ;=============================================================
 TSTALT:
         ; Write phase
         LHLD    TSTBEG
         MVI     B,0AAH          ; first byte AA
 TALWLP: MOV     M,B
-        ; Toggle pattern: AA->55->AA->55
         MOV     A,B
         XRI     0FFH            ; complement: AA->55, 55->AA
         MOV     B,A
@@ -340,26 +361,30 @@ TALWLP: MOV     M,B
 
         ; Verify phase
         LHLD    TSTBEG
-        MVI     B,0AAH
-TALRLP: MOV     A,M             ; actual
-        MOV     C,A             ; C = actual (save before compare)
-        CMP     B               ; compare with expected
+TALRLP: ; Compute expected: even offset=AAH, odd offset=55H
+        PUSH    H
+        XCHG                    ; DE = current addr
+        LHLD    TSTBEG
+        MOV     A,E
+        SUB     L               ; low byte of (addr - TSTBEG)
+        ANI     1               ; 0=even, 1=odd
+        POP     H               ; restore address pointer
+        MVI     B,0AAH          ; assume even
+        JZ      TALEV
+        MVI     B,55H           ; odd
+TALEV:  MOV     A,M             ; A = actual
+        MOV     C,A             ; C = actual (save)
+        CMP     B               ; compare actual vs expected
         JZ      TALROK
         SHLD    ERRADDR
         MOV     A,B
         STA     ERREXP
-        MOV     A,C             ; actual (saved, not re-read)
+        MOV     A,C
         STA     ERRACT
         PUSH    H
-        PUSH    B
         CALL    REPORT
-        POP     B
         POP     H
-TALROK: ; Toggle pattern
-        MOV     A,B
-        XRI     0FFH
-        MOV     B,A
-        CALL    NEXTHL
+TALROK: CALL    NEXTHL
         JC      TALRLP
         RET
 
