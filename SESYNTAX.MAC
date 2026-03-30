@@ -129,6 +129,7 @@ ATTR_YEL EQU    33H         ; yellow foreground
 ATTR_MAG EQU    35H         ; magenta foreground
 ATTR_RED EQU    31H         ; red foreground
 ATTR_BLU EQU    34H         ; blue foreground
+ATTR_BYL EQU    93H         ; bright yellow foreground
 
 ;--- Syntax highlighting option (defined above imports) -----
 
@@ -444,6 +445,7 @@ SNLP:
         ACI     0
         MOV     H,A
         MOV     A,M             ; A = char at col C
+        ANI     7FH             ; strip high bit (CP/M may set bit 7)
 
         ORA     A
         JZ      SNDNE           ; NUL = end of line
@@ -491,6 +493,7 @@ SNWRD2:
         ACI     0
         MOV     H,A
         MOV     A,M             ; char after identifier
+        ANI     7FH             ; strip high bit
         CPI     ':'
         JZ      SNLABL
 
@@ -510,9 +513,9 @@ SNWRD2:
         MOV     D,A             ; restore start col
         JZ      SNDIR
 
-        ; Default: opcode colour (bold/white)
+        ; Default: opcode colour (bright yellow)
         MOV     E,C             ; E = end col
-        MVI     A,ATTR_BLD
+        MVI     A,ATTR_BYL
         CALL    SNFILL          ; fill SYNATTR[D-1..E-2]
         JMP     SNLP
 
@@ -550,6 +553,7 @@ SNNUML:
         ACI     0
         MOV     H,A
         MOV     A,M
+        ANI     7FH             ; strip high bit
         CALL    SNISHX          ; Z if hex digit
         JNZ     SNNUMD
         INR     C
@@ -590,6 +594,7 @@ SNSTRL:
         ACI     0
         MOV     H,A
         MOV     A,M
+        ANI     7FH             ; strip high bit
         ORA     A
         JZ      SNSTRD
         CPI     CR
@@ -606,11 +611,10 @@ SNSTRD:
         JMP     SNLP
 
 SNCOMM:
-        ; Comment: ; to end of line (green)
+        ; Comment: ; to end of line
         MOV     D,C             ; start
         LDA     SYNLIM
-        MOV     E,A             ; end = line limit
-        INR     E               ; inclusive end for SNFILL
+        MOV     E,A             ; end = line limit (no INR: 255+1 wraps)
         MVI     A,ATTR_GRN
         CALL    SNFILL
         JMP     SNDNE           ; comment goes to end
@@ -631,6 +635,7 @@ SNCOL:
         ACI     0
         MOV     H,A
         MOV     A,M
+        ANI     7FH             ; strip high bit
         CALL    SNISID          ; Z if identifier char
         RNZ
         INR     C
@@ -1028,8 +1033,7 @@ SCPYES:
         ; Fill magenta from # to end of line
         MOV     D,C             ; start = # position
         LDA     SYNLIM
-        MOV     E,A
-        INR     E               ; inclusive end for SNFILL
+        MOV     E,A             ; end = line limit (no INR: 255+1 wraps)
         MVI     A,ATTR_MAG
         CALL    SNFILL
         JMP     SNCDNE
@@ -1070,8 +1074,7 @@ SNCSK1: INR     C               ; skip the /
 SNCLC:
         MOV     D,C             ; start = /
         LDA     SYNLIM
-        MOV     E,A
-        INR     E
+        MOV     E,A             ; end = line limit (no INR: 255+1 wraps)
         MVI     A,ATTR_GRN
         CALL    SNFILL
         JMP     SNCDNE

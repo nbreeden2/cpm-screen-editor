@@ -91,6 +91,7 @@ ATTR_YEL EQU    33H         ; yellow foreground
 ATTR_MAG EQU    35H         ; magenta foreground
 ATTR_RED EQU    31H         ; red foreground
 ATTR_BLU EQU    34H         ; blue foreground
+ATTR_BYL EQU    93H         ; bright yellow foreground
 
 ;--- Color assembly option ---------------------------
 COLOR   EQU     0           ; 1 = color, 0 = monochrome
@@ -244,6 +245,7 @@ SGRRED:  DB     ESC,'[','3','1','m','$'  ; SGR red fg
 SGRYEL:  DB     ESC,'[','3','3','m','$'  ; SGR yellow fg
 SGRCYN:  DB     ESC,'[','3','6','m','$'  ; SGR cyan fg
 SGRWHT:  DB     ESC,'[','0',';','3','7','m','$' ; SGR reset+white fg
+SGRBYL:  DB     ESC,'[','9','3','m','$'  ; SGR bright yellow fg
         ENDIF
 
 ;--- Info bar label strings ---------------------------
@@ -815,7 +817,11 @@ SDSGL:  MOV     B,M             ; table attr byte
         JZ      SDSGF           ; match found
         MOV     A,C             ; restore target
         JMP     SDSGL
-SDSGF:  CALL    OUTSTR          ; DE = SGR string
+SDSGF:  PUSH    D               ; save color string
+        LXI     D,SGRRES        ; reset first (ESC[0m)
+        CALL    OUTSTR
+        POP     D               ; restore color string
+        CALL    OUTSTR          ; DE = SGR string
 SDSGD:  RET
 
 ;--- SGR lookup table: attribute byte -> string address ------
@@ -835,6 +841,8 @@ SGRLUT: DB      ATTR_BLD
         DW      SGRRED
         DB      ATTR_BLU
         DW      SGRBLU
+        DB      ATTR_BYL
+        DW      SGRBYL
         DB      0               ; end sentinel
         ENDIF
 
