@@ -300,12 +300,13 @@ TWWDN:
         LHLD    TSTBEG
         MVI     B,01H
 TWRLP:  MOV     A,M             ; A = actual
+        MOV     C,A             ; C = actual (save before compare)
         CMP     B               ; compare actual vs expected (B)
         JZ      TWROK
         SHLD    ERRADDR
         MOV     A,B             ; expected
         STA     ERREXP
-        MOV     A,M             ; actual
+        MOV     A,C             ; actual (saved, not re-read)
         STA     ERRACT
         PUSH    H
         PUSH    B
@@ -341,12 +342,13 @@ TALWLP: MOV     M,B
         LHLD    TSTBEG
         MVI     B,0AAH
 TALRLP: MOV     A,M             ; actual
+        MOV     C,A             ; C = actual (save before compare)
         CMP     B               ; compare with expected
         JZ      TALROK
         SHLD    ERRADDR
         MOV     A,B
         STA     ERREXP
-        MOV     A,M
+        MOV     A,C             ; actual (saved, not re-read)
         STA     ERRACT
         PUSH    H
         PUSH    B
@@ -389,14 +391,6 @@ REPORT:
         INX     H
         SHLD    ERRCNT
 
-        ; Cap display at 20 errors
-        MOV     A,H
-        ORA     A
-        JNZ     RPTSKP          ; > 255, skip
-        MOV     A,L
-        CPI     21
-        JNC     RPTSKP          ; > 20, skip
-
         LXI     D,CRLFS
         MVI     C,BF_PRTSTR
         CALL    BDOS
@@ -419,7 +413,7 @@ REPORT:
         LDA     ERRACT
         CALL    PRTHEX2
 
-RPTSKP: RET
+        RET
 
 ;=============================================================
 ; PRTHEX4 - Print HL as 4-digit hex.
@@ -504,9 +498,11 @@ PDDDN:  MOV     A,B
         RZ
 PDDPR:  MVI     A,1
         STA     PLZF
+        PUSH    H               ; save remainder (BDOS clobbers all)
         MOV     E,B
         MVI     C,BF_CONOUT
         CALL    BDOS
+        POP     H               ; restore remainder
         RET
 
 ;=============================================================
