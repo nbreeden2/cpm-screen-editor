@@ -37,6 +37,10 @@
         EXTRN   VISAVALL        ; three-phase save
         EXTRN   VAFCB           ; AFTER temp FCB
         EXTRN   VAFEX           ; AFTER temp existence flag
+        EXTRN   VIWBYT          ; write byte to output buffer
+        EXTRN   VIWFCB          ; output FCB pointer
+        EXTRN   VIOPOS          ; output buffer position
+        EXTRN   VIFLUSH         ; flush output buffer
 
 ;--- Exports ----------------------------------------------
         PUBLIC  FIOPEN          ; load file into buffer
@@ -394,6 +398,129 @@ FIFULL:
 ; Exit:   Falls through to FIEOF when source is exhausted.
 ;------------------------------------------------------------
 FIOVFL:
+        ; --- Trim partial line from end of gap buffer ---
+        ; Scan backward from GAPBG to find last LF.
+        ; Move bytes after the LF into FIOVFRAG for AFTER temp.
+        XRA     A
+        STA     FIOVFN          ; fragment length = 0
+
+        ; Get buffer base address
+        LHLD    CURBDP
+        MVI     A,BD_BSTAR
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A
+        MOV     E,M
+        INX     H
+        MOV     D,M             ; DE = buffer base
+
+        ; Get GAPBG offset
+        LHLD    CURBDP
+        MVI     A,BD_GAPBG
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A
+        MOV     A,M
+        INX     H
+        ORA     M               ; check GAPBG == 0
+        JZ      FIOVT0          ; empty buffer, skip trim
+        DCX     H
+        MOV     C,M
+        INX     H
+        MOV     B,M             ; BC = GAPBG offset
+
+        ; HL = base + GAPBG - 1 (last byte of pre-gap text)
+        MOV     H,D
+        MOV     L,E             ; HL = base
+        DAD     B               ; HL = base + GAPBG
+        DCX     H               ; HL = last byte
+
+        ; DE still = base. Scan backward for LF.
+        MVI     B,0             ; B = fragment byte count
+FIOVSC: MOV     A,H
+        CMP     D
+        JNZ     FIOVS1
+        MOV     A,L
+        CMP     E
+        JZ      FIOVT0          ; reached base, no LF found, skip
+FIOVS1: MOV     A,M
+        CPI     LF
+        JZ      FIOVLF          ; found last LF
+        INR     B
+        DCX     H
+        JMP     FIOVSC
+
+FIOVLF: ; Found LF at HL. Fragment = B bytes after it.
+        MOV     A,B
+        ORA     A
+        JZ      FIOVT0          ; LF is last byte, no fragment
+        STA     FIOVFN          ; save fragment length
+
+        ; Copy fragment bytes to FIOVFRAG
+        INX     H               ; HL = first byte after LF
+        LXI     D,FIOVFRAG
+FIOVCP: MOV     A,M
+        STAX    D
+        INX     H
+        INX     D
+        DCR     B
+        JNZ     FIOVCP
+
+        ; Adjust GAPBG backward by fragment length
+        LHLD    CURBDP
+        MVI     A,BD_GAPBG
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A
+        MOV     E,M
+        INX     H
+        MOV     D,M             ; DE = old GAPBG
+        LDA     FIOVFN
+        MOV     C,A
+        MVI     B,0             ; BC = fragment length
+        MOV     A,E
+        SUB     C
+        MOV     E,A
+        MOV     A,D
+        SBB     B
+        MOV     D,A             ; DE = new GAPBG
+        DCX     H
+        MOV     M,E
+        INX     H
+        MOV     M,D             ; write new GAPBG
+
+        ; Also adjust BD_TXEND
+        LHLD    CURBDP
+        MVI     A,BD_TXEND
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A
+        MOV     E,M
+        INX     H
+        MOV     D,M             ; DE = old TXEND
+        LDA     FIOVFN
+        MOV     C,A
+        MVI     B,0
+        MOV     A,E
+        SUB     C
+        MOV     E,A
+        MOV     A,D
+        SBB     B
+        MOV     D,A             ; DE = new TXEND
+        DCX     H
+        MOV     M,E
+        INX     H
+        MOV     M,D             ; write new TXEND
+
+FIOVT0:
         ; Set overflow flags
         MVI     A,1
         STA     VIOVFL
@@ -439,12 +566,35 @@ FIOVF2: STAX    D
         LXI     D,OVFLMSG
         CALL    STATMSG
 
-        ; Copy remaining records directly: read from source,
-        ; write to AFTER temp. No byte-by-byte processing.
+        ; Set up VIWBYT output to AFTER FCB
+        LXI     H,VAFCB
+        SHLD    VIWFCB
+        XRA     A
+        STA     VIOPOS
+
+        ; Write partial-line fragment to AFTER temp (if any)
+        LDA     FIOVFN
+        ORA     A
+        JZ      FIOVLP          ; no fragment, skip
+
+        LXI     H,FIOVFRAG
+        LDA     FIOVFN
+        MOV     B,A
+FIOVWF: MOV     A,M
+        PUSH    H
+        PUSH    B
+        CALL    VIWBYT
+        POP     B
+        POP     H
+        INX     H
+        DCR     B
+        JNZ     FIOVWF
+
+        ; Read remaining source records byte-by-byte via VIWBYT.
+        ; Fragment (if any) is already in VIOBUF from above.
         ; Count LFs for VAFLN, detect CPMEOF for end.
 FIOVLP:
-        ; Read next source record
-        LXI     D,CMDTAIL
+        LXI     D,DMABUF
         MVI     C,BF_SETDMA
         CALL    BDOS
         LXI     D,WRKFCB
@@ -453,13 +603,13 @@ FIOVLP:
         ORA     A
         JNZ     FIOVDN          ; non-zero = EOF or error
 
-        ; Count LFs and detect CPMEOF
-        LXI     H,CMDTAIL
+        ; Process record bytes via VIWBYT
+        LXI     H,DMABUF
         MVI     B,RECSIZ
 FIOVBL:
         MOV     A,M
         CPI     CPMEOF
-        JZ      FIOVEF          ; hit EOF marker in data
+        JZ      FIOVDN          ; hit EOF marker
         CPI     LF
         JNZ     FIOVNL
         PUSH    H
@@ -470,25 +620,22 @@ FIOVBL:
         POP     B
         POP     H
 FIOVNL:
+        ; Write byte to AFTER via VIWBYT
+        MOV     A,M
+        PUSH    H
+        PUSH    B
+        CALL    VIWBYT
+        POP     B
+        POP     H
         INX     H
         DCR     B
         JNZ     FIOVBL
-
-        ; Write this record to AFTER temp (DMA still CMDTAIL)
-        LXI     D,VAFCB
-        MVI     C,BF_FWRITE
-        CALL    BDOS
         JMP     FIOVLP          ; next record
 
-FIOVEF:
-        ; Found CPMEOF in record - write final record as-is
-        LXI     D,VAFCB
-        MVI     C,BF_FWRITE
-        CALL    BDOS
-
 FIOVDN:
-        ; Close AFTER temp (no flush needed, wrote full records)
-        ; Set DMA for directory op (BF_FCLOSE updates directory)
+        ; Flush remaining buffered bytes to AFTER temp
+        CALL    VIFLUSH
+        ; Close AFTER temp
         LXI     D,CMDTAIL
         MVI     C,BF_SETDMA
         CALL    BDOS
@@ -1351,6 +1498,10 @@ FILNUM: DW      0               ; current line number during load
 FICOL:  DB      0               ; column counter during load
 FITMP:  DB      0               ; saved byte during column check
 FIPFLG: DB      0               ; FIPRNUM leading zero suppress
+
+; Partial-line trim for overflow
+FIOVFN: DB      0               ; fragment byte count
+FIOVFRAG: DS    MAXCOLS         ; fragment buffer (max line width)
 
         END
 

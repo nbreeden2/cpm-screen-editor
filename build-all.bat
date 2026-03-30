@@ -23,7 +23,7 @@ python CPMFMT.PY SEHELP.MAC SEKEY.MAC SEKEYBND.MAC SEMENU.MAC
 if errorlevel 1 goto fail
 python CPMFMT.PY SESEARCH.MAC
 if errorlevel 1 goto fail
-python CPMFMT.PY COL80.MAC COL132.MAC CLS.MAC
+python CPMFMT.PY COL80.MAC COL132.MAC CLS.MAC MEMTEST.MAC COLORS.MAC
 if errorlevel 1 goto fail
 
 echo Assembling shared modules...
@@ -33,7 +33,7 @@ for %%M in (SEDIT SEBLOCK SEFILEIO SEGAPBUF SEHELP SEKEY SEKEYBND SEMENU SESEARC
 )
 
 echo Assembling standalone utilities...
-for %%M in (GETWIDTH COL80 COL132 CLS) do (
+for %%M in (GETWIDTH MEMTEST KEYCODE COL80 COL132 CLS COLORS) do (
     cpmulator M80.COM =%%M
     if errorlevel 1 goto fail
 )
@@ -109,11 +109,17 @@ echo.
 echo Linking standalone utilities...
 cpmulator L80.COM GETWIDTH,GETWIDTH/n/e
 if errorlevel 1 goto fail
+cpmulator L80.COM KEYCODE,KEYCODE/n/e
+if errorlevel 1 goto fail
+cpmulator L80.COM MEMTEST,MEMTEST/n/e
+if errorlevel 1 goto fail
 cpmulator L80.COM COL80,COL80/n/e
 if errorlevel 1 goto fail
 cpmulator L80.COM COL132,COL132/n/e
 if errorlevel 1 goto fail
 cpmulator L80.COM CLS,CLS/n/e
+if errorlevel 1 goto fail
+cpmulator L80.COM COLORS,COLORS/n/e
 if errorlevel 1 goto fail
 
 REM --- Clean up ---

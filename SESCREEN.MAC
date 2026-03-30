@@ -256,6 +256,14 @@ IBOVSTR: DB     '  [OVR]','$'
 NAMNMST: DB     '[No Name]','$'
 LDNGMST: DB     '[Loading]','$'
 
+;--- Separator strings for virtual mode ---
+SPRUPRA: DB     '^^^ $'
+SPRLIN: DB      ' Lines $'
+SPRABV: DB      ' above$'
+SPREQS: DB      ' === $'
+SPRBLW: DB      ' below$'
+SPRDNA: DB      ' vvv$'
+
 ;=============================================================
 ; SCRINIT - Initialize terminal and draw screen chrome.
 ; Entry:  (none)
@@ -1543,7 +1551,73 @@ SEPRDRAW:
         CALL    CURGOTO
         LXI     D,SGRDIM
         CALL    OUTSTR
-        ; Dynamic separator: RSCRCL '=' chars
+        ; Check virtual mode for range display
+        LDA     VIMODE
+        ORA     A
+        JZ      SPRNRM          ; normal mode: plain separator
+
+        ; Virtual mode separator with range info
+        ; Show "^^^ Lines 1-nnnn above" only if VBFLN > 0
+        LHLD    VBFLN
+        MOV     A,H
+        ORA     L
+        JZ      SPRNEQ          ; no BEFORE lines
+        LXI     D,SPRUPRA
+        CALL    OUTSTR
+        LXI     D,SPRLIN
+        CALL    OUTSTR
+        LXI     H,1             ; first line above
+        CALL    OUTN4DG
+        MVI     A,'-'
+        CALL    OUTCHAR
+        LHLD    VBFLN
+        CALL    OUTN4DG
+        LXI     D,SPRABV
+        CALL    OUTSTR
+
+SPRNEQ:
+        ; Middle ===
+        LXI     D,SPREQS
+        CALL    OUTSTR
+
+        ; Show "Lines nnnn-nnnn below vvv" only if VAFLN > 0
+        LHLD    VAFLN
+        MOV     A,H
+        ORA     L
+        JZ      SPRNDN          ; no AFTER lines
+        LXI     D,SPRLIN
+        CALL    OUTSTR
+        ; First line below = GBCNTLN(total) - VAFLN
+        CALL    GBCNTLN         ; HL = total lines
+        XCHG                    ; DE = total
+        LHLD    VAFLN
+        MOV     A,E
+        SUB     L
+        MOV     L,A
+        MOV     A,D
+        SBB     H
+        MOV     H,A             ; HL = total - VAFLN = first AFTER line
+        CALL    OUTN4DG
+        MVI     A,'-'
+        CALL    OUTCHAR
+        ; Last line = total
+        CALL    GBCNTLN
+        CALL    OUTN4DG
+        LXI     D,SPRBLW
+        CALL    OUTSTR
+        LXI     D,SPRDNA
+        CALL    OUTSTR
+
+SPRNDN:
+        ; Clear rest of line
+        LXI     D,CLREOL
+        CALL    OUTSTR
+        LXI     D,SGRRES
+        CALL    OUTSTR
+        RET
+
+SPRNRM:
+        ; Normal mode: plain separator (RSCRCL '=' chars)
         LDA     RSCRCL
         MOV     B,A
 SPRLP:  MVI     A,'='

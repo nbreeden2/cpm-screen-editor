@@ -219,6 +219,7 @@ SRCHMAX EQU     64          ; max find string length
         PUBLIC  VAFEX           ; AFTER temp existence flag
         PUBLIC  VIWFCB          ; output FCB pointer
         PUBLIC  VIOPOS          ; output buffer position
+        PUBLIC  VIFLUSH         ; flush output buffer
 
 ;=============================================================
 ; CODE SEGMENT
@@ -555,12 +556,86 @@ VGT_PC1:
         JMP     VGT_PC
 
 VGT_PC:
+        ; --- Trim partial line from end of buffer ---
+        ; Scan backward from VIWPTR to find last LF.
+        ; Move fragment bytes to AFTER temp.
+        XRA     A
+        STA     VGTFN           ; fragment length = 0
+
+        ; Get buffer base
+        CALL    GBBASE          ; DE = base
+        LHLD    VIWPTR          ; HL = write ptr
+        ; Check if buffer is empty
+        MOV     A,H
+        CMP     D
+        JNZ     VGTS1
+        MOV     A,L
+        CMP     E
+        JZ      VGTT0           ; empty, skip trim
+VGTS1:
+        ; HL = VIWPTR, DE = base. Scan backward for LF.
+        DCX     H               ; HL = last byte written
+        MVI     B,0             ; fragment count
+VGTSC:  MOV     A,H
+        CMP     D
+        JNZ     VGTS2
+        MOV     A,L
+        CMP     E
+        JZ      VGTT0           ; reached base, no LF, skip
+VGTS2:  MOV     A,M
+        CPI     LF
+        JZ      VGTLF           ; found LF
+        INR     B
+        DCX     H
+        JMP     VGTSC
+
+VGTLF:  ; Found LF at HL. Fragment = B bytes after it.
+        MOV     A,B
+        ORA     A
+        JZ      VGTT0           ; LF is last byte, no fragment
+        STA     VGTFN           ; save fragment length
+
+        ; Copy fragment to VGTFRG
+        INX     H               ; first byte after LF
+        PUSH    H               ; save source ptr
+        LXI     D,VGTFRG
+        MOV     C,B             ; C = count
+VGTCP:  MOV     A,M
+        STAX    D
+        INX     H
+        INX     D
+        DCR     C
+        JNZ     VGTCP
+        POP     H               ; HL = first byte after LF
+
+        ; Adjust VIWPTR back to just after the LF
+        SHLD    VIWPTR
+
+VGTT0:
         ; Create AFTER temp
         CALL    VIMKAFT
         LXI     H,VAFCB
         SHLD    VIWFCB
         XRA     A
         STA     VIOPOS
+
+        ; Write fragment bytes to AFTER (if any)
+        LDA     VGTFN
+        ORA     A
+        JZ      VGT_CL          ; no fragment, skip
+
+        LXI     H,VGTFRG
+        LDA     VGTFN
+        MOV     B,A
+VGTWF:  MOV     A,M
+        PUSH    H
+        PUSH    B
+        CALL    VIWBYT
+        POP     B
+        POP     H
+        INX     H
+        DCR     B
+        JNZ     VGTWF
 
         ; Read remaining MERGE and write to AFTER, counting LFs
 VGT_CL:
@@ -1441,6 +1516,10 @@ VMGEX:  DB      0               ; MERGE temp exists
 
 ; Misc temp
 VBTMP:  DB      0               ; temp byte for VIWBYT
+
+; Partial-line trim for Phase B->C
+VGTFN:  DB      0               ; fragment byte count
+VGTFRG: DS      MAXCOLS         ; fragment buffer
 
         END
 

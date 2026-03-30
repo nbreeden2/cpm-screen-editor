@@ -1,0 +1,214 @@
+;============================================================
+; FILE:    COLORS.MAC
+; VERSION: 1.0
+; PROJECT: SEDIT - CP/M 2.2 Utilities
+; DATE:    2026-03-30
+;------------------------------------------------------------
+; DESCRIPTION:
+;   Displays ANSI/VT100 color names rendered in their
+;   respective colors. Shows both normal (30-37) and
+;   bright (90-97) foreground colors.
+;
+;   Usage: A>COLORS
+;------------------------------------------------------------
+
+BDOS    EQU     0005H
+BF_PRTSTR EQU   9
+
+ESC     EQU     1BH
+CR      EQU     0DH
+LF      EQU     0AH
+
+        CSEG
+
+START:
+        ; Banner
+        LXI     D,BANNER
+        MVI     C,BF_PRTSTR
+        CALL    BDOS
+
+        ; Normal colors (30-37)
+        LXI     D,NHDR
+        MVI     C,BF_PRTSTR
+        CALL    BDOS
+
+        LXI     D,SBLK
+        CALL    SHOWCOL
+        LXI     D,SRED
+        CALL    SHOWCOL
+        LXI     D,SGRN
+        CALL    SHOWCOL
+        LXI     D,SYEL
+        CALL    SHOWCOL
+        LXI     D,SBLU
+        CALL    SHOWCOL
+        LXI     D,SMAG
+        CALL    SHOWCOL
+        LXI     D,SCYN
+        CALL    SHOWCOL
+        LXI     D,SWHT
+        CALL    SHOWCOL
+
+        ; Bright colors (90-97)
+        LXI     D,BHDR
+        MVI     C,BF_PRTSTR
+        CALL    BDOS
+
+        LXI     D,SBBLK
+        CALL    SHOWCOL
+        LXI     D,SBRED
+        CALL    SHOWCOL
+        LXI     D,SBGRN
+        CALL    SHOWCOL
+        LXI     D,SBYEL
+        CALL    SHOWCOL
+        LXI     D,SBBLU
+        CALL    SHOWCOL
+        LXI     D,SBMAG
+        CALL    SHOWCOL
+        LXI     D,SBCYN
+        CALL    SHOWCOL
+        LXI     D,SBWHT
+        CALL    SHOWCOL
+
+        ; Bold + color combinations
+        LXI     D,BOLDHDR
+        MVI     C,BF_PRTSTR
+        CALL    BDOS
+
+        LXI     D,SBOBLK
+        CALL    SHOWCOL
+        LXI     D,SBORED
+        CALL    SHOWCOL
+        LXI     D,SBOGRN
+        CALL    SHOWCOL
+        LXI     D,SBOYEL
+        CALL    SHOWCOL
+        LXI     D,SBOBLU
+        CALL    SHOWCOL
+        LXI     D,SBOMAG
+        CALL    SHOWCOL
+        LXI     D,SBOCYN
+        CALL    SHOWCOL
+        LXI     D,SBOWHT
+        CALL    SHOWCOL
+
+        ; Attributes
+        LXI     D,ATTRHDR
+        MVI     C,BF_PRTSTR
+        CALL    BDOS
+
+        LXI     D,SNORM
+        CALL    SHOWCOL
+        LXI     D,SBOLD
+        CALL    SHOWCOL
+        LXI     D,SDIM
+        CALL    SHOWCOL
+        LXI     D,SREV
+        CALL    SHOWCOL
+
+        ; Reset and exit
+        LXI     D,RESET
+        MVI     C,BF_PRTSTR
+        CALL    BDOS
+        RET
+
+;=============================================================
+; SHOWCOL - Display one color entry.
+; Entry: DE = pointer to entry: SGR_string + name + RESET + CRLF
+;        Each entry is a complete $-terminated string that
+;        sets color, prints name, resets, and adds newline.
+;=============================================================
+SHOWCOL:
+        MVI     C,BF_PRTSTR
+        CALL    BDOS
+        RET
+
+;=============================================================
+; Strings
+;=============================================================
+BANNER: DB      CR,LF
+        DB      'COLORS v1.0 - ANSI/VT100 Color Test'
+        DB      CR,LF
+        DB      '===================================='
+        DB      CR,LF,'$'
+
+NHDR:   DB      CR,LF,'--- Normal Colors (SGR 30-37) ---'
+        DB      CR,LF,'$'
+
+; Normal colors: ESC[xxm + name + ESC[0m + CRLF
+SBLK:   DB      ESC,'[30m','  Black   (SGR 30)'
+        DB      ESC,'[0m',CR,LF,'$'
+SRED:   DB      ESC,'[31m','  Red     (SGR 31)'
+        DB      ESC,'[0m',CR,LF,'$'
+SGRN:   DB      ESC,'[32m','  Green   (SGR 32)'
+        DB      ESC,'[0m',CR,LF,'$'
+SYEL:   DB      ESC,'[33m','  Yellow  (SGR 33)'
+        DB      ESC,'[0m',CR,LF,'$'
+SBLU:   DB      ESC,'[34m','  Blue    (SGR 34)'
+        DB      ESC,'[0m',CR,LF,'$'
+SMAG:   DB      ESC,'[35m','  Magenta (SGR 35)'
+        DB      ESC,'[0m',CR,LF,'$'
+SCYN:   DB      ESC,'[36m','  Cyan    (SGR 36)'
+        DB      ESC,'[0m',CR,LF,'$'
+SWHT:   DB      ESC,'[37m','  White   (SGR 37)'
+        DB      ESC,'[0m',CR,LF,'$'
+
+BHDR:   DB      CR,LF,'--- Bright Colors (SGR 90-97) ---'
+        DB      CR,LF,'$'
+
+; Bright colors: ESC[xxm + name + ESC[0m + CRLF
+SBBLK:  DB      ESC,'[90m','  Bright Black   (SGR 90)'
+        DB      ESC,'[0m',CR,LF,'$'
+SBRED:  DB      ESC,'[91m','  Bright Red     (SGR 91)'
+        DB      ESC,'[0m',CR,LF,'$'
+SBGRN:  DB      ESC,'[92m','  Bright Green   (SGR 92)'
+        DB      ESC,'[0m',CR,LF,'$'
+SBYEL:  DB      ESC,'[93m','  Bright Yellow  (SGR 93)'
+        DB      ESC,'[0m',CR,LF,'$'
+SBBLU:  DB      ESC,'[94m','  Bright Blue    (SGR 94)'
+        DB      ESC,'[0m',CR,LF,'$'
+SBMAG:  DB      ESC,'[95m','  Bright Magenta (SGR 95)'
+        DB      ESC,'[0m',CR,LF,'$'
+SBCYN:  DB      ESC,'[96m','  Bright Cyan    (SGR 96)'
+        DB      ESC,'[0m',CR,LF,'$'
+SBWHT:  DB      ESC,'[97m','  Bright White   (SGR 97)'
+        DB      ESC,'[0m',CR,LF,'$'
+
+BOLDHDR: DB     CR,LF,'--- Bold + Color (SGR 1;30-37) ---'
+        DB      CR,LF,'$'
+
+; Bold + color: ESC[1;xxm + name + ESC[0m + CRLF
+SBOBLK: DB      ESC,'[1;30m','  Bold Black   (SGR 1;30)'
+        DB      ESC,'[0m',CR,LF,'$'
+SBORED: DB      ESC,'[1;31m','  Bold Red     (SGR 1;31)'
+        DB      ESC,'[0m',CR,LF,'$'
+SBOGRN: DB      ESC,'[1;32m','  Bold Green   (SGR 1;32)'
+        DB      ESC,'[0m',CR,LF,'$'
+SBOYEL: DB      ESC,'[1;33m','  Bold Yellow  (SGR 1;33)'
+        DB      ESC,'[0m',CR,LF,'$'
+SBOBLU: DB      ESC,'[1;34m','  Bold Blue    (SGR 1;34)'
+        DB      ESC,'[0m',CR,LF,'$'
+SBOMAG: DB      ESC,'[1;35m','  Bold Magenta (SGR 1;35)'
+        DB      ESC,'[0m',CR,LF,'$'
+SBOCYN: DB      ESC,'[1;36m','  Bold Cyan    (SGR 1;36)'
+        DB      ESC,'[0m',CR,LF,'$'
+SBOWHT: DB      ESC,'[1;37m','  Bold White   (SGR 1;37)'
+        DB      ESC,'[0m',CR,LF,'$'
+
+ATTRHDR: DB     CR,LF,'--- Attributes ---'
+        DB      CR,LF,'$'
+
+SNORM:  DB      ESC,'[0m','  Normal    (SGR 0)'
+        DB      ESC,'[0m',CR,LF,'$'
+SBOLD:  DB      ESC,'[1m','  Bold      (SGR 1)'
+        DB      ESC,'[0m',CR,LF,'$'
+SDIM:   DB      ESC,'[2m','  Dim       (SGR 2)'
+        DB      ESC,'[0m',CR,LF,'$'
+SREV:   DB      ESC,'[7m','  Reverse   (SGR 7)'
+        DB      ESC,'[0m',CR,LF,'$'
+
+RESET:  DB      ESC,'[0m',CR,LF,'$'
+
+        END     START
+
