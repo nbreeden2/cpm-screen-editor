@@ -1,6 +1,6 @@
 
 
-                      SEDIT v1.11 Technical Manual
+                      SEDIT v1.12 Technical Manual
                   Build Environment and Source Reference
 
                     ================================
@@ -532,7 +532,7 @@
 
       SYN_ASM (SNASM):  8080/Z80 assembly tokenizer
         Labels at column 1    -> ATTR_YEL
-        Opcodes/directives    -> ATTR_BLD (bold white)
+        Opcodes               -> ATTR_BYL (bright yellow)
         Registers             -> ATTR_CYN
         Numbers               -> ATTR_BLU
         Strings               -> ATTR_MAG
@@ -782,6 +782,11 @@
 
     10. REVISION HISTORY
 
+    v1.12   Fix syntax comment coloring (SNFILL overflow at
+            SYNLIM=255). Bright yellow opcodes. Expanded
+            directive table. Row 23 virtual range display.
+            Modified indicator * after filename. Menu exit
+            shortcut changed to E.
     v1.11   C language syntax highlighting with multi-line block
             comment tracking.  Four build variants (mono, color,
             ASM highlight, C highlight).  SEBUILD.PY and

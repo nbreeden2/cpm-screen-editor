@@ -4,7 +4,7 @@
 **Assembler:** Microsoft M80 / L80
 **Terminal:** VT100 / ANSI
 **Editing Model:** Full-screen, ESC-menu driven, WordStar-compatible control keys
-**Version:** 1.11
+**Version:** 1.12
 
 ---
 
@@ -116,7 +116,7 @@ COL:  1  2  3  4  5  6 ---------------------------------------------------- 80
 
 ### 2.4 Row 23 — Separator Line
 
-A full 80-character line of `=` characters (drawn dim if COLOR enabled).
+A full 80-character line of `=` characters (drawn dim if COLOR enabled). In virtual buffer mode, shows the line ranges above and below the edit buffer (e.g., `^^^ Lines 1-938 above === Lines 1877-3279 below vvv`).
 
 ### 2.5 Row 24 — Status / Operation Bar
 
@@ -207,7 +207,7 @@ Menu geometry: top-left at row 6/col 28, bottom-right at row 17/col 54.
 - Press any key to return to editing
 
 #### 7. About (B)
-- Displays `SEDIT v1.11 CP/M Screen Editor` on the status bar
+- Displays `SEDIT v1.12 CP/M Screen Editor` on the status bar
 - Press any key to dismiss
 
 #### 8. Toggle 80/132 col (W)
@@ -218,7 +218,7 @@ Menu geometry: top-left at row 6/col 28, bottom-right at row 17/col 54.
 - Runtime variables updated: RTXTCL (73/125), RSCRCL (80/132), RTXTTB (69/121)
 - Editor starts in 80-column mode by default
 
-#### 9. Exit (X/Q)
+#### 9. Exit (X/E)
 - If buffer is modified, prompts to save
 - Clears screen and warm boots via `JMP 0000H`
 
@@ -479,8 +479,8 @@ When SYNHI=1, the following ASM token classes are highlighted:
 | Token Type | SGR | Color/Style |
 |------------|-----|-------------|
 | Label (col 1 identifier) | 33 | Yellow |
-| Opcode / mnemonic | bold | Bold white |
-| Directive (EQU, EXTRN, PUBLIC) | 34 | Blue |
+| Opcode / mnemonic | 93 | Bright yellow |
+| Directive (EQU, EXTRN, PUBLIC, ORG, CSEG, DSEG, DB, DW, DS, IF, ENDIF, END, etc.) | 34 | Blue |
 | Register (A B C D E H L M SP PC HL DE BC AF) | 36 | Cyan |
 | Numeric literal | 34 | Blue |
 | String literal | 35 | Magenta |
