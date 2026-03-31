@@ -302,7 +302,7 @@ MNULSC: ORI     20H             ; force lowercase
         CPI     'b'
         MVI     B,6             ; About
         JZ      MNULSL
-        CPI     'w'
+        CPI     't'
         MVI     B,7             ; Toggle columns
         JZ      MNULSL
         CPI     'x'
@@ -790,15 +790,15 @@ MNUBOT: DB      '+','-','-','-','-','-','-','-','-','-'
         DB      '-','-','-','-','-','+','$'
 
 ; Item text strings (padded to 22 chars for uniform highlight)
-MNTX1:  DB      '1. Open File          $'
-MNTX2:  DB      '2. Save File          $'
-MNTX3:  DB      '3. Save As...         $'
-MNTX4:  DB      '4. Find text...       $'
-MNTX5:  DB      '5. Go To Line...      $'
-MNTX6:  DB      '6. Help               $'
-MNTX7:  DB      '7. About              $'
-MNTX8:  DB      '8. Toggle 80/132 col  $'
-MNTX9:  DB      '9. Exit               $'
+MNTX1:  DB      '1. ',ESC,'[1m','O',ESC,'[0m','pen File          $'
+MNTX2:  DB      '2. ',ESC,'[1m','S',ESC,'[0m','ave File          $'
+MNTX3:  DB      '3. Save ',ESC,'[1m','A',ESC,'[0m','s...         $'
+MNTX4:  DB      '4. ',ESC,'[1m','F',ESC,'[0m','ind text...       $'
+MNTX5:  DB      '5. ',ESC,'[1m','G',ESC,'[0m','o To Line...      $'
+MNTX6:  DB      '6. ',ESC,'[1m','H',ESC,'[0m','elp               $'
+MNTX7:  DB      '7. A',ESC,'[1m','b',ESC,'[0m','out              $'
+MNTX8:  DB      '8. ',ESC,'[1m','T',ESC,'[0m','oggle 80/132 col  $'
+MNTX9:  DB      '9. ',ESC,'[1m','E',ESC,'[0m','xit               $'
 
 ; Prompt strings
 OPNPMT: DB      'Open file: $'
