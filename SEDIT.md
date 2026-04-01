@@ -4,7 +4,7 @@
 **Assembler:** Microsoft M80 / L80
 **Terminal:** VT100 / ANSI
 **Editing Model:** Full-screen, ESC-menu driven, WordStar-compatible control keys
-**Version:** 1.12
+**Version:** 1.13
 
 ---
 
@@ -61,7 +61,7 @@ A:MAIN    .MAC*  Lines:1024  Row: 142  Col:  35  [INS]
 | `*` after filename | Shown when the buffer has unsaved changes |
 | `Lines:nnnn` | Total number of lines in the file (blue if COLOR enabled) |
 | `Row:nnnn` | Current cursor line, 1-based (blue) |
-| `Col:nnnn` | Current cursor column within the text, 1-based (blue) |
+| `Col:nnnn` | Current cursor column within the text, 1-based, tabs expanded (blue) |
 | `[INS]` / `[OVR]` | Insert mode (green) or Overwrite mode (red) |
 
 All numeric fields are 4-digit, right-justified with leading spaces (max 9999). If no file is loaded, the filename area shows `[No Name]`. Drive byte 0 (default) queries the current disk via BDOS.
@@ -99,7 +99,7 @@ COL:  1  2  3  4  5  6 ---------------------------------------------------- 80
 - Lines 1-9999 display as `   1`, `  42`, `9999`
 - The current cursor line's number is displayed in **bold** (SGR 1)
 - Lines within a marked block have their line numbers displayed in **reverse video** (SGR 7)
-- Line number gutter is green if COLOR is enabled
+- Line number gutter is bold green if COLOR is enabled
 
 #### 2.3.2 Line Width and Horizontal Scrolling
 
@@ -207,7 +207,7 @@ Menu geometry: top-left at row 6/col 28, bottom-right at row 17/col 54.
 - Press any key to return to editing
 
 #### 7. About (B)
-- Displays `SEDIT v1.12 CP/M Screen Editor` on the status bar
+- Displays `SEDIT v1.13 CP/M Screen Editor` on the status bar
 - Press any key to dismiss
 
 #### 8. Toggle 80/132 col (W)
@@ -491,7 +491,7 @@ When SYNHI=2, C language files (`.C`, `.H`) are also highlighted:
 
 | Token Type | SGR | Color/Style |
 |------------|-----|-------------|
-| Keyword (if, for, while, etc.) | bold | Bold white |
+| Keyword (if, for, while, etc.) | 93 | Bright yellow |
 | Preprocessor directive (#include, etc.) | 35 | Magenta |
 | String / character literal | 33 | Yellow |
 | Numeric literal | 34 | Blue |

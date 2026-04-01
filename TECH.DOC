@@ -1,6 +1,6 @@
 
 
-                      SEDIT v1.12 Technical Manual
+                      SEDIT v1.13 Technical Manual
                   Build Environment and Source Reference
 
                     ================================
@@ -540,7 +540,7 @@
         Directives            -> ATTR_BLU
 
       SYN_C (SNC_LP):  C language tokenizer
-        Keywords              -> ATTR_BLD (bold white)
+        Keywords              -> ATTR_BYL (bright yellow)
         Preprocessor (#)      -> ATTR_MAG
         Strings / char lits   -> ATTR_YEL
         Numbers               -> ATTR_BLU
@@ -782,6 +782,11 @@
 
     10. REVISION HISTORY
 
+    v1.13   Fix syntax tokenizer address carry bug (comments
+            past ~column 24 never colored). Fix tab cursor
+            positioning, Col: display, and auto-scroll to use
+            visual columns with tab expansion. Bold green line
+            numbers. Goto-line clamped to file size.
     v1.12   Fix syntax comment coloring (SNFILL overflow at
             SYNLIM=255). Bright yellow opcodes. Expanded
             directive table. Row 23 virtual range display.
