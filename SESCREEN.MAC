@@ -287,8 +287,7 @@ SCRINIT:
         CALL    SEPRDRAW        ; draw row 23
         CALL    STATCLR         ; clear row 24
         LXI     D,SHWCUR
-        CALL    OUTSTR
-        RET
+        JMP     OUTSTR
 
 ;=============================================================
 ; SCRDRAW - Full redraw of the 20-line edit area.
@@ -748,8 +747,7 @@ SDCLR3:
 
 SDRWDN: CALL    RULRDRAW        ; restore tab ruler (row 2)
         CALL    SEPRDRAW        ; restore separator (row 23)
-        CALL    STATCLR         ; clear status bar (row 24)
-        RET
+        JMP     STATCLR         ; clear status bar (row 24)
 
 ;-------------------------------------------------------------
 ; SDRVON - Turn on reverse video for highlight.
@@ -928,8 +926,7 @@ SCRECF:
         MVI     A,' '
         CALL    OUTCHAR
         LXI     D,CLREOL
-        CALL    OUTSTR
-        RET
+        JMP     OUTSTR
 
 ;=============================================================
 ; SCREDLN - Draw one edit area line.
@@ -1009,8 +1006,7 @@ SCREDLN:
         MVI     A,' '
         CALL    OUTCHAR
         LXI     D,CLREOL        ; clear rest of line
-        CALL    OUTSTR
-        RET
+        JMP     OUTSTR
 
 SLEDRAW:
         ; DE = pointer to text, A = length (up to 73)
@@ -1203,8 +1199,7 @@ SLEEND:
 SLEND2:
         ENDIF
         LXI     D,CLREOL        ; erase to end of line
-        CALL    OUTSTR
-        RET
+        JMP     OUTSTR
 
 ;=============================================================
 ; INFOBAR - Update row 1 info bar with current file info.
@@ -1506,8 +1501,7 @@ IBCLEAR:
         LXI     D,CLREOL        ; clear to end of row
         CALL    OUTSTR
         LXI     D,SGRRES
-        CALL    OUTSTR
-        RET
+        JMP     OUTSTR
 
 ;=============================================================
 ; RULRDRAW - Draw tab ruler on row 2.
@@ -1547,8 +1541,7 @@ RLOUT:  PUSH    B
         LXI     D,CLREOL
         CALL    OUTSTR
         LXI     D,SGRRES
-        CALL    OUTSTR
-        RET
+        JMP     OUTSTR
 
 ;=============================================================
 ; SEPRDRAW - Draw '===' separator on row 23.
@@ -1623,8 +1616,7 @@ SPRNDN:
         LXI     D,CLREOL
         CALL    OUTSTR
         LXI     D,SGRRES
-        CALL    OUTSTR
-        RET
+        JMP     OUTSTR
 
 SPRNRM:
         ; Normal mode: plain separator (RSCRCL '=' chars)
@@ -1637,8 +1629,7 @@ SPRLP:  MVI     A,'='
         DCR     B
         JNZ     SPRLP
         LXI     D,SGRRES
-        CALL    OUTSTR
-        RET
+        JMP     OUTSTR
 
 ;=============================================================
 ; STATMSG - Write message to status bar row 24.
@@ -1655,8 +1646,7 @@ STATMSG:
         POP     D               ; restore pointer
         CALL    OUTSTR
         LXI     D,CLREOL        ; clear rest of row
-        CALL    OUTSTR
-        RET
+        JMP     OUTSTR
 
 ;=============================================================
 ; STATCLR - Clear the status bar row 24.
@@ -1668,8 +1658,7 @@ STATCLR:
         MVI     C,1
         CALL    CURGOTO
         LXI     D,CLREOL
-        CALL    OUTSTR
-        RET
+        JMP     OUTSTR
 
 ;=============================================================
 ; CURPOS - Place hardware cursor at current edit position.
@@ -1728,8 +1717,7 @@ CPVDN:  POP     B               ; B = terminal row
         SUB     C               ; A = visual_col - HSCROL
         ADI     TXTFCOL
         MOV     C,A             ; C = terminal col
-        CALL    CURGOTO
-        RET
+        JMP     CURGOTO
 
 ;=============================================================
 ; CURGOTO - Move terminal cursor to row, column.
@@ -1756,8 +1744,7 @@ CURGOTO:
         MVI     H,0
         CALL    OUTHL           ; print col digits
         MVI     A,'H'
-        CALL    OUTCHAR
-        RET
+        JMP     OUTCHAR
 
 ;=============================================================
 ; OUTCHAR - Output single character to console.
@@ -1873,8 +1860,7 @@ ON4TO:  PUSH    H
         ; --- Units digit (always printed) ---
         MOV     A,L
         ADI     '0'
-        CALL    OUTCHAR
-        RET
+        JMP     OUTCHAR
 
 ;=============================================================
 ; OUTHL - Output HL as unsigned decimal (no leading zeros).
@@ -1892,8 +1878,7 @@ OUTHL:
         CALL    OHDGT
         MOV     A,L
         ADI     '0'
-        CALL    OUTCHAR
-        RET
+        JMP     OUTCHAR
 
 OHDGT:  ; divide HL by DE, output digit if non-zero
         ; suppress leading zeros via OHLFLAG
@@ -1935,8 +1920,7 @@ OHDYES: STA     OHLFLAG         ; mark non-zero digit seen
 OUTHL4:
         XRA     A
         STA     OHLFLAG         ; reset leading zero flag
-        CALL    OUTHL
-        RET
+        JMP     OUTHL
 
 ;--- Data for OUTHL leading-zero suppression ----------
         DSEG

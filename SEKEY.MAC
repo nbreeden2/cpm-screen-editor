@@ -262,8 +262,7 @@ GKDEL:  MVI     C,ACT_DELRT     ; DEL = delete right
 GKHIGH: ; High-byte key (80h-FFh): look up in HKYTBL
         MOV     D,A             ; D = byte to find
         LXI     H,HKYTBL
-        CALL    TBLSRCH         ; search (byte,action) table
-        RET
+        JMP     TBLSRCH         ; search (byte,action) table
 
 GKESC:  MVI     A,KST_ESC       ; enter ESC state
         STA     KEYSTATE
@@ -416,8 +415,7 @@ GKCTLK: ; Ctrl-K prefix: read next byte, look up
         XRA     A
         STA     KEYSTATE
         LXI     H,CTKTBL
-        CALL    TBLSRCH         ; search (char,action) list
-        RET
+        JMP     TBLSRCH         ; search (char,action) list
 
 GKCTLQ: ; Ctrl-Q prefix: read next byte, look up
         MVI     A,KST_CTQ
@@ -426,8 +424,7 @@ GKCTLQ: ; Ctrl-Q prefix: read next byte, look up
         XRA     A
         STA     KEYSTATE
         LXI     H,CTQTBL
-        CALL    TBLSRCH
-        RET
+        JMP     TBLSRCH
 
 GKSTATE: ; Currently in a prefix state - should not
          ; reach here from polling loop. Reset.

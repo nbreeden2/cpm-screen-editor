@@ -704,8 +704,7 @@ GBLTSR:
         CALL    GBSETTOPLN
 GBLTRC:
         CALL    GBCURLNL
-        CALL    GBSETCSCOL
-        RET
+        JMP     GBSETCSCOL
 
 ;=============================================================
 ; GBMVRT - Move cursor right one character.
@@ -767,8 +766,7 @@ GBMVRT:
 GBRTCL:
         CALL    GBCSCOL
         INX     H
-        CALL    GBSETCSCOL
-        RET
+        JMP     GBSETCSCOL
 GBRTNL:
         LXI     H,0
         CALL    GBSETCSCOL
@@ -777,15 +775,13 @@ GBRTNL:
         MOV     A,L
         CPI     EDITROW
         JNC     GBRTSC
-        CALL    GBSETCSROW
-        RET
+        JMP     GBSETCSROW
 GBRTSC:
         CALL    GBTOPLN
         INX     H
         CALL    GBSETTOPLN
         LXI     H,EDITROW-1
-        CALL    GBSETCSROW
-        RET
+        JMP     GBSETCSROW
 GBRTAT: RET
 
 ;=============================================================
@@ -846,8 +842,7 @@ GBMVTOP:
         ORA     L
         JZ      GVTNRM          ; no BEFORE lines, use normal path
         LXI     H,1
-        CALL    VIGOTO
-        RET
+        JMP     VIGOTO
 GVTNRM:
         ; Bulk move: copy entire R1 to end of gap (backward copy)
         CALL    GBGAPBG
@@ -914,8 +909,7 @@ GVTPOS: ; Set cursor to top of file
         LXI     H,0
         CALL    GBSETCSROW
         LXI     H,0
-        CALL    GBSETCSCOL
-        RET
+        JMP     GBSETCSCOL
 
 ;=============================================================
 ; GBMVEND - Move cursor to end of file.
@@ -939,8 +933,7 @@ GBMVEND:
         ; Actually just use a large target line: VBFLN+buf+VAFLN
         ; We can get total from GBCNTLN (which we'll modify to include VBFLN+VAFLN)
         CALL    GBCNTLN         ; HL = total lines (includes VBFLN+VAFLN)
-        CALL    VIGOTO
-        RET
+        JMP     VIGOTO
 GVENRM:
         ; Compute N = BSIZE - GAPEN (entire R2 region)
         CALL    GBGAPEN
@@ -1032,8 +1025,7 @@ GVESCR: ; total_lines > EDITROW: TOPLN = lines - EDITROW
         LXI     H,EDITROW-1
         CALL    GBSETCSROW
 GVECOL: CALL    GBCURLNL
-        CALL    GBSETCSCOL
-        RET
+        JMP     GBSETCSCOL
 
 ;=============================================================
 ; GBGOTOL - Go to a specific line number (fast bulk move).
@@ -1295,8 +1287,7 @@ GGTSRL: ; Scroll: TOPLN = target - 1, CSROW = 0
         CALL    GBSETCSROW
 GGTCOL: ; CSCOL = 0 (at start of line)
         LXI     H,0
-        CALL    GBSETCSCOL
-        RET
+        JMP     GBSETCSCOL
 
 ;=============================================================
 ; GBPGUP - Scroll up one page (EDITROW lines).
@@ -1555,8 +1546,7 @@ GBPGDN:
         DAD     D               ; HL = VBFLN + TOPLN
         LXI     D,EDITROW+1
         DAD     D               ; HL = VBFLN + TOPLN + EDITROW + 1
-        CALL    VIGOTO
-        RET
+        JMP     VIGOTO
 GPDNRM:
         ; Save base address
         CALL    GBBASE
@@ -1703,8 +1693,7 @@ GPDCOL: CALL    GBCURLNL
         LHLD    VBFLN
         DAD     D
         INX     H               ; HL = VBFLN + TOPLN + 1
-        CALL    VIGOTO
-        RET
+        JMP     VIGOTO
 
 ;=============================================================
 ; GBMVUP - Move cursor up one line.
@@ -1723,14 +1712,12 @@ GBMVUP:
         JZ      GVUBOT          ; already at file top
         CALL    GBMLNS         ; go to line start
         CALL    GVUSKP          ; step over LF (and CR if present)
-        CALL    GBMLNS         ; go to start of that line
-        RET
+        JMP     GBMLNS         ; go to start of that line
 GVUROW:
         ; Move to start of current line, then prev line
         CALL    GBMLNS
         CALL    GVUSKP          ; step over LF (and CR if present)
-        CALL    GBMLNS         ; start of prev line
-        RET
+        JMP     GBMLNS         ; start of prev line
 ;------------------------------------------------------------
 ; GVUSKP - Step backward over line ending (LF, then CR if present)
 ;------------------------------------------------------------
@@ -1748,8 +1735,7 @@ GVUSKP:
         MOV     A,M
         CPI     CR
         RNZ                     ; not CR, done
-        CALL    GBMVLT          ; skip CR too
-        RET
+        JMP     GBMVLT          ; skip CR too
 GVUBOT:
         ; Check virtual mode for content above buffer
         LDA     VIMODE
@@ -1848,8 +1834,7 @@ GVDNPH:
         LHLD    GPGTMP
         DAD     D               ; HL = VBFLN + TOPLN + CSROW
         INX     H               ; HL = VBFLN + TOPLN + CSROW + 1
-        CALL    VIGOTO
-        RET
+        JMP     VIGOTO
 GVDNEF:
         ; Buffer EOF: check virtual mode for content below
         LDA     VIMODE
@@ -1871,16 +1856,14 @@ GVDNEF:
         DAD     D               ; HL = VBFLN + TOPLN + CSROW
         INX     H
         INX     H               ; HL = VBFLN + TOPLN + CSROW + 2
-        CALL    VIGOTO
-        RET
+        JMP     VIGOTO
 
 GVDNDN:
         ; Safety: recalculate CSCOL from scratch.
         ; Corrects any drift in incremental column tracking
         ; (e.g. CR handling, tab stops, or other edge cases).
         CALL    GBCURLNL        ; HL = chars since last LF
-        CALL    GBSETCSCOL      ; force CSCOL = correct value
-        RET
+        JMP     GBSETCSCOL      ; force CSCOL = correct value
 
 ;=============================================================
 ; GBDLLN - Delete current line (including its newline).

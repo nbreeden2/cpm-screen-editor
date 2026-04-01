@@ -749,14 +749,12 @@ FSVVRT:
         JMP     FSVSKP
 
 FSVSKP: LXI     D,SAVEMSG
-        CALL    STATMSG
-        RET
+        JMP     STATMSG
 
 FSVERE: LXI     D,ERRMSG
         CALL    STATMSG
         MVI     C,BF_CONIN
-        CALL    BDOS            ; wait for any key
-        RET
+        JMP     BDOS            ; wait for any key
 
 ;=============================================================
 ; FIPROMPT - Prompt user for a filename on the status line.
@@ -883,8 +881,7 @@ FIBUFCLR:
         POP     D               ; DE = base
         POP     H               ; HL = descriptor
 
-        CALL    GBINIT
-        RET
+        JMP     GBINIT
 
 ;------------------------------------------------------------
 ; FISAVFN - Copy FCB drive+name+ext into BD_FNAME field.
@@ -990,8 +987,7 @@ FIMKBAK:
         CALL    FIBAKFCB        ; build BAKFCB
         LXI     D,BAKFCB
         MVI     C,BF_FDEL
-        CALL    BDOS            ; ignore error (may not exist)
-        RET
+        JMP     BDOS            ; ignore error (may not exist)
 
 ;------------------------------------------------------------
 ; FIRNMBK - Rename WRKFCB file to .BAK using FCB rename.
@@ -1032,8 +1028,7 @@ FRNLP2: LDAX    D
 
         LXI     D,RNMFCB
         MVI     C,23            ; BF_RENAME = 23
-        CALL    BDOS
-        RET
+        JMP     BDOS
 
 ;------------------------------------------------------------
 ; FIWRITE - Write gap buffer to currently-open WRKFCB.
@@ -1230,8 +1225,7 @@ FWCLOS:
         LDA     FWERRF
         ORA     A
         RNZ                     ; error: keep modified flag
-        CALL    FICLRMOD
-        RET
+        JMP     FICLRMOD
 
 ;------------------------------------------------------------
 ; FWREC - Write one RECSIZ record from DMABUF to WRKFCB.
@@ -1371,8 +1365,7 @@ FPNESC: STAX    D
         INX     D
         DCR     B
         JNZ     FPNELP
-        CALL    FIRCB0
-        RET
+        JMP     FIRCB0
 
 ;=============================================================
 ; FIPRNUM - Print HL as decimal number (0-65535).

@@ -236,8 +236,7 @@ BLMARK:
         LXI     H,NO_MARK
         CALL    BLWRME
         LXI     D,BM1MSG
-        CALL    STATMSG
-        RET
+        JMP     STATMSG
 
 BLMST2:
         ; MRKBG is set; check MRKEN
@@ -269,15 +268,13 @@ BLMSWP: ; cursor < MRKBG: swap so MRKBG <= MRKEN
         POP     H               ; HL = old MRKBG
         CALL    BLWRME          ; MRKEN = old MRKBG
         LXI     D,BM2MSG
-        CALL    STATMSG
-        RET
+        JMP     STATMSG
 
 BLMSET: ; MRKEN = cursor (DE)
         XCHG
         CALL    BLWRME          ; MRKEN = HL (cursor)
         LXI     D,BM2MSG
-        CALL    STATMSG
-        RET
+        JMP     STATMSG
 
 BLMCLR: ; Clear both marks
         LXI     H,NO_MARK
@@ -285,8 +282,7 @@ BLMCLR: ; Clear both marks
         LXI     H,NO_MARK
         CALL    BLWRME
         LXI     D,BMCMSG
-        CALL    STATMSG
-        RET
+        JMP     STATMSG
 
 ;=============================================================
 ; BLCOPY - Copy marked block to clipboard (CLIPBUF).
@@ -357,8 +353,7 @@ BCDON:
         SHLD    CLIPLEN
 
         LXI     D,BCPMSG
-        CALL    STATMSG
-        RET
+        JMP     STATMSG
 
 ;=============================================================
 ; BLDEL - Delete marked block from buffer.
@@ -419,8 +414,7 @@ BDDON:
         MVI     A,1
         STA     DIRTY
         LXI     D,BDLMSG
-        CALL    STATMSG
-        RET
+        JMP     STATMSG
 
 ;=============================================================
 ; BLPASTE - Insert clipboard contents at current cursor.
@@ -457,13 +451,11 @@ BPDONE:
         MVI     A,1
         STA     DIRTY
         LXI     D,BPSMSG
-        CALL    STATMSG
-        RET
+        JMP     STATMSG
 
 BPNONE:
         LXI     D,BPEMSG
-        CALL    STATMSG
-        RET
+        JMP     STATMSG
 
 ;=============================================================
 ; Internal helpers

@@ -407,15 +407,13 @@ SRNAVD:
         MVI     A,1
         STA     DIRTY
         LXI     D,SRFMSG
-        CALL    STATMSG
-        RET
+        JMP     STATMSG
 
 SRNFND:
         XRA     A
         STA     SRWRAP
         LXI     D,SRNFMS
-        CALL    STATMSG
-        RET
+        JMP     STATMSG
 
 ;=============================================================
 ; SRTRY - Try to match SRCHSTR at logical offset HL.

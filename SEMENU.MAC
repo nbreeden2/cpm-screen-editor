@@ -344,8 +344,7 @@ MNUDN:  LDA     MNUSEL
         JMP     MNULP
 
 MNUCNC: ; Cancel: restore screen
-        CALL    MNUCLR
-        RET
+        JMP     MNUCLR
 
 MNUACT: ; Dispatch selected item
         CALL    MNUCLR          ; remove menu overlay
@@ -586,8 +585,7 @@ MNUDRB:
         MVI     C,MNUCOL1
         CALL    CURGOTO
         LXI     D,MNUBOT
-        CALL    OUTSTR
-        RET
+        JMP     OUTSTR
 
 ; MOUTSTR2 - local helper: OUTSTR with HL instead of DE
 MOUTSTR2:

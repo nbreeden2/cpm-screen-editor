@@ -638,8 +638,7 @@ DXEXIT:
         JMP     WBOOT           ; return to CP/M
 
 DXRET:  LXI     D,CLRMSG
-        CALL    STATMSG         ; clear leftover prompt
-        RET
+        JMP     STATMSG         ; clear leftover prompt
 
 ;------------------------------------------------------------
 ; FILFAIL - File too large or too wide to load.

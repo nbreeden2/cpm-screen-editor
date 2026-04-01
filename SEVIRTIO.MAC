@@ -287,8 +287,7 @@ VICLAFT:
         CALL    VISDMA          ; set DMA for directory ops
         LXI     D,VAFCB
         MVI     C,BF_FCLOSE
-        CALL    BDOS
-        RET
+        JMP     BDOS
 
 ;=============================================================
 ; VIGOTO - Merge current state and split at target line.
@@ -1073,8 +1072,7 @@ VIBUFCLR:
         POP     H               ; HL = descriptor
 
         ; Call GBINIT (HL=desc, DE=base, BC=size)
-        CALL    GBINIT
-        RET
+        JMP     GBINIT
 
 ;=============================================================
 ; VIGBFIN - Finalise buffer descriptor after direct load.
@@ -1391,8 +1389,7 @@ VIMKMRG:
 VISDMA:
         LXI     D,CMDTAIL
         MVI     C,BF_SETDMA
-        CALL    BDOS
-        RET
+        JMP     BDOS
 
 ;------------------------------------------------------------
 ; Open temp file for reading helpers
@@ -1444,15 +1441,13 @@ VICLSBEF:
         CALL    VISDMA          ; set DMA for directory ops
         LXI     D,VBFCB
         MVI     C,BF_FCLOSE
-        CALL    BDOS
-        RET
+        JMP     BDOS
 
 VICLSAFT:
         CALL    VISDMA          ; set DMA for directory ops
         LXI     D,VAFCB
         MVI     C,BF_FCLOSE
-        CALL    BDOS
-        RET
+        JMP     BDOS
 
 ;=============================================================
 ; DATA SEGMENT

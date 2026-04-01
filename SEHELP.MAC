@@ -286,8 +286,7 @@ HLPKEY: MVI     E,0FFH
 
         ; Reset attribute
         LXI     D,HLPNRM
-        CALL    OUTSTR
-        RET
+        JMP     OUTSTR
 
 ;=============================================================
 ; String constants
