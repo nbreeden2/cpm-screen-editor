@@ -618,13 +618,8 @@ SDSKDN: ; Skip done. Check if we entered highlight region.
         STA     SDHLON
 SDSK2:  MVI     C,0             ; reset screen column for output
         ; --- Text output loop ---
-SDTXLP: MOV     A,C
-        PUSH    B
-        MOV     B,A
-        LDA     RTXTCL
-        CMP     B               ; RTXTCL - col: carry if col > limit
-        MOV     A,B
-        POP     B
+SDTXLP: LDA     RTXTCL
+        CMP     C               ; RTXTCL - col: carry if col > limit
         JC      SDCLR           ; hit screen column limit
         JZ      SDCLR
         LDAX    D               ; read text byte
@@ -697,13 +692,8 @@ SDTBSP: MVI     A,' '
         POP     B
         POP     D
         INR     C
-        MOV     A,C
-        PUSH    B
-        MOV     B,A
         LDA     RTXTCL
-        CMP     B
-        MOV     A,B
-        POP     B
+        CMP     C               ; RTXTCL - col: carry if col > limit
         JC      SDCLR
         JZ      SDCLR
         DCR     B
@@ -1129,13 +1119,8 @@ SLSKCK: LDA     SLSKIP
 SLSKDN: MVI     C,0             ; reset screen column for output
 
 SLETXT:
-        MOV     A,C
-        PUSH    B
-        MOV     B,A
         LDA     RTXTCL
-        CMP     B
-        MOV     A,B
-        POP     B
+        CMP     C               ; RTXTCL - col: carry if col > limit
         JC      SLEEND          ; hit screen column limit
         JZ      SLEEND
         LDAX    D               ; read text byte
@@ -1196,13 +1181,8 @@ STABSP: MVI     A,' '
         POP     B
         POP     D               ; restore text pointer
         INR     C
-        MOV     A,C
-        PUSH    B
-        MOV     B,A
         LDA     RTXTCL
-        CMP     B
-        MOV     A,B
-        POP     B
+        CMP     C               ; RTXTCL - col: carry if col > limit
         JC      SLEEND
         JZ      SLEEND
         DCR     B
