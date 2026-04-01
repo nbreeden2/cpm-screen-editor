@@ -234,19 +234,19 @@ CLREOL:  DB     ESC,'[','K','$' ; erase to end of line
 HIDCUR:  DB     ESC,'[','?','2','5','l','$' ; hide cursor
 SHWCUR:  DB     ESC,'[','?','2','5','h','$' ; show cursor
 SGRRES:  DB     ESC,'[','0','m','$'  ; SGR reset
-SGRBLD:  DB     ESC,'[','1','m','$'  ; SGR bold
-SGRDIM:  DB     ESC,'[','2','m','$'  ; SGR dim
-SGRREV:  DB     ESC,'[','7','m','$'  ; SGR reverse
+SGRBLD:  DB     ESC,'[','0',';','1','m','$'  ; SGR reset+bold
+SGRDIM:  DB     ESC,'[','0',';','2','m','$'  ; SGR reset+dim
+SGRREV:  DB     ESC,'[','0',';','7','m','$'  ; SGR reset+reverse
         IF COLOR+SYNHI
-SGRMAG:  DB     ESC,'[','3','5','m','$'  ; SGR magenta fg
-SGRGRN:  DB     ESC,'[','3','2','m','$'  ; SGR green fg
-SGRBLU:  DB     ESC,'[','9','4','m','$'  ; SGR bright blue fg
-SGRRED:  DB     ESC,'[','3','1','m','$'  ; SGR red fg
-SGRYEL:  DB     ESC,'[','3','3','m','$'  ; SGR yellow fg
-SGRCYN:  DB     ESC,'[','3','6','m','$'  ; SGR cyan fg
-SGRWHT:  DB     ESC,'[','0',';','3','7','m','$' ; SGR reset+white fg
-SGRBYL:  DB     ESC,'[','9','3','m','$'  ; SGR bright yellow fg
-SGRBGN:  DB     ESC,'[','1',';','3','2','m','$'  ; SGR bold green fg
+SGRMAG:  DB     ESC,'[','0',';','3','5','m','$'  ; SGR reset+magenta
+SGRGRN:  DB     ESC,'[','0',';','3','2','m','$'  ; SGR reset+green
+SGRBLU:  DB     ESC,'[','0',';','9','4','m','$'  ; SGR reset+bright blue
+SGRRED:  DB     ESC,'[','0',';','3','1','m','$'  ; SGR reset+red
+SGRYEL:  DB     ESC,'[','0',';','3','3','m','$'  ; SGR reset+yellow
+SGRCYN:  DB     ESC,'[','0',';','3','6','m','$'  ; SGR reset+cyan
+SGRWHT:  DB     ESC,'[','0',';','3','7','m','$'  ; SGR reset+white
+SGRBYL:  DB     ESC,'[','0',';','9','3','m','$'  ; SGR reset+bright yellow
+SGRBGN:  DB     ESC,'[','0',';','1',';','3','2','m','$'  ; SGR reset+bold+green
         ENDIF
 
 ;--- Info bar label strings ---------------------------
@@ -808,11 +808,7 @@ SDSGL:  MOV     B,M             ; table attr byte
         JZ      SDSGF           ; match found
         MOV     A,C             ; restore target
         JMP     SDSGL
-SDSGF:  PUSH    D               ; save color string
-        LXI     D,SGRRES        ; reset first (ESC[0m)
-        CALL    OUTSTR
-        POP     D               ; restore color string
-        CALL    OUTSTR          ; DE = SGR string
+SDSGF:  CALL    OUTSTR          ; DE = combined reset+color string
 SDSGD:  RET
 
 ;--- SGR lookup table: attribute byte -> string address ------
