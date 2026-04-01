@@ -871,16 +871,14 @@ GVTNRM:
         POP     H               ; HL = src end
         POP     D               ; DE = dest end
         ; Copy backward (dest > src, safe)
-GVTCLP: MOV     A,B
-        ORA     C
-        JZ      GVTCLD
-        MOV     A,M
+GVTCLP: MOV     A,M
         STAX    D
         DCX     H
         DCX     D
         DCX     B
-        JMP     GVTCLP
-GVTCLD:
+        MOV     A,B
+        ORA     C
+        JNZ     GVTCLP
         ; --- Update descriptor fields ---
         LHLD    GPGCNT
         MOV     B,H
@@ -974,16 +972,14 @@ GVENRM:
         POP     H               ; HL = src
         POP     D               ; DE = dest
         ; Copy forward (dest < src, safe)
-GVECLP: MOV     A,B
-        ORA     C
-        JZ      GVECLD
-        MOV     A,M
+GVECLP: MOV     A,M
         STAX    D
         INX     H
         INX     D
         DCX     B
-        JMP     GVECLP
-GVECLD:
+        MOV     A,B
+        ORA     C
+        JNZ     GVECLP
         ; --- Update descriptor fields ---
         LHLD    GPGCNT
         MOV     B,H
@@ -1244,16 +1240,14 @@ GGTSDN: ; HL = one past last LF (or end of text)
         POP     D               ; DE = dst
         POP     H               ; HL = src
         ; Copy forward (src > dst, safe)
-GGTCLP: MOV     A,B
-        ORA     C
-        JZ      GGTCLD
-        MOV     A,M
+GGTCLP: MOV     A,M
         STAX    D
         INX     H
         INX     D
         DCX     B
-        JMP     GGTCLP
-GGTCLD:
+        MOV     A,B
+        ORA     C
+        JNZ     GGTCLP
         ; --- Update descriptor fields ---
         LHLD    GPGCNT
         MOV     B,H
@@ -1445,16 +1439,14 @@ GPUCPY: ; HL = absolute target address, GPGLFS = LFs crossed
         POP     H               ; HL = src end
         POP     D               ; DE = dest end
         ; Copy backward (safe: dest > src)
-GPUCLP: MOV     A,B
-        ORA     C
-        JZ      GPUCLD
-        MOV     A,M
+GPUCLP: MOV     A,M
         STAX    D
         DCX     H
         DCX     D
         DCX     B
-        JMP     GPUCLP
-GPUCLD:
+        MOV     A,B
+        ORA     C
+        JNZ     GPUCLP
         ; --- Update descriptor fields ---
         LHLD    GPGCNT
         MOV     B,H
@@ -1631,16 +1623,14 @@ GPDCNT: ; HL = copy-end position, B = remaining LF count
         POP     H               ; HL = src
         POP     D               ; DE = dest
         ; Copy forward (safe: src > dest)
-GPDCLP: MOV     A,B
-        ORA     C
-        JZ      GPDCLD
-        MOV     A,M
+GPDCLP: MOV     A,M
         STAX    D
         INX     H
         INX     D
         DCX     B
-        JMP     GPDCLP
-GPDCLD:
+        MOV     A,B
+        ORA     C
+        JNZ     GPDCLP
         ; --- Update descriptor fields ---
         LHLD    GPGCNT
         MOV     B,H
