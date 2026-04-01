@@ -1,6 +1,6 @@
 
 
-                      SEDIT v1.13 Technical Manual
+                      SEDIT v1.14 Technical Manual
                   Build Environment and Source Reference
 
                     ================================
@@ -782,6 +782,13 @@
 
     10. REVISION HISTORY
 
+    v1.14   Performance optimizations: column-limit check
+            simplification in rendering loops, combined SGR
+            reset+color strings, bulk copy bottom-test loops,
+            GBMVRT/GBMVLT accessor caching, 62 tail-call
+            eliminations, dead code removal. ~160 bytes smaller,
+            ~17% faster page navigation, ~30 cycles/char saved
+            in screen rendering.
     v1.13   Fix syntax tokenizer address carry bug (comments
             past ~column 24 never colored). Fix tab cursor
             positioning, Col: display, and auto-scroll to use

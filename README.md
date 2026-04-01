@@ -4,7 +4,7 @@
 **Assembler:** Microsoft M80 / L80
 **Terminal:** VT100 / ANSI
 **Editing Model:** Full-screen, ESC-menu driven, WordStar-compatible control keys
-**Version:** 1.13
+**Version:** 1.14
 
 ---
 
@@ -207,7 +207,7 @@ Menu geometry: top-left at row 6/col 28, bottom-right at row 18/col 54.
 - Press any key to return to editing
 
 #### 7. About (B)
-- Displays `SEDIT v1.13 CP/M Screen Editor` on the status bar
+- Displays `SEDIT v1.14 CP/M Screen Editor` on the status bar
 - Press any key to dismiss
 
 #### 8. Toggle 80/132 col (W)
