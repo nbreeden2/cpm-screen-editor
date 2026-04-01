@@ -218,13 +218,7 @@ SRCHMAX EQU     64          ; max find string length
 BLMARK:
         ; Read MRKBG
         CALL    BLRDMB          ; HL = MRKBG
-        MOV     A,H
-        ANI     0FFH
-        MOV     B,A
-        MOV     A,L
-        ORA     B
-        CPI     0FFH
-        ; Check if MRKBG = NO_MARK: HL = 0FFFFh
+        ; Check if MRKBG = NO_MARK (0FFFFh)
         MOV     A,H
         CPI     0FFH
         JNZ     BLMST2          ; MRKBG already set

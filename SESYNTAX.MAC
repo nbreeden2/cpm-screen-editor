@@ -660,10 +660,8 @@ SNISID:
         JC      SNNIDC
         CPI     'z'+1
         JC      SNNIDR
-SNNIDC: ORA     A               ; ensure NZ if not set
-        ; set NZ
-        MVI     A,1
-        ORA     A
+SNNIDC: MVI     A,1
+        ORA     A               ; set NZ
         RET
 SNNIDR: XRA     A               ; Z
         RET

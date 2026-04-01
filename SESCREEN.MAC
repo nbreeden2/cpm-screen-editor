@@ -308,8 +308,6 @@ SCRDRAW:
         MOV     E,M
         INX     H
         MOV     D,M             ; DE = TOPLN
-        XCHG                    ; HL = TOPLN
-        XCHG                    ; DE = TOPLN
         LHLD    VBFLN
         DAD     D               ; HL = VBFLN + TOPLN
         SHLD    SDTPLN          ; save for line number gutter

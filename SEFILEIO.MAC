@@ -819,36 +819,6 @@ FPCANC: LXI     H,FILNBUF
 ; Uses CURBDP to get base and size, then calls GBINIT.
 ;------------------------------------------------------------
 FIBUFCLR:
-        ; HL = descriptor address (CURBDP)
-        LHLD    CURBDP
-
-        ; DE = BD_BSTAR (base address)
-        PUSH    H
-        LXI     D,BD_BSTAR
-        DAD     D
-        MOV     E,M
-        INX     H
-        MOV     D,M             ; DE = base
-        POP     H
-
-        ; BC = BD_BSIZE (capacity)
-        PUSH    H
-        LXI     D,BD_BSIZE
-        DAD     D
-        MOV     C,M
-        INX     H
-        MOV     B,M             ; BC = size (actually BC not used right - let me fix)
-        POP     H
-
-        ; HL = descriptor, DE = base, BC = capacity
-        ; Swap: GBINIT expects HL=desc, DE=base, BC=size
-        ; We have HL=desc now, need to reload DE and BC
-        PUSH    H               ; save desc
-        POP     H               ; restore desc (HL=desc)
-        ; DE already = base, BC already = size
-        ; But we clobbered H with the push/pop trick above
-        ; Let me redo this cleanly:
-
         LHLD    CURBDP          ; HL = descriptor
         PUSH    H               ; save desc ptr
 
