@@ -636,22 +636,27 @@ GBMVLT:
         ORA     L
         RZ                      ; at BOF
 
-        ; Get char to left of gap
+        ; Cache base address (GBBASE clobbers A,HL)
         CALL    GBBASE          ; DE = base
+        XCHG
+        SHLD    GLTBAS          ; save base
+        XCHG                    ; DE = base again
+
+        ; Get char to left of gap: base + GAPBG - 1
         CALL    GBGAPBG
         DCX     H
         DAD     D               ; abs address
         MOV     A,M             ; char being passed
         STA     GBTMP
 
-        ; Slide gap left: copy byte from left of gap
-        ;   to right end of gap (use GBTMP; GBBASE/GBGAPEN clobber A)
-        CALL    GBBASE
+        ; Write char at right end of gap: base + GAPEN - 1
         CALL    GBGAPEN
         DCX     H
+        XCHG                    ; DE = GAPEN - 1
+        LHLD    GLTBAS          ; HL = base
         DAD     D               ; HL = base + GAPEN - 1
         LDA     GBTMP
-        MOV     M,A             ; write saved char at right end of gap
+        MOV     M,A             ; write saved char
 
         ; Update GAPBG-=1, GAPEN-=1
         CALL    GBGAPBG
@@ -719,20 +724,25 @@ GBMVRT:
         SBB     D
         JNC     GBRTAT          ; GAPEN >= BSIZE, at end
 
-        ; Get char at right side of gap (GAPEN)
-        CALL    GBBASE
-        CALL    GBGAPEN
-        DAD     D
+        ; Cache base address (GBBASE clobbers A,HL)
+        CALL    GBBASE          ; DE = base
+        XCHG
+        SHLD    GRTBAS          ; save base
+        XCHG                    ; DE = base again
+
+        ; Get char at right side of gap: base + GAPEN
+        CALL    GBGAPEN         ; HL = GAPEN
+        DAD     D               ; HL = base + GAPEN
         MOV     A,M
         STA     GBTMP
 
-        ; Copy char from right of gap to left of gap
-        ; (buffer[GAPBG] = buffer[GAPEN])
-        CALL    GBBASE          ; DE = base
+        ; Write char at left of gap: base + GAPBG
         CALL    GBGAPBG         ; HL = GAPBG
-        DAD     D               ; HL = abs addr of GAPBG
+        XCHG                    ; DE = GAPBG
+        LHLD    GRTBAS          ; HL = base
+        DAD     D               ; HL = base + GAPBG
         LDA     GBTMP
-        MOV     M,A             ; write char at GAPBG
+        MOV     M,A             ; write char
 
         ; Slide gap right: GAPBG+=1, GAPEN+=1
         CALL    GBGAPBG
@@ -3246,6 +3256,10 @@ GFLR2E: DW      0               ; region 2 end
 GPGBAS: DW      0               ; buffer base address
 GPGCNT: DW      0               ; byte count for bulk copy
 GPGLFS: DB      0               ; LFs found during scan
+
+; GBMVRT/GBMVLT cached base address
+GRTBAS: DW      0               ; cached GBBASE for GBMVRT
+GLTBAS: DW      0               ; cached GBBASE for GBMVLT
 
 ; GBGOTOL working variables
 GGTLIN: DW      0               ; target line number (1-based)
