@@ -246,6 +246,7 @@ SGRYEL:  DB     ESC,'[','3','3','m','$'  ; SGR yellow fg
 SGRCYN:  DB     ESC,'[','3','6','m','$'  ; SGR cyan fg
 SGRWHT:  DB     ESC,'[','0',';','3','7','m','$' ; SGR reset+white fg
 SGRBYL:  DB     ESC,'[','9','3','m','$'  ; SGR bright yellow fg
+SGRBGN:  DB     ESC,'[','1',';','3','2','m','$'  ; SGR bold green fg
         ENDIF
 
 ;--- Info bar label strings ---------------------------
@@ -432,7 +433,7 @@ SDRWLP: LDA     SDROW
 
         ; Print 3-digit line number gutter
         IF COLOR
-        LXI     D,SGRGRN        ; green for line numbers
+        LXI     D,SGRBGN        ; bold green for line numbers
         CALL    OUTSTR
         ENDIF
         LHLD    SDTPLN          ; HL = TOPLN
@@ -1010,7 +1011,7 @@ SCREDLN:
         DAD     D               ; HL = VBFLN + TOPLINE + row + 1
         IF COLOR
         PUSH    H
-        LXI     D,SGRGRN        ; green for line numbers
+        LXI     D,SGRBGN        ; bold green for line numbers
         CALL    OUTSTR
         POP     H
         ENDIF
@@ -1054,7 +1055,7 @@ SLEDRAW:
         DAD     D               ; HL = VBFLN + TOPLINE + row + 1
         IF COLOR
         PUSH    H
-        LXI     D,SGRGRN        ; green for line numbers
+        LXI     D,SGRBGN        ; bold green for line numbers
         CALL    OUTSTR
         POP     H
         ENDIF
@@ -1415,9 +1416,10 @@ IBLNCT: ; Print Lines: count
         DAD     D               ; HL = VBFLN + TOPLN + CSROW + 1
         CALL    OUTHL4
 
-        ; Print Col: cursor col
+        ; Print Col: visual cursor col (tabs expanded)
         LXI     D,IBCNSTR
         CALL    OUTSTR
+        ; Get byte col from descriptor
         LHLD    CURBDP
         MVI     A,BD_CSCOL
         ADD     L
@@ -1425,7 +1427,32 @@ IBLNCT: ; Print Lines: count
         MVI     A,0
         ADC     H
         MOV     H,A
-        MOV     L,M
+        MOV     C,M             ; C = byte col (0-based)
+        ; Scan current line expanding tabs
+        PUSH    B
+        CALL    GBCURLN         ; HL = GGLBUF, A = len
+        POP     B               ; C = byte col
+        MVI     D,0             ; D = visual column
+        MOV     A,C
+        ORA     A
+        JZ      IBCLDN          ; byte col = 0
+        MOV     E,C             ; E = bytes to walk
+IBCLLP: MOV     A,M
+        CPI     TAB
+        JZ      IBCLTB
+        INR     D               ; normal char: visual++
+        JMP     IBCLNX
+IBCLTB: MOV     A,D
+        ANI     TABWID-1
+        MOV     B,A
+        MVI     A,TABWID
+        SUB     B
+        ADD     D
+        MOV     D,A             ; D = next tab stop
+IBCLNX: INX     H
+        DCR     E
+        JNZ     IBCLLP
+IBCLDN: MOV     L,D
         MVI     H,0
         INX     H               ; 1-based
         CALL    OUTHL4
@@ -1530,8 +1557,7 @@ RLGUT:  MVI     A,' '
         MOV     B,A             ; B = chars remaining
         MVI     C,0             ; C = position (0-based)
 RLTXLP: MOV     A,C
-        INR     A               ; 1-based position
-        ANI     TABWID-1        ; mod 4
+        ANI     TABWID-1        ; mod 4 (0-based)
         JNZ     RLDASH
         MVI     A,':'
         JMP     RLOUT
@@ -1684,16 +1710,46 @@ CURPOS:
         MOV     H,A
         MOV     B,M             ; B = screen row (0-based)
         INX     H
-        MOV     C,M             ; C = text col (0-based)
+        MOV     C,M             ; C = text col (byte offset, 0-based)
         ; Terminal row = B + EDITFR (1-based)
         MOV     A,B
         ADI     EDITFR
         MOV     B,A             ; B = terminal row
-        ; Terminal col = C - HSCROL + TXTFCOL (1-based)
-        LDA     HSCROL
-        MOV     L,A             ; L = HSCROL
+        PUSH    B               ; save row and byte col
+        ; Compute visual column by scanning current line for tabs
+        ; Read current line text
+        CALL    GBCURLN         ; HL = GGLBUF, A = len
+        ; Walk C bytes, expanding tabs
+        POP     B               ; B = terminal row, C = byte col
+        PUSH    B               ; re-save
+        MVI     D,0             ; D = visual column counter
         MOV     A,C
-        SUB     L               ; A = CSCOL - HSCROL (screen col)
+        ORA     A
+        JZ      CPVDN           ; byte col = 0, visual = 0
+        MOV     E,C             ; E = bytes to walk
+CPVLP:  MOV     A,M
+        CPI     TAB
+        JZ      CPVTAB
+        INR     D               ; normal char: visual++
+        JMP     CPVNXT
+CPVTAB: ; Tab: advance to next tab stop
+        MOV     A,D
+        ANI     TABWID-1
+        MOV     C,A
+        MVI     A,TABWID
+        SUB     C               ; spaces to next stop
+        ADD     D
+        MOV     D,A             ; D = new visual column
+CPVNXT: INX     H
+        DCR     E
+        JNZ     CPVLP
+CPVDN:  POP     B               ; B = terminal row
+        ; D = visual column (0-based)
+        ; Terminal col = D - HSCROL + TXTFCOL (1-based)
+        LDA     HSCROL
+        MOV     C,A
+        MOV     A,D
+        SUB     C               ; A = visual_col - HSCROL
         ADI     TXTFCOL
         MOV     C,A             ; C = terminal col
         CALL    CURGOTO

@@ -1040,6 +1040,21 @@ GBGOTOL:
         MOV     A,H
         ORA     L
         RZ                      ; line 0 = no-op
+        ; Clamp target to total line count
+        PUSH    H               ; save target
+        CALL    GBCNTLN         ; HL = total lines
+        XCHG                    ; DE = total
+        POP     H               ; HL = target
+        MOV     A,H
+        CMP     D
+        JC      GGTCLMP         ; target_H < total_H, in range
+        JNZ     GGTCL2          ; target_H > total_H, clamp
+        MOV     A,L
+        CMP     E
+        JC      GGTCLMP         ; target < total, in range
+        JZ      GGTCLMP         ; target == total, in range
+GGTCL2: XCHG                    ; HL = total (clamp to max)
+GGTCLMP:
         ; In virtual mode, check if target is in buffer range
         LDA     VIMODE
         ORA     A

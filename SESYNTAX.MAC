@@ -437,9 +437,9 @@ SNLP:
 
         ; Read current char
         LHLD    SYNPTR
-        MOV     A,L
-        ADD     C
-        DCR     A               ; index = C-1
+        MOV     A,C
+        DCR     A               ; A = C-1 (0-based index)
+        ADD     L               ; A = L + (C-1)
         MOV     L,A
         MOV     A,H
         ACI     0
@@ -485,9 +485,9 @@ SNWRD2:
         ; Classify: label if followed by ':', else opcode/reg
         ; Check char at C (after identifier)
         LHLD    SYNPTR
-        MOV     A,L
-        ADD     C
-        DCR     A
+        MOV     A,C
+        DCR     A               ; A = C-1 (0-based index)
+        ADD     L               ; A = L + (C-1)
         MOV     L,A
         MOV     A,H
         ACI     0
@@ -545,9 +545,9 @@ SNNUM:
         ; advance while digit or A-F/a-f
 SNNUML:
         LHLD    SYNPTR
-        MOV     A,L
-        ADD     C
-        DCR     A
+        MOV     A,C
+        DCR     A               ; A = C-1 (0-based index)
+        ADD     L               ; A = L + (C-1)
         MOV     L,A
         MOV     A,H
         ACI     0
@@ -586,9 +586,9 @@ SNSTRL:
         CMP     C               ; SYNLIM - C; carry set if C > SYNLIM
         JC      SNSTRD          ; past limit
         LHLD    SYNPTR
-        MOV     A,L
-        ADD     C
-        DCR     A
+        MOV     A,C
+        DCR     A               ; A = C-1 (0-based index)
+        ADD     L               ; A = L + (C-1)
         MOV     L,A
         MOV     A,H
         ACI     0
@@ -627,9 +627,9 @@ SNDNE:  RET
 ;------------------------------------------------------------
 SNCOL:
         LHLD    SYNPTR
-        MOV     A,L
-        ADD     C
-        DCR     A
+        MOV     A,C
+        DCR     A               ; A = C-1 (0-based index)
+        ADD     L               ; A = L + (C-1)
         MOV     L,A
         MOV     A,H
         ACI     0
@@ -948,9 +948,9 @@ SNCLP:
 
         ; Read current char
         LHLD    SYNPTR
-        MOV     A,L
-        ADD     C
-        DCR     A               ; index = C-1
+        MOV     A,C
+        DCR     A               ; A = C-1 (0-based index)
+        ADD     L               ; A = L + (C-1)
         MOV     L,A
         MOV     A,H
         ACI     0
@@ -1108,9 +1108,9 @@ SNCBCL:
         CMP     B
         JNC     SNCBCE          ; past limit, comment continues
         LHLD    SYNPTR
-        MOV     A,L
-        ADD     C
-        DCR     A
+        MOV     A,C
+        DCR     A               ; A = C-1 (0-based index)
+        ADD     L               ; A = L + (C-1)
         MOV     L,A
         MOV     A,H
         ACI     0
@@ -1132,9 +1132,9 @@ SNCBCL:
         CMP     B
         JNC     SNCBCE          ; past limit
         LHLD    SYNPTR
-        MOV     A,L
-        ADD     C
-        DCR     A
+        MOV     A,C
+        DCR     A               ; A = C-1 (0-based index)
+        ADD     L               ; A = L + (C-1)
         MOV     L,A
         MOV     A,H
         ACI     0
@@ -1173,9 +1173,9 @@ SNCBLL:
         CMP     B
         JNC     SNCBLE          ; past limit
         LHLD    SYNPTR
-        MOV     A,L
-        ADD     C
-        DCR     A
+        MOV     A,C
+        DCR     A               ; A = C-1 (0-based index)
+        ADD     L               ; A = L + (C-1)
         MOV     L,A
         MOV     A,H
         ACI     0
@@ -1197,9 +1197,9 @@ SNCBLL:
         CMP     B
         JNC     SNCBLE
         LHLD    SYNPTR
-        MOV     A,L
-        ADD     C
-        DCR     A
+        MOV     A,C
+        DCR     A               ; A = C-1 (0-based index)
+        ADD     L               ; A = L + (C-1)
         MOV     L,A
         MOV     A,H
         ACI     0
@@ -1239,9 +1239,9 @@ SNCSTL:
         CMP     B
         JNC     SNCSTD          ; past limit
         LHLD    SYNPTR
-        MOV     A,L
-        ADD     C
-        DCR     A
+        MOV     A,C
+        DCR     A               ; A = C-1 (0-based index)
+        ADD     L               ; A = L + (C-1)
         MOV     L,A
         MOV     A,H
         ACI     0
@@ -1283,9 +1283,9 @@ SNCCHL:
         CMP     B
         JNC     SNCCHD          ; past limit
         LHLD    SYNPTR
-        MOV     A,L
-        ADD     C
-        DCR     A
+        MOV     A,C
+        DCR     A               ; A = C-1 (0-based index)
+        ADD     L               ; A = L + (C-1)
         MOV     L,A
         MOV     A,H
         ACI     0
@@ -1321,9 +1321,9 @@ SNCNUM:
         MOV     D,C             ; start col
         ; Check for 0x prefix
         LHLD    SYNPTR
-        MOV     A,L
-        ADD     C
-        DCR     A
+        MOV     A,C
+        DCR     A               ; A = C-1 (0-based index)
+        ADD     L               ; A = L + (C-1)
         MOV     L,A
         MOV     A,H
         ACI     0
@@ -1339,9 +1339,9 @@ SNCNUM:
         CMP     B
         JNC     SNCNMD          ; past limit
         LHLD    SYNPTR
-        MOV     A,L
-        ADD     C
-        DCR     A
+        MOV     A,C
+        DCR     A               ; A = C-1 (0-based index)
+        ADD     L               ; A = L + (C-1)
         MOV     L,A
         MOV     A,H
         ACI     0
@@ -1362,9 +1362,9 @@ SNCNXL:
         CMP     B
         JNC     SNCNMD
         LHLD    SYNPTR
-        MOV     A,L
-        ADD     C
-        DCR     A
+        MOV     A,C
+        DCR     A               ; A = C-1 (0-based index)
+        ADD     L               ; A = L + (C-1)
         MOV     L,A
         MOV     A,H
         ACI     0
@@ -1382,9 +1382,9 @@ SNCNML:
         CMP     B
         JNC     SNCNMD
         LHLD    SYNPTR
-        MOV     A,L
-        ADD     C
-        DCR     A
+        MOV     A,C
+        DCR     A               ; A = C-1 (0-based index)
+        ADD     L               ; A = L + (C-1)
         MOV     L,A
         MOV     A,H
         ACI     0

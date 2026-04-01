@@ -229,6 +229,7 @@ SRCHMAX EQU     64          ; max find string length
         EXTRN   GBDLLN         ; delete current line
         EXTRN   GBWRDPV         ; move to prev word
         EXTRN   GBWRDNX         ; move to next word
+        EXTRN   GBCURLN         ; get current line text
         EXTRN   FIOPEN          ; load file to buffer
         EXTRN   FISAVE          ; save buffer to file
         EXTRN   FISAVFN         ; copy WRKFCB name to BD_FNAME
@@ -700,12 +701,38 @@ CHKYES: MVI     A,1
 ; Exit:   AF HL clobbered; DIRTY set if HSCROL changed
 ;------------------------------------------------------------
 AUTOSCR:
-        ; Read BD_CSCOL
+        ; Compute visual column (expand tabs in current line)
+        ; Read BD_CSCOL (byte offset)
         MVI     A,BD_CSCOL
         CALL    BDFLD           ; HL -> BD_CSCOL
-        MOV     A,M             ; A = cursor column
+        MOV     C,M             ; C = byte col (0-based)
+        ; Scan current line for tabs
+        PUSH    B
+        CALL    GBCURLN         ; HL = GGLBUF, A = len
+        POP     B               ; C = byte col
+        MVI     D,0             ; D = visual column
+        MOV     A,C
+        ORA     A
+        JZ      ASVDN           ; byte col = 0
+        MOV     E,C             ; E = bytes to walk
+ASVLP:  MOV     A,M
+        CPI     TAB
+        JZ      ASVTAB
+        INR     D               ; normal char: visual++
+        JMP     ASVNXT
+ASVTAB: MOV     A,D
+        ANI     TABWID-1
+        MOV     B,A
+        MVI     A,TABWID
+        SUB     B
+        ADD     D
+        MOV     D,A             ; D = next tab stop
+ASVNXT: INX     H
+        DCR     E
+        JNZ     ASVLP
+ASVDN:  MOV     A,D             ; A = visual column
 
-        ; Snap-to-zero: if CSCOL < RTXTTB, HSCROL = 0
+        ; Snap-to-zero: if visual_col < RTXTTB, HSCROL = 0
         MOV     B,A             ; B = CSCOL
         LDA     RTXTTB          ; A = runtime threshold
         CMP     B               ; RTXTTB - CSCOL: carry if CSCOL > RTXTTB

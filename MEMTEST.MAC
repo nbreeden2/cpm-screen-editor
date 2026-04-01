@@ -438,6 +438,25 @@ REPORT:
         LDA     ERRACT
         CALL    PRTHEX2
 
+        ; Re-read the failing address two more times
+        LHLD    ERRADDR
+        MOV     A,M             ; second read
+        STA     ERRD2
+        MOV     A,M             ; third read
+        STA     ERRD3
+
+        LXI     D,R2MSG
+        MVI     C,BF_PRTSTR
+        CALL    BDOS
+        LDA     ERRD2
+        CALL    PRTHEX2
+
+        LXI     D,R3MSG
+        MVI     C,BF_PRTSTR
+        CALL    BDOS
+        LDA     ERRD3
+        CALL    PRTHEX2
+
         RET
 
 ;=============================================================
@@ -570,6 +589,8 @@ OKMSG:  DB      ' ok','$'
 AMSG:   DB      '  addr=$'
 EXMSG:  DB      ' exp=$'
 GTMSG:  DB      ' got=$'
+R2MSG:  DB      ' r2=$'
+R3MSG:  DB      ' r3=$'
 CRLFS:  DB      CR,LF,'$'
 PASSMSG: DB     CR,LF,'PASSED - No errors detected.',CR,LF,'$'
 FAILMSG: DB     CR,LF,'FAILED - $'
@@ -592,6 +613,8 @@ ERRACT: DB      0
 PLZF:   DB      0
 TPLIM:  DW      0               ; end address for TSTPAT loops
 LOOPCNT: DW     0               ; loop iteration counter
+ERRD2:  DB      0               ; second re-read value
+ERRD3:  DB      0               ; third re-read value
 
         DS      64
 STACK:
