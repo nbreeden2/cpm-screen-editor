@@ -39,7 +39,7 @@ for %%M in (GETWIDTH MEMTEST KEYCODE COL80 COL132 CLS COLORS) do (
 )
 
 REM --- Build each variant ---
-
+echo --- WordStar/VT100 Variants ---
 echo.
 echo --- Variant 1/4: SEDIT.COM (mono, no highlight) ---
 python SEBUILD.PY 0 0
@@ -99,10 +99,22 @@ cpmulator L80.COM SEDIT,SESCREEN,SEKEY,SEGAPBUF,SEFILEIO,SEMENU,SESEARCH,SEBLOCK
 if errorlevel 1 goto fail
 copy /y SEDIT.COM SEDIT-C.COM >nul
 echo Built SEDIT-C.COM (C highlight)
+echo --- End of WordStar/VT100 variants ---
 
 REM --- Restore source to default (mono) ---
 python SEBUILD.PY 0 0
 python CPMFMT.PY SESCREEN.MAC SESYNTAX.MAC
+
+echo --- Build ADM-31 Editor ---
+cpmulator M80.COM =SESCREEN
+if errorlevel 1 goto fail
+cpmulator M80.COM =SESYNTAX
+if errorlevel 1 goto fail
+cpmulator M80.COM =SEADM31
+if errorlevel 1 goto fail
+cpmulator L80.COM SEDIT,SEADM31,SEKEY,SEGAPBUF,SEFILEIO,SEMENU,SESEARCH,SEBLOCK,SESYNTAX,SEKEYBND,SEVIRTIO,SEHELP,SEADM31/N/E
+echo Built SEADM31.COM
+echo --- End of ADM-31 Editor ---
 
 REM --- Link standalone utilities ---
 echo.
@@ -131,10 +143,11 @@ del SEDIT-MONO.COM 2>nul
 
 echo.
 echo === All variants built ===
-echo   SEDIT.COM    - Mono  (no color, no highlighting)
-echo   SEDIT-CL.COM - Color (color, no highlighting)
-echo   SEDIT-A.COM  - ASM   (color + ASM highlighting)
-echo   SEDIT-C.COM  - Color (color + C highlighting)
+echo   SEDIT.COM    - Mono  (WordStar/VT100, no color, no highlighting)
+echo   SEDIT-CL.COM - Color (WordStar/VT100, color   , no highlighting)
+echo   SEDIT-A.COM  - ASM   (WordStar/VT100, color + ASM highlighting)
+echo   SEDIT-C.COM  - Color (WordStar/VT100, color + C highlighting)
+echo   SEADM31.COM  - Mono  (ADM-31        , no color, no highlighting)
 goto end
 
 :fail
