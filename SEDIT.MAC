@@ -260,6 +260,7 @@ SRCHMAX EQU     64          ; max find string length
         PUBLIC  RTXTCL          ; runtime text columns
         PUBLIC  RSCRCL          ; runtime screen columns
         PUBLIC  RTXTTB          ; runtime TXTCOLS-TABWID
+        PUBLIC  VTMPDRV         ; virtual temp file drive (0=default)
 
 ;=============================================================
 ; CODE SEGMENT
@@ -322,6 +323,13 @@ BFINLP: MVI     M,' '
 
         ; Initialize and clear screen, draw chrome
         CALL    SCRINIT
+
+        ; Parse optional temp drive from second command arg
+        ; Usage: SEDIT MYFILE.MAC B:
+        ; CCP puts drive byte at 006CH (second FCB)
+        ; 0=no arg, 1=A, 2=B, etc.
+        LDA     006CH           ; second FCB drive byte
+        STA     VTMPDRV
 
         ; Initialize virtual buffer I/O (delete leftover temps)
         CALL    VIINIT
@@ -873,6 +881,7 @@ COLMOD: DB      0               ; column mode: 0=80, 1=132
 RTXTCL: DB      TXTCOLS         ; runtime text columns (73 or 125)
 RSCRCL: DB      SCRCOLS         ; runtime screen columns (80 or 132)
 RTXTTB: DB      TXTCOLS-TABWID  ; runtime TXTCOLS-TABWID (69 or 121)
+VTMPDRV: DB     0               ; virtual temp file drive (0=default)
 OLDTPLN: DW     0               ; saved TOPLN for scroll detect
 CURBDP: DW      0               ; ptr to active buf desc
 BDESC0: DS      BD_SIZE         ; single buffer descriptor (34 bytes)

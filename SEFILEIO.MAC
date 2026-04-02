@@ -36,6 +36,7 @@
         EXTRN   VIOVFL          ; overflow flag
         EXTRN   VISAVALL        ; three-phase save
         EXTRN   VAFCB           ; AFTER temp FCB
+        EXTRN   VTMPDRV         ; virtual temp file drive
         EXTRN   VAFEX           ; AFTER temp existence flag
         EXTRN   VIWBYT          ; write byte to output buffer
         EXTRN   VIWFCB          ; output FCB pointer
@@ -548,6 +549,10 @@ FIOVF2: STAX    D
         INX     D
         DCR     B
         JNZ     FIOVF2
+
+        ; Override drive byte with VTMPDRV
+        LDA     VTMPDRV
+        STA     VAFCB
 
         ; Create the file
         LXI     D,VAFCB

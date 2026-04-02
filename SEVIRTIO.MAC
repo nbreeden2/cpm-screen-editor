@@ -194,6 +194,7 @@ SRCHMAX EQU     64          ; max find string length
         EXTRN   GBBSIZ          ; DE = buffer size
         EXTRN   GBGAPEN         ; HL = gap end offset
         EXTRN   DIRTY           ; full redraw flag
+        EXTRN   VTMPDRV         ; virtual temp file drive
         EXTRN   STATMSG         ; display status message
         EXTRN   OUTSTR          ; write $-string to console
         EXTRN   SYNINIT         ; detect syntax mode from filename
@@ -1285,6 +1286,13 @@ VFCI_Z: STAX    D
         DCR     B
         JNZ     VFCI_Z
         POP     D               ; return FCB address in DE
+        ; Override drive byte with VTMPDRV
+        LDA     VTMPDRV
+        PUSH    H
+        MOV     H,D
+        MOV     L,E             ; HL = FCB address
+        MOV     M,A             ; FCB[0] = VTMPDRV
+        POP     H
         RET
 
 ;------------------------------------------------------------
