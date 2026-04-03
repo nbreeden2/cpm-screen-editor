@@ -228,6 +228,7 @@ SRCHMAX EQU     64          ; max find string length
         PUBLIC  GBGOTOL         ; go to line N (fast bulk move)
         PUBLIC  GBBASE          ; DE = buffer base address
         PUBLIC  GBBSIZ          ; DE = buffer size
+        PUBLIC  GBGAPBG         ; HL = gap start offset
         PUBLIC  GBGAPEN         ; HL = gap end offset
         PUBLIC  GBLOGRD         ; read byte at logical offset
 

@@ -699,7 +699,7 @@ BMCMSG:  DB     'Mark clear. $'
 BNMMSG:  DB     'No block.   $'
 BCPMSG:  DB     'Block copied$'
 BDLMSG:  DB     'Block del.  $'
-BPSMSG:  DB     'Pasted.     $'
+BPSMSG:  DB     'Block pasted$'
 BPEMSG:  DB     'Clip empty. $'
 
         END

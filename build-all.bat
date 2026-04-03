@@ -7,6 +7,7 @@ REM   SEDIT.COM    - Mono  (no color, no highlighting)
 REM   SEDIT-CL.COM - Color (color, no highlighting)
 REM   SEDIT-A.COM  - ASM   (color, ASM highlighting)
 REM   SEDIT-C.COM  - Color (color, C highlighting)
+REM   SEADM31.COM  - Mono  (no color, specific to the ADM-31)
 REM
 REM Requires: cpmulator.exe, M80.COM, L80.COM, Python (CPMFMT.PY)
 REM ---------------------------------------------------------------

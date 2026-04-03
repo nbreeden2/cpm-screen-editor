@@ -212,6 +212,7 @@ SRCHMAX EQU     64          ; max find string length
         EXTRN   GBINSRT         ; insert char at gap
         EXTRN   GBBASE          ; DE = buffer base address
         EXTRN   GBBSIZ          ; DE = buffer size
+        EXTRN   GBGAPBG         ; HL = gap start offset
         EXTRN   GBGAPEN         ; HL = gap end offset
         EXTRN   GBDLFT         ; delete left (BS)
         EXTRN   GBDELRT         ; delete right (Del)
@@ -576,10 +577,42 @@ DO_MNU: CALL    MNUSHOW
 ;------------------------------------------------------------
 MLDIRT: MVI     A,1
         STA     DIRTY
+        CALL    CHKLOW
         JMP     MAINLP
 MLDRTL: MVI     A,1
         STA     DRTLINE
+        CALL    CHKLOW
         JMP     MAINLP
+
+;------------------------------------------------------------
+; CHKLOW - Warn if free buffer space < 256 bytes.
+; Only warns in non-virtual mode (virtual mode has disk).
+; Entry:  (none)
+; Exit:   Warning displayed if low; all regs clobbered
+;------------------------------------------------------------
+CHKLOW:
+        LDA     VIMODE
+        ORA     A
+        RNZ                     ; virtual mode, skip check
+        ; Gap size = GAPEN - GAPBG
+        CALL    GBGAPEN         ; HL = GAPEN
+        XCHG                    ; DE = GAPEN
+        CALL    GBGAPBG         ; HL = GAPBG
+        MOV     A,E
+        SUB     L
+        MOV     L,A
+        MOV     A,D
+        SBB     H
+        MOV     H,A             ; HL = gap size
+        ; Check if high byte >= 1 (gap >= 256)
+        MOV     A,H
+        ORA     A
+        RNZ                     ; gap >= 256, OK
+        ; Gap < 256: show warning
+        LXI     D,LOWMSG
+        JMP     STATMSG
+
+LOWMSG: DB      'Low memory! Save file and restart.$'
 
 ;------------------------------------------------------------
 ; DOEXIT - Prompt to save, handle unnamed files, exit.

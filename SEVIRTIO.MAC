@@ -729,7 +729,10 @@ VGT_DN:
         CALL    CURPOS
         XRA     A
         STA     DIRTY           ; clear dirty (already drawn)
-        RET
+        LXI     D,VIGDMSG
+        JMP     STATMSG
+
+VIGDMSG: DB     'Virtual buffer repositioned.$'
 
 ;=============================================================
 ; VISAVALL - Three-phase save: BEFORE + buffer + AFTER.

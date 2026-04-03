@@ -98,6 +98,8 @@ MODE_OVR EQU    1
         EXTRN   VBFLN
         EXTRN   VAFLN
         EXTRN   VIMODE
+        EXTRN   GBGAPBG
+        EXTRN   GBGAPEN
         EXTRN   GBFNDCS
         EXTRN   GBRDLNO
 
@@ -132,6 +134,7 @@ IBRNSTR: DB     '   Row:',' $'
 IBCNSTR: DB     '   Col:',' $'
 IBWDSTR: DB     '   Len:',' $'
 IBINSTR: DB     '  [INS]','$'
+IBFRSTR: DB     '[Free:','$'
 IBOVSTR: DB     '  [OVR]','$'
 NAMNMST: DB     '[No Name]','$'
 LDNGMST: DB     '[Loading]','$'
@@ -192,22 +195,23 @@ SCRDRAW:
         XRA     A
 SDRNF:  STA     SDFND
 
-        ; Compute highlight range (block marking)
+        ; --- Compute highlight range ---
+        ; If MRKBG == FFFF: no highlight
+        ; If MRKEN == FFFF: highlight MRKBG..CSOFF (marking)
+        ; If MRKEN != FFFF: highlight MRKBG..MRKEN (block set)
         LHLD    CURBDP
-        MVI     A,BD_MRKEN
+        MVI     A,BD_MRKBG
         ADD     L
         MOV     L,A
         MVI     A,0
         ADC     H
         MOV     H,A
-        MOV     E,M
+        MOV     A,M
         INX     H
-        MOV     D,M             ; DE = MRKEN
-        MOV     A,D
-        ANI     0FFH
+        ANA     M
         INR     A
-        JZ      SDHLNO          ; MRKEN == FFFF -> no mark
-        ; Read MRKBG
+        JZ      SDHLNO          ; MRKBG == FFFF -> no mark
+        ; MRKBG is set. Read it into DE.
         LHLD    CURBDP
         MVI     A,BD_MRKBG
         ADD     L
@@ -218,7 +222,35 @@ SDRNF:  STA     SDFND
         MOV     E,M
         INX     H
         MOV     D,M             ; DE = MRKBG
-        ; Read CSOFF
+        ; Check MRKEN
+        LHLD    CURBDP
+        MVI     A,BD_MRKEN
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A
+        MOV     A,M
+        INX     H
+        ANA     M
+        INR     A
+        JZ      SDHLMRK         ; MRKEN == FFFF -> use CSOFF
+        ; MRKEN is set: highlight MRKBG..MRKEN
+        LHLD    CURBDP
+        MVI     A,BD_MRKEN
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A
+        MOV     C,M
+        INX     H
+        MOV     B,M
+        MOV     H,B
+        MOV     L,C             ; HL = MRKEN
+        JMP     SDHLRNG
+SDHLMRK:
+        ; MRKEN not set: highlight MRKBG..CSOFF
         LHLD    CURBDP
         MVI     A,BD_CSOFF
         ADD     L
@@ -231,15 +263,16 @@ SDRNF:  STA     SDFND
         MOV     B,M
         MOV     H,B
         MOV     L,C             ; HL = CSOFF
-        ; min/max
+SDHLRNG:
+        ; DE = start, HL = end. min/max:
         MOV     A,H
         CMP     D
         JC      SDHLCS
-        JNZ     SDHLMK
+        JNZ     SDHLMK2
         MOV     A,L
         CMP     E
         JC      SDHLCS
-SDHLMK: XCHG
+SDHLMK2: XCHG
         SHLD    SDHLBG
         XCHG
         SHLD    SDHLEN
@@ -517,9 +550,9 @@ SDCLR2:
         JMP     SDRWLP
 
 SDRWDN: CALL    RULRDRAW
-        CALL    SEPRDRAW
-        CALL    STATCLR
-        RET
+        JMP     SEPRDRAW
+        ; Status bar not cleared: last message persists until
+        ; the next STATMSG call overwrites it.
 
 ;--- Highlight on/off helpers ---
 SDRVON: PUSH    D
@@ -1007,7 +1040,7 @@ IBOVRMD:
 IBVIRT:
         LDA     VIMODE
         ORA     A
-        JZ      IBCLEAR
+        JZ      IBFREE
         ; Show [Vssss,eeee]
         MVI     A,'['
         CALL    OUTCHAR
@@ -1036,6 +1069,26 @@ IBVIRT:
         JZ      IBVDN
         DCX     H
 IBVDN:  CALL    OUTHL4
+        MVI     A,']'
+        CALL    OUTCHAR
+
+        JMP     IBCLEAR
+
+        ; [Free:nnnnn] - show free gap buffer space
+IBFREE:
+        LXI     D,IBFRSTR
+        CALL    OUTSTR
+        ; Free = GAPEN - GAPBG
+        CALL    GBGAPEN
+        XCHG
+        CALL    GBGAPBG
+        MOV     A,E
+        SUB     L
+        MOV     L,A
+        MOV     A,D
+        SBB     H
+        MOV     H,A             ; HL = free bytes
+        CALL    OUTN5DG
         MVI     A,']'
         CALL    OUTCHAR
 
@@ -1281,13 +1334,52 @@ OUTSTR:
         JMP     OUTSTR
 
 ;=============================================================
+; OUTN5DG - Output number as 5-digit decimal (leading spaces).
+; Entry:  HL = number (0-65535)
+; Exit:   5 chars output; AF BC DE HL clobbered
+;=============================================================
+OUTN5DG:
+        XRA     A
+        STA     ON4LZF
+        ; Ten-thousands
+        LXI     D,10000
+        MVI     B,0
+ON5TH:  MOV     A,L
+        SUB     E
+        MOV     C,A
+        MOV     A,H
+        SBB     D
+        JC      ON5THD
+        MOV     H,A
+        MOV     L,C
+        INR     B
+        JMP     ON5TH
+ON5THD: MOV     A,B
+        ORA     A
+        JNZ     ON5THP
+        MVI     A,' '
+        PUSH    H
+        CALL    OUTCHAR
+        POP     H
+        JMP     ON4KDG          ; continue with thousands
+ON5THP: ADI     '0'
+        PUSH    H
+        CALL    OUTCHAR
+        POP     H
+        MVI     A,1
+        STA     ON4LZF
+        JMP     ON4KDG          ; continue with thousands
+
+;=============================================================
 ; OUTN4DG - Output number as 4-digit decimal (leading spaces).
 ; Entry:  HL = number (0-9999)
 ; Exit:   4 chars output; AF BC DE HL clobbered
 ;=============================================================
 OUTN4DG:
+        XRA     A
+        STA     ON4LZF
         ; Thousands
-        LXI     D,1000
+ON4KDG: LXI     D,1000
         MVI     B,0
 ON4TH:  MOV     A,L
         SUB     E

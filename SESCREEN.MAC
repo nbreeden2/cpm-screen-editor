@@ -202,6 +202,8 @@ SRCHMAX EQU     64          ; max find string length
         EXTRN   VBFLN           ; lines in BEFORE temp (SEVIRTIO)
         EXTRN   VAFLN           ; lines in AFTER temp (SEVIRTIO)
         EXTRN   VIMODE          ; virtual buffer mode (SEVIRTIO)
+        EXTRN   GBGAPBG         ; HL = gap start offset
+        EXTRN   GBGAPEN         ; HL = gap end offset
         EXTRN   GBFNDCS         ; find TOPLN offset via backward scan
         EXTRN   GBRDLNO         ; read line at given offset
         IF SYNHI
@@ -256,6 +258,7 @@ IBCNSTR: DB     '   Col:',' $'
 IBWDSTR: DB     '   Len:',' $'
 IBINSTR: DB     '  [INS]','$'
 IBOVSTR: DB     '  [OVR]','$'
+IBFRSTR: DB     '[Free:','$'
 NAMNMST: DB     '[No Name]','$'
 LDNGMST: DB     '[Loading]','$'
 
@@ -320,21 +323,10 @@ SCRDRAW:
         XRA     A               ; not found
 SDRNF:  STA     SDFND           ; 1=lines exist, 0=past end
 
-        ; --- Compute highlight range if marking ---
-        ; Marking mode = MRKEN==FFFF && MRKBG!=FFFF
-        LHLD    CURBDP
-        MVI     A,BD_MRKEN
-        ADD     L
-        MOV     L,A
-        MVI     A,0
-        ADC     H
-        MOV     H,A
-        MOV     A,M
-        INX     H
-        ANA     M               ; A = low AND high
-        INR     A               ; Z if word was FFFF
-        JNZ     SDHLNO          ; MRKEN != FFFF -> not marking
-        ; MRKEN == FFFF; check MRKBG
+        ; --- Compute highlight range ---
+        ; If MRKBG == FFFF: no highlight
+        ; If MRKEN == FFFF: highlight MRKBG..CSOFF (marking)
+        ; If MRKEN != FFFF: highlight MRKBG..MRKEN (block set)
         LHLD    CURBDP
         MVI     A,BD_MRKBG
         ADD     L
@@ -347,7 +339,7 @@ SDRNF:  STA     SDFND           ; 1=lines exist, 0=past end
         ANA     M
         INR     A
         JZ      SDHLNO          ; MRKBG == FFFF -> no mark
-        ; Read MRKBG into DE
+        ; MRKBG is set. Read it into DE.
         LHLD    CURBDP
         MVI     A,BD_MRKBG
         ADD     L
@@ -358,7 +350,35 @@ SDRNF:  STA     SDFND           ; 1=lines exist, 0=past end
         MOV     E,M
         INX     H
         MOV     D,M             ; DE = MRKBG
-        ; Read CSOFF into HL
+        ; Check MRKEN
+        LHLD    CURBDP
+        MVI     A,BD_MRKEN
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A
+        MOV     A,M
+        INX     H
+        ANA     M
+        INR     A
+        JZ      SDHLMRK         ; MRKEN == FFFF -> use CSOFF
+        ; MRKEN is set: highlight MRKBG..MRKEN
+        LHLD    CURBDP
+        MVI     A,BD_MRKEN
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A
+        MOV     C,M
+        INX     H
+        MOV     B,M
+        MOV     H,B
+        MOV     L,C             ; HL = MRKEN
+        JMP     SDHLRNG         ; DE=MRKBG, HL=MRKEN
+SDHLMRK:
+        ; MRKEN not set: highlight MRKBG..CSOFF
         LHLD    CURBDP
         MVI     A,BD_CSOFF
         ADD     L
@@ -371,6 +391,8 @@ SDRNF:  STA     SDFND           ; 1=lines exist, 0=past end
         MOV     B,M
         MOV     H,B
         MOV     L,C             ; HL = CSOFF
+SDHLRNG:
+        ; DE = start (MRKBG), HL = end (CSOFF or MRKEN)
         ; min/max: SDHLBG = min(HL,DE), SDHLEN = max(HL,DE)
         MOV     A,H
         CMP     D
@@ -744,8 +766,9 @@ SDCLR3:
         JMP     SDRWLP
 
 SDRWDN: CALL    RULRDRAW        ; restore tab ruler (row 2)
-        CALL    SEPRDRAW        ; restore separator (row 23)
-        JMP     STATCLR         ; clear status bar (row 24)
+        JMP     SEPRDRAW        ; restore separator (row 23)
+        ; Status bar not cleared: last message persists until
+        ; the next STATMSG call overwrites it.
 
 ;-------------------------------------------------------------
 ; SDRVON - Turn on reverse video for highlight.
@@ -1453,11 +1476,11 @@ IBOVRMD:
         LXI     D,IBOVSTR
         CALL    OUTSTR
 
-        ; Print virtual buffer indicator [Vssss,eeee]
+        ; Print virtual buffer indicator or free memory
 IBVIRT:
         LDA     VIMODE
         ORA     A
-        JZ      IBCLEAR
+        JZ      IBFREE
         IF COLOR
         LXI     D,SGRCYN        ; cyan for [V...]
         CALL    OUTSTR
@@ -1495,6 +1518,26 @@ IBVDN:
         CALL    OUTHL4
         MVI     A,']'
         CALL    OUTCHAR
+        JMP     IBCLEAR
+
+        ; [Free:nnnnn] - show free gap buffer space
+IBFREE:
+        LXI     D,IBFRSTR       ; "[Free:"
+        CALL    OUTSTR
+        ; Free = GAPEN - GAPBG (gap size)
+        CALL    GBGAPEN         ; HL = GAPEN
+        XCHG                    ; DE = GAPEN
+        CALL    GBGAPBG         ; HL = GAPBG
+        MOV     A,E
+        SUB     L
+        MOV     L,A
+        MOV     A,D
+        SBB     H
+        MOV     H,A             ; HL = GAPEN - GAPBG = free bytes
+        CALL    OUTN5DG         ; print 5-digit decimal
+        MVI     A,']'
+        CALL    OUTCHAR
+
 IBCLEAR:
         LXI     D,CLREOL        ; clear to end of row
         CALL    OUTSTR
@@ -1776,6 +1819,41 @@ OUTSTR:
         JMP     OUTSTR
 
 ;=============================================================
+; OUTN5DG - Output number in HL as 5-digit decimal,
+;           right-justified with leading spaces.
+; Entry:  HL = number (0-65535)
+; Exit:   5 chars output; AF BC DE HL clobbered
+;=============================================================
+OUTN5DG:
+        XRA     A
+        STA     ON4LZF          ; clear leading-digit flag
+        ; --- Ten-thousands digit ---
+        MVI     B,0
+        LXI     D,-10000
+ON5TLP: INR     B
+        DAD     D
+        JC      ON5TLP
+        ; Overshot: add 10000 back
+        LXI     D,10000
+        DAD     D
+        DCR     B               ; B = digit (0-6)
+        MOV     A,B
+        ORA     A
+        JNZ     ON5TPR
+        MVI     A,' '           ; leading space
+        PUSH    H
+        CALL    OUTCHAR
+        POP     H
+        JMP     ON4KDG          ; continue with thousands
+ON5TPR: ADI     '0'
+        PUSH    H
+        CALL    OUTCHAR
+        POP     H
+        MVI     A,1
+        STA     ON4LZF          ; mark digit seen
+        JMP     ON4KDG          ; continue with thousands
+
+;=============================================================
 ; OUTN4DG - Output number in HL as 4-digit decimal,
 ;           right-justified with leading spaces.
 ; Entry:  HL = number (0-9999 expected)
@@ -1784,7 +1862,7 @@ OUTSTR:
 OUTN4DG:
         XRA     A
         STA     ON4LZF          ; clear leading-digit flag
-        ; --- Thousands digit ---
+ON4KDG: ; --- Thousands digit ---
         MVI     B,0
         LXI     D,-1000
 ON4KLP: INR     B
