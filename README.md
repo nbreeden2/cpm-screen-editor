@@ -4,7 +4,7 @@
 **Assembler:** Microsoft M80 / L80
 **Terminal:** VT100 / ANSI
 **Editing Model:** Full-screen, ESC-menu driven, WordStar-compatible control keys
-**Version:** 1.14
+**Version:** 1.16
 
 ---
 
@@ -63,6 +63,8 @@ A:MAIN    .MAC*  Lines:1024  Row: 142  Col:  35  [INS]
 | `Row:nnnn` | Current cursor line, 1-based (blue) |
 | `Col:nnnn` | Current cursor column within the text, 1-based, tabs expanded (blue) |
 | `[INS]` / `[OVR]` | Insert mode (green) or Overwrite mode (red) |
+| `[Free:nnnnn]` | Free buffer space in bytes (non-virtual mode) |
+| `[Vssss,eeee]` | Virtual buffer line range (virtual mode) |
 
 All numeric fields are 4-digit, right-justified with leading spaces (max 9999). If no file is loaded, the filename area shows `[No Name]`. Drive byte 0 (default) queries the current disk via BDOS.
 
@@ -207,7 +209,7 @@ Menu geometry: top-left at row 6/col 28, bottom-right at row 18/col 54.
 - Press any key to return to editing
 
 #### 7. About (B)
-- Displays `SEDIT v1.14 CP/M Screen Editor` on the status bar
+- Displays `SEDIT v1.16 CP/M Screen Editor` on the status bar
 - Press any key to dismiss
 
 #### 8. Toggle 80/132 col (W)

@@ -1,6 +1,6 @@
 
 
-                      SEDIT v1.14 Technical Manual
+                      SEDIT v1.16 Technical Manual
                   Build Environment and Source Reference
 
                     ================================
@@ -69,6 +69,13 @@
     CLS.COM           ~35  Clear screen and home cursor
     GETWIDTH.COM     ~250  Terminal width detection utility
     KEYCODE.COM     ~3600  Key code diagnostic tool
+    MEMTEST.COM      ~500  TPA memory test (7 patterns, looping)
+    COLORS.COM       ~200  ANSI/VT100 color test display
+
+    2.3a Alternate Terminal Drivers
+
+    SEADM31.MAC     ~1500  ADM-31 terminal driver (replaces
+                           SESCREEN.MAC in link command)
 
     2.4  Build Scripts and Tools
 
@@ -782,6 +789,13 @@
 
     10. REVISION HISTORY
 
+    v1.16   Free memory indicator [Free:nnnnn] on info bar.
+            Low memory warning at < 256 bytes free. Block
+            highlight persists after Mark end. Status messages
+            persist on row 24. ADM-31 terminal driver
+            (SEADM31.MAC). Fix GBCURLN ORI 1 corrupting LEN
+            display. Virtual buffer repositioned message.
+    v1.15   VTMPDRV command line switch for temp file drive.
     v1.14   Performance optimizations: column-limit check
             simplification in rendering loops, combined SGR
             reset+color strings, bulk copy bottom-test loops,

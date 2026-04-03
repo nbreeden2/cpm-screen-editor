@@ -1,6 +1,6 @@
 
 
-                         SEDIT v1.14 User Manual
+                         SEDIT v1.16 User Manual
                      CP/M 2.2 Full-Screen Text Editor
 
                     ================================
@@ -61,6 +61,7 @@
 
         A>SEDIT                     Start with empty buffer
         A>SEDIT MYFILE.TXT          Open MYFILE.TXT for editing
+        A>SEDIT MYFILE.TXT B:       Use drive B: for temp files
 
     If the named file exists, it is loaded into the edit buffer.  If
     it does not exist, an empty buffer is created with that filename
@@ -87,7 +88,8 @@
 
         Row  1    Information bar: filename (* if modified), line
                   count, cursor position (row:col), file length,
-                  insert/overwrite mode indicator
+                  insert/overwrite mode, free memory or virtual
+                  buffer range indicator
         Row  2    Tab ruler (: marks every 4 columns)
         Rows 3-22 Edit area (20 lines of text)
                   Columns 1-5: line number gutter
