@@ -269,6 +269,8 @@ SPRABV: DB      ' above$'
 SPREQS: DB      ' === $'
 SPRBLW: DB      ' below$'
 SPRDNA: DB      ' vvv$'
+SPRBLD: DB      ' V1.17 $'
+SPRBLN  EQU     8               ; length of SPRBLD (excluding $)
 
 ;=============================================================
 ; SCRINIT - Initialize terminal and draw screen chrome.
@@ -1660,8 +1662,12 @@ SPRNDN:
         JMP     OUTSTR
 
 SPRNRM:
-        ; Normal mode: plain separator (RSCRCL '=' chars)
+        ; Normal mode: version + build + '=' chars
+        LXI     D,SPRBLD
+        CALL    OUTSTR
+        ; Fill remaining with '='
         LDA     RSCRCL
+        SUI     SPRBLN          ; subtract build string length
         MOV     B,A
 SPRLP:  MVI     A,'='
         PUSH    B

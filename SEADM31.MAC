@@ -146,6 +146,8 @@ SPRABV: DB      ' above$'
 SPREQS: DB      ' === $'
 SPRBLW: DB      ' below$'
 SPRDNA: DB      ' vvv$'
+SPRBLD: DB      ' V1.17 $'
+SPRBLN  EQU     8
 
 ;=============================================================
 ; SCRINIT - Initialize terminal and draw chrome.
@@ -1295,8 +1297,11 @@ SPRNEQ: LXI     D,SPREQS
 SPRNDN: LXI     D,CLREOL
         JMP     OUTSTR
 
-SPRNRM: ; Normal separator
+SPRNRM: ; Normal separator: version + build + '='
+        LXI     D,SPRBLD
+        CALL    OUTSTR
         LDA     RSCRCL
+        SUI     SPRBLN
         MOV     B,A
 SPRLP:  MVI     A,'='
         PUSH    B
