@@ -2169,9 +2169,19 @@ GCLR2N: INX     H
 GCLCPD: ; NUL-terminate
         XRA     A
         STAX    D
-        MOV     A,B             ; A = line length
+        MOV     A,B             ; A = true line length
         LXI     H,GGLBUF
-        ORI     1               ; NZ = line exists
+        ; Set NZ to indicate line exists without corrupting A.
+        ; B is the char count; if 0 (empty line) we still need NZ.
+        ; Use: compare A with FFH — only equal if length is 255
+        ; (max line), so NZ for all practical lengths 0-254.
+        ; Actually simpler: INR B / DCR B sets NZ if B was > 0,
+        ; Z if B was 0. But we need NZ even when B=0 (empty line).
+        ; Simplest: just save A, force NZ, restore A via MOV.
+        MOV     C,A             ; save true length in C
+        MVI     A,1             ; force NZ (A nonzero)
+        ORA     A               ; set NZ flag
+        MOV     A,C             ; restore true length (MOV doesn't affect flags)
         RET
 
 ;=============================================================
