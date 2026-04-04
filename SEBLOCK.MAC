@@ -375,28 +375,29 @@ BDNAVL:
         JMP     BDNAVL
 
 BDDLP:
-        ; Delete BKEN-BLKBG characters
+        ; Delete BLKEN-BLKBG characters using memory counter
+        ; (BC register not safe across GBDELRT BDOS calls)
         LHLD    BLKEN
-        XCHG
-        LHLD    BLKBG
-        ; count = BKEN - BLKBG = DE - HL
+        XCHG                    ; DE = BLKEN
+        LHLD    BLKBG           ; HL = BLKBG
         MOV     A,E
         SUB     L
-        MOV     C,A
+        MOV     L,A
         MOV     A,D
         SBB     H
-        MOV     B,A             ; BC = count
-
-        MOV     A,B
-        ORA     C
-        JZ      BDDON
+        MOV     H,A             ; HL = count
+        SHLD    BDDCNT          ; save count to memory
 
 BDDELP:
+        LHLD    BDDCNT
+        MOV     A,H
+        ORA     L
+        JZ      BDDON
         CALL    GBDELRT
-        DCX     B
-        MOV     A,B
-        ORA     C
-        JNZ     BDDELP
+        LHLD    BDDCNT
+        DCX     H
+        SHLD    BDDCNT
+        JMP     BDDELP
 
 BDDON:
         ; Clear block marks
@@ -676,6 +677,8 @@ BLKEN:  DW      0
 
 ; Navigation counter
 BDNAV:  DW      0
+; Delete counter
+BDDCNT: DW      0
 
 ; Clipboard
 CLIPBUF: DS     CLIPMAX
