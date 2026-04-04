@@ -353,7 +353,7 @@ MAINLP:
         ; Auto-scroll horizontally if cursor outside viewport
         CALL    AUTOSCR
 
-        ; Force full redraw if marking in progress (highlight tracks cursor)
+        ; Force redraw if marking in progress (highlight tracks cursor)
         MVI     A,BD_MRKEN
         CALL    BDFLD           ; HL -> BD_MRKEN
         MOV     A,M
@@ -369,7 +369,7 @@ MAINLP:
         ANA     M
         INR     A
         JZ      MLNOMK          ; MRKBG == FFFF -> no mark
-        ; Marking mode: force full redraw
+        ; Marking mode: force full redraw (highlight tracks cursor)
         MVI     A,1
         STA     DIRTY
 MLNOMK:
@@ -393,6 +393,12 @@ MLFULL:
 MLDONE:
         CALL    INFOBAR         ; always update info bar (row/col)
         CALL    CURPOS          ; place HW cursor
+
+        ; Save current row for marking mode line-change detection
+        MVI     A,BD_CSROW
+        CALL    BDFLD
+        MOV     A,M
+        STA     MLSROW
 
         ; Get next key (blocking)
         CALL    GETKEY          ; B=type, C=code/char
@@ -913,6 +919,7 @@ RTXTCL: DB      TXTCOLS         ; runtime text columns (73 or 125)
 RSCRCL: DB      SCRCOLS         ; runtime screen columns (80 or 132)
 RTXTTB: DB      TXTCOLS-TABWID  ; runtime TXTCOLS-TABWID (69 or 121)
 VTMPDRV: DB     0               ; virtual temp file drive (0=default)
+MLSROW: DB      0               ; saved CSROW for marking mode
 OLDTPLN: DW     0               ; saved TOPLN for scroll detect
 CURBDP: DW      0               ; ptr to active buf desc
 BDESC0: DS      BD_SIZE         ; single buffer descriptor (34 bytes)

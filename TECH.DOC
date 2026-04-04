@@ -1,6 +1,6 @@
 
 
-                      SEDIT v1.16 Technical Manual
+                      SEDIT v1.17 Technical Manual
                   Build Environment and Source Reference
 
                     ================================
@@ -789,6 +789,10 @@
 
     10. REVISION HISTORY
 
+    v1.17   Fix block delete (GBDELRT clobbered BC count
+            register via BDOS). Low memory warning fix.
+            Version string on separator row. Fix GBCURLN
+            ORI 1 corrupting LEN display.
     v1.16   Free memory indicator [Free:nnnnn] on info bar.
             Low memory warning at < 256 bytes free. Block
             highlight persists after Mark end. Status messages
