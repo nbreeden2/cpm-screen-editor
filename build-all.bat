@@ -32,7 +32,7 @@ if errorlevel 1 goto fail
 python CPMFMT.PY COL80.MAC COL132.MAC CLS.MAC MEMTEST.MAC COLORS.MAC
 if errorlevel 1 goto fail
 REM Specific to the ADM 31 terminal
-python CPMFMT.PY SEADM31
+python CPMFMT.PY SEADM31 SEADM31K
 if errorlevel 1 goto fail
 REM Specific to the Cromemco 3102 terminal
 python CPMFMT.PY SEC3102.MAC SEC3102K.MAC
@@ -125,7 +125,9 @@ cpmulator M80.COM =SESYNTAX
 if errorlevel 1 goto fail
 cpmulator M80.COM =SEADM31
 if errorlevel 1 goto fail
-cpmulator L80.COM SEDIT,SEADM31,SEKEY,SEGAPBUF,SEFILEIO,SEMENU,SESEARCH,SEBLOCK,SESYNTAX,SEKEYBND,SEVIRTIO,SEHELP,SEADM31/N/E
+cpmulator M80.COM =SEADM31K
+if errorlevel 1 goto fail
+cpmulator L80.COM SEDIT,SEADM31,SEADM31K,SEGAPBUF,SEFILEIO,SEMENU,SESEARCH,SEBLOCK,SESYNTAX,SEKEYBND,SEVIRTIO,SEHELP,SEADM31/N/E
 echo Built SEADM31.COM
 echo --- End of ADM-31 Editor ---
 
