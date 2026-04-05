@@ -1,0 +1,1461 @@
+;============================================================
+; FILE:    SEC3102.MAC
+; PROJECT: SEDIT - Screen Editor for CP/M 2.2
+; VERSION: 1.0
+; DATE:    2026-04-05
+;------------------------------------------------------------
+; DESCRIPTION:
+;   Cromemco 3102 (Beehive DM10/DM30) terminal driver for
+;   SEDIT. Drop-in replacement for SESCREEN.MAC. Same PUBLIC
+;   exports, same EXTRN imports (minus SYNHI-dependent ones).
+;   No color, no syntax highlighting rendering.
+;
+;   Cromemco 3102 escape sequences:
+;     Cursor address: ESC F line+20H col+20H
+;     Clear screen:   ESC E
+;     Clear to EOL:   ESC K
+;     Cursor home:    ESC H
+;     Reverse video:  ESC d P / ESC d @
+;     Normal video:   ESC m
+;     Insert line:    ESC L
+;     Delete line:    ESC M
+;     Cursor up:      ESC A
+;     Cursor down:    ESC B
+;     Cursor right:   ESC C
+;     Cursor left:    ESC D
+;
+;   Arrow keys send: ^K(up) ^J(down) ^H(left) ^L(right)
+;   which match WordStar bindings already in SEKEY.MAC.
+;
+;   Build: M80 =SEC3102
+;   Link:  L80 SEDIT,SEC3102,SEKEY,SEGAPBUF,SEFILEIO,
+;              SEMENU,SESEARCH,SEBLOCK,SESYNTAX,SEKEYBND,
+;              SEVIRTIO,SEHELP,SEDIT/N/E
+;============================================================
+
+;============================================================
+; Inlined constants from SEDIT.INC
+;============================================================
+
+;--- CP/M system addresses ----------------------------
+BDOS    EQU     0005H
+WBOOT   EQU     0000H
+
+;--- BDOS function numbers ----------------------------
+BF_RAWIO  EQU   6
+BF_GETDSK EQU   25
+
+;--- ASCII control codes ------------------------------
+NUL     EQU     00H
+BS      EQU     08H
+TAB     EQU     09H
+LF      EQU     0AH
+CR      EQU     0DH
+ESC     EQU     1BH
+
+;--- Screen layout ------------------------------------
+SCRROWS EQU     24
+SCRCOLS EQU     80
+EDITROW EQU     20
+EDITFR  EQU     3
+INFOROW EQU     1
+RULRROW EQU     2
+SEPRROW EQU     23
+STATROW EQU     24
+LNUMWID EQU     5
+TXTCOLS EQU     73
+MAXCOLS EQU     255
+TXTFCOL EQU     6
+TABWID  EQU     4
+
+;--- Buffer descriptor field offsets -----------------
+BD_BSTAR EQU    0
+BD_BSIZE EQU    2
+BD_GAPBG EQU    4
+BD_GAPEN EQU    6
+BD_TXEND EQU    8
+BD_TOPLN EQU    10
+BD_CSROW EQU    12
+BD_CSCOL EQU    13
+BD_CSOFF EQU    14
+BD_MRKBG EQU    16
+BD_MRKEN EQU    18
+BD_MODIF EQU    20
+BD_SYNMD EQU    21
+BD_FNAME EQU    22
+BD_SIZE  EQU    34
+
+;--- Syntax mode codes --------------------------------
+SYN_NONE EQU    0
+SYN_ASM  EQU    1
+SYN_C    EQU    2
+
+;--- Block mark sentinel ------------------------------
+NO_MARK EQU     0FFFFH
+
+;--- Insert / overwrite mode --------------------------
+MODE_INS EQU    0
+MODE_OVR EQU    1
+
+;--- Imports ------------------------------------------
+        EXTRN   CURBDP
+        EXTRN   INSMODE
+        EXTRN   HSCROL
+        EXTRN   RTXTCL
+        EXTRN   RSCRCL
+        EXTRN   GBGETLN
+        EXTRN   GBCURLN
+        EXTRN   GBCNTLN
+        EXTRN   GBGAPBG
+        EXTRN   GBGAPEN
+        EXTRN   VBFLN
+        EXTRN   VAFLN
+        EXTRN   VIMODE
+        EXTRN   GBFNDCS
+        EXTRN   GBRDLNO
+
+;--- Exports ------------------------------------------
+        PUBLIC  SCRINIT
+        PUBLIC  SCRDRAW
+        PUBLIC  SCREDLN
+        PUBLIC  SCREDCL
+        PUBLIC  STATMSG
+        PUBLIC  STATCLR
+        PUBLIC  INFOBAR
+        PUBLIC  CURPOS
+        PUBLIC  OUTCHAR
+        PUBLIC  OUTSTR
+        PUBLIC  CURGOTO
+        PUBLIC  OUTN4DG
+        PUBLIC  ISLOAD
+
+;=============================================================
+; Cromemco 3102 escape sequence strings ($-terminated)
+;=============================================================
+        CSEG
+
+CLRSTR: DB      ESC,'E','$'             ; clear screen
+CLREOL: DB      ESC,'K','$'             ; clear to end of line
+CURHOM: DB      ESC,'H','$'             ; cursor home
+ATTREV: DB      ESC,'d','P','$'         ; reverse video on
+ATTOFF: DB      ESC,'d','@','$'         ; reverse video off
+ATTNRM: DB      ESC,'m','$'             ; normal video (reset all)
+
+;--- Info bar label strings ---------------------------
+IBLNSTR: DB     '   Lines:',' $'
+IBRNSTR: DB     '   Row:',' $'
+IBCNSTR: DB     '   Col:',' $'
+IBWDSTR: DB     '   Len:',' $'
+IBINSTR: DB     '  [INS]','$'
+IBFRSTR: DB     '[Free:','$'
+IBOVSTR: DB     '  [OVR]','$'
+NAMNMST: DB     '[No Name]','$'
+LDNGMST: DB     '[Loading]','$'
+
+;--- Separator strings for virtual mode ---
+SPRUPRA: DB     '^^^ $'
+SPRLIN: DB      ' Lines $'
+SPRABV: DB      ' above$'
+SPREQS: DB      ' === $'
+SPRBLW: DB      ' below$'
+SPRDNA: DB      ' vvv$'
+SPRBLD: DB      ' V1.17 $'
+SPRBLN  EQU     8
+
+;=============================================================
+; SCRINIT - Initialize terminal and draw chrome.
+;=============================================================
+SCRINIT:
+        LXI     D,CLRSTR
+        CALL    OUTSTR
+        CALL    INFOBAR
+        CALL    RULRDRAW
+        CALL    SEPRDRAW
+        RET
+
+;=============================================================
+; SCRDRAW - Full screen redraw (20 edit lines).
+;=============================================================
+SCRDRAW:
+        ; Read TOPLN
+        LHLD    CURBDP
+        MVI     A,BD_TOPLN
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A
+        MOV     E,M
+        INX     H
+        MOV     D,M
+        LHLD    VBFLN
+        DAD     D
+        SHLD    SDTPLN
+
+        ; Find TOPLN offset
+        CALL    GBFNDCS
+        SHLD    SDLOFF
+        MVI     A,1
+        JNZ     SDRNF
+        XRA     A
+SDRNF:  STA     SDFND
+
+        ; --- Compute highlight range ---
+        LHLD    CURBDP
+        MVI     A,BD_MRKBG
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A
+        MOV     A,M
+        INX     H
+        ANA     M
+        INR     A
+        JZ      SDHLNO
+        ; MRKBG is set
+        LHLD    CURBDP
+        MVI     A,BD_MRKBG
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A
+        MOV     E,M
+        INX     H
+        MOV     D,M             ; DE = MRKBG
+        ; Check MRKEN
+        LHLD    CURBDP
+        MVI     A,BD_MRKEN
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A
+        MOV     A,M
+        INX     H
+        ANA     M
+        INR     A
+        JZ      SDHLMRK
+        ; MRKEN set: highlight MRKBG..MRKEN
+        LHLD    CURBDP
+        MVI     A,BD_MRKEN
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A
+        MOV     C,M
+        INX     H
+        MOV     B,M
+        MOV     H,B
+        MOV     L,C
+        JMP     SDHLRNG
+SDHLMRK:
+        ; MRKEN not set: highlight MRKBG..CSOFF
+        LHLD    CURBDP
+        MVI     A,BD_CSOFF
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A
+        MOV     C,M
+        INX     H
+        MOV     B,M
+        MOV     H,B
+        MOV     L,C
+SDHLRNG:
+        ; DE = MRKBG, HL = end. min/max:
+        MOV     A,H
+        CMP     D
+        JC      SDHLCS
+        JNZ     SDHLMK
+        MOV     A,L
+        CMP     E
+        JC      SDHLCS
+SDHLMK: XCHG
+        SHLD    SDHLBG
+        XCHG
+        SHLD    SDHLEN
+        JMP     SDHLOK
+SDHLCS: SHLD    SDHLBG
+        XCHG
+        SHLD    SDHLEN
+SDHLOK: LHLD    SDHLBG
+        XCHG
+        LHLD    SDHLEN
+        MOV     A,H
+        CMP     D
+        JNZ     SDHLYS
+        MOV     A,L
+        CMP     E
+        JZ      SDHLNO
+SDHLYS: MVI     A,1
+        STA     SDHLMD
+        JMP     SDHLDN
+SDHLNO: XRA     A
+        STA     SDHLMD
+SDHLDN:
+
+        XRA     A
+        STA     SDROW
+
+        ; --- Draw each row ---
+SDRWLP: LDA     SDROW
+        CPI     EDITROW
+        JNC     SDRWDN
+
+        ADI     EDITFR
+        MOV     B,A
+        MVI     C,1
+        CALL    CURGOTO
+
+        ; Print line number gutter
+        LHLD    SDTPLN
+        LDA     SDROW
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A
+        INX     H
+        CALL    OUTN4DG
+        MVI     A,' '
+        CALL    OUTCHAR
+
+        LDA     SDFND
+        ORA     A
+        JZ      SDCLR
+
+        LHLD    SDLOFF
+        SHLD    SDLNST
+        CALL    GBRDLNO
+        SHLD    SDLOFF
+        JNZ     SDTEXT
+
+        XRA     A
+        STA     SDFND
+        JMP     SDCLR
+
+SDTEXT: PUSH    D
+        LDA     SDHLMD
+        ORA     A
+        JZ      SDHNHL
+        LHLD    SDHLBG
+        XCHG
+        LHLD    SDLNST
+        MOV     A,E
+        SUB     L
+        MOV     C,A
+        MOV     A,D
+        SBB     H
+        MOV     B,A
+        JNC     SDHLS1
+        XRA     A
+        STA     SDHLS
+        JMP     SDHLEC
+SDHLS1: MOV     A,B
+        ORA     A
+        JNZ     SDHNHL
+        MOV     A,C
+        CPI     MAXCOLS
+        JNC     SDHNHL
+        STA     SDHLS
+SDHLEC: LHLD    SDHLEN
+        XCHG
+        LHLD    SDLNST
+        MOV     A,E
+        SUB     L
+        MOV     C,A
+        MOV     A,D
+        SBB     H
+        MOV     B,A
+        JNC     SDHLE1
+        XRA     A
+        STA     SDHLE
+        JMP     SDHLVL
+SDHLE1: MOV     A,B
+        ORA     A
+        JNZ     SDHEFF
+        MOV     A,C
+        JMP     SDHLE2
+SDHEFF: MVI     A,0FFH
+SDHLE2: STA     SDHLE
+SDHLVL: LDA     SDHLE
+        MOV     B,A
+        LDA     SDHLS
+        CMP     B
+        JNC     SDHNHL
+        JMP     SDHSET
+SDHNHL: MVI     A,0FFH
+        STA     SDHLS
+        STA     SDHLE
+SDHSET: POP     D
+        XRA     A
+        STA     SDHLON
+        STA     SDBYTI
+        MVI     C,0
+
+        ; Skip phase (horizontal scroll)
+        LDA     HSCROL
+        ORA     A
+        JZ      SDTXLP
+        STA     SDSKIP
+SDSKPL: LDAX    D
+        ORA     A
+        JZ      SDSKDN
+        CPI     CR
+        JZ      SDSKDN
+        CPI     LF
+        JZ      SDSKDN
+        CPI     TAB
+        JZ      SDSKTB
+        INX     D
+        INR     C
+        LDA     SDBYTI
+        INR     A
+        STA     SDBYTI
+        JMP     SDSKCK
+SDSKTB: LDA     HSCROL
+        ADD     C
+        ANI     TABWID-1
+        MOV     B,A
+        MVI     A,TABWID
+        SUB     B
+        ADD     C
+        MOV     C,A
+        INX     D
+        LDA     SDBYTI
+        INR     A
+        STA     SDBYTI
+SDSKCK: LDA     SDSKIP
+        CMP     C
+        JC      SDSKDN
+        JZ      SDSKDN
+        JMP     SDSKPL
+SDSKDN: LDA     SDHLMD
+        ORA     A
+        JZ      SDSK2
+        LDA     SDBYTI
+        MOV     B,A
+        LDA     SDHLS
+        CMP     B
+        JZ      SDSK2
+        JNC     SDSK2
+        LDA     SDHLE
+        CMP     B
+        JC      SDSK2
+        JZ      SDSK2
+        PUSH    D
+        PUSH    B
+        LXI     D,ATTREV
+        CALL    OUTSTR
+        POP     B
+        POP     D
+        MVI     A,1
+        STA     SDHLON
+SDSK2:  MVI     C,0
+
+        ; --- Text output loop ---
+SDTXLP: LDA     RTXTCL
+        CMP     C
+        JC      SDCLR
+        JZ      SDCLR
+        LDAX    D
+        ORA     A
+        JZ      SDCLR
+        CPI     CR
+        JZ      SDCLR
+        CPI     LF
+        JZ      SDCLR
+        ; Highlight transition check
+        STA     SDTMPB
+        LDA     SDBYTI
+        MOV     B,A
+        LDA     SDHLS
+        CMP     B
+        CZ      SDRVON
+        LDA     SDHLE
+        CMP     B
+        CZ      SDRVOF
+        ; Output character
+        LDA     SDTMPB
+        CPI     TAB
+        JZ      SDTAB
+        PUSH    D
+        PUSH    B
+        CALL    OUTCHAR
+        POP     B
+        POP     D
+        INX     D
+        INR     C
+        LDA     SDBYTI
+        INR     A
+        STA     SDBYTI
+        JMP     SDTXLP
+
+SDTAB:  LDA     HSCROL
+        ADD     C
+        ANI     TABWID-1
+        MOV     B,A
+        MVI     A,TABWID
+        SUB     B
+        MOV     B,A
+SDTBSP: MVI     A,' '
+        PUSH    D
+        PUSH    B
+        CALL    OUTCHAR
+        POP     B
+        POP     D
+        INR     C
+        LDA     RTXTCL
+        CMP     C
+        JC      SDCLR
+        JZ      SDCLR
+        DCR     B
+        JNZ     SDTBSP
+        INX     D
+        LDA     SDBYTI
+        INR     A
+        STA     SDBYTI
+        JMP     SDTXLP
+
+SDCLR:  LDA     SDHLON
+        ORA     A
+        JZ      SDCLR2
+        PUSH    D
+        PUSH    B
+        LXI     D,ATTOFF
+        CALL    OUTSTR
+        POP     B
+        POP     D
+        XRA     A
+        STA     SDHLON
+SDCLR2:
+        LXI     D,CLREOL
+        CALL    OUTSTR
+
+        LDA     SDROW
+        INR     A
+        STA     SDROW
+        JMP     SDRWLP
+
+SDRWDN: CALL    RULRDRAW
+        JMP     SEPRDRAW
+
+;--- Highlight on/off helpers ---
+SDRVON: PUSH    D
+        PUSH    B
+        LXI     D,ATTREV
+        CALL    OUTSTR
+        POP     B
+        POP     D
+        MVI     A,1
+        STA     SDHLON
+        RET
+
+SDRVOF: PUSH    D
+        PUSH    B
+        LXI     D,ATTOFF
+        CALL    OUTSTR
+        POP     B
+        POP     D
+        XRA     A
+        STA     SDHLON
+        RET
+
+;=============================================================
+; SCREDCL - Redraw current cursor line.
+;=============================================================
+SCREDCL:
+        LHLD    CURBDP
+        MVI     A,BD_CSROW
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A
+        MOV     B,M
+        PUSH    B
+        MOV     A,B
+        ADI     EDITFR
+        MOV     B,A
+        MVI     C,1
+        CALL    CURGOTO
+        CALL    GBCURLN
+        XCHG
+        POP     B
+        JNZ     SLEDRAW
+        ; Empty buffer
+        LHLD    CURBDP
+        MOV     A,L
+        ADI     BD_TOPLN
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A
+        MOV     E,M
+        INX     H
+        MOV     D,M
+        MOV     A,E
+        ADD     B
+        MOV     L,A
+        MOV     A,D
+        ACI     0
+        MOV     H,A
+        INX     H
+        CALL    OUTN4DG
+        MVI     A,' '
+        CALL    OUTCHAR
+        LXI     D,CLREOL
+        JMP     OUTSTR
+
+;=============================================================
+; SCREDLN - Draw one edit area line.
+;=============================================================
+SCREDLN:
+        PUSH    B
+        MOV     A,B
+        ADI     EDITFR
+        MOV     B,A
+        MVI     C,1
+        CALL    CURGOTO
+        POP     B
+        PUSH    B
+        MOV     L,B
+        MVI     H,0
+        PUSH    H
+        LHLD    CURBDP
+        MVI     A,BD_TOPLN
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A
+        MOV     E,M
+        INX     H
+        MOV     D,M
+        POP     H
+        DAD     D
+        CALL    GBGETLN
+        POP     B
+        MOV     A,D
+        ORA     E
+        JNZ     SLEDRAW
+        ; Past end
+        MOV     L,B
+        MVI     H,0
+        PUSH    H
+        LHLD    CURBDP
+        MVI     A,BD_TOPLN
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A
+        MOV     E,M
+        INX     H
+        MOV     D,M
+        POP     H
+        DAD     D
+        INX     H
+        XCHG
+        LHLD    VBFLN
+        DAD     D
+        CALL    OUTN4DG
+        MVI     A,' '
+        CALL    OUTCHAR
+        LXI     D,CLREOL
+        JMP     OUTSTR
+
+;=============================================================
+; SLEDRAW - Draw one line with text content.
+;=============================================================
+SLEDRAW:
+        PUSH    D
+        PUSH    B
+        LHLD    CURBDP
+        MVI     A,BD_TOPLN
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A
+        MOV     E,M
+        INX     H
+        MOV     D,M
+        POP     B
+        PUSH    B
+        MOV     A,E
+        ADD     B
+        MOV     L,A
+        MOV     A,D
+        ACI     0
+        MOV     H,A
+        INX     H
+        XCHG
+        LHLD    VBFLN
+        DAD     D
+        CALL    OUTN4DG
+        MVI     A,' '
+        CALL    OUTCHAR
+        POP     B
+        POP     D
+
+        MVI     C,0
+
+        ; Skip phase
+        LDA     HSCROL
+        ORA     A
+        JZ      SLETXT
+        STA     SLSKIP
+SLSKPL: LDAX    D
+        ORA     A
+        JZ      SLSKDN
+        CPI     CR
+        JZ      SLSKDN
+        CPI     LF
+        JZ      SLSKDN
+        CPI     TAB
+        JZ      SLSKTB
+        INX     D
+        INR     C
+        JMP     SLSKCK
+SLSKTB: LDA     HSCROL
+        ADD     C
+        ANI     TABWID-1
+        MOV     B,A
+        MVI     A,TABWID
+        SUB     B
+        ADD     C
+        MOV     C,A
+        INX     D
+SLSKCK: LDA     SLSKIP
+        CMP     C
+        JC      SLSKDN
+        JZ      SLSKDN
+        JMP     SLSKPL
+SLSKDN: MVI     C,0
+
+SLETXT: LDA     RTXTCL
+        CMP     C
+        JC      SLEEND
+        JZ      SLEEND
+        LDAX    D
+        ORA     A
+        JZ      SLEEND
+        CPI     CR
+        JZ      SLEEND
+        CPI     LF
+        JZ      SLEEND
+        CPI     TAB
+        JZ      SLETAB
+        PUSH    D
+        PUSH    B
+        CALL    OUTCHAR
+        POP     B
+        POP     D
+        INX     D
+        INR     C
+        JMP     SLETXT
+
+SLETAB: LDA     HSCROL
+        ADD     C
+        ANI     TABWID-1
+        MOV     B,A
+        MVI     A,TABWID
+        SUB     B
+        MOV     B,A
+STABSP: MVI     A,' '
+        PUSH    D
+        PUSH    B
+        CALL    OUTCHAR
+        POP     B
+        POP     D
+        INR     C
+        LDA     RTXTCL
+        CMP     C
+        JC      SLEEND
+        JZ      SLEEND
+        DCR     B
+        JNZ     STABSP
+        INX     D
+        JMP     SLETXT
+
+SLEEND: LXI     D,CLREOL
+        JMP     OUTSTR
+
+;=============================================================
+; INFOBAR - Update info bar on row 1.
+;=============================================================
+INFOBAR:
+        MVI     B,INFOROW
+        MVI     C,1
+        CALL    CURGOTO
+
+        LXI     D,ATTREV
+        CALL    OUTSTR
+
+        ; Filename display
+        LHLD    CURBDP
+        MVI     A,BD_FNAME
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A
+
+        LDA     ISLOAD
+        ORA     A
+        JNZ     IBLDNG
+
+        INX     H
+        MOV     A,M
+        ANI     7FH
+        CPI     ' '
+        DCX     H
+        JZ      IBNONAME
+
+        ; Drive letter
+        MOV     A,M
+        ORA     A
+        JNZ     IBDRVOK
+        PUSH    H
+        MVI     C,BF_GETDSK
+        CALL    BDOS
+        POP     H
+        INR     A
+IBDRVOK:
+        DCR     A
+        ADI     'A'
+        PUSH    H
+        CALL    OUTCHAR
+        MVI     A,':'
+        CALL    OUTCHAR
+        POP     H
+        INX     H
+        JMP     IBNAME
+
+IBLDNG: PUSH    H
+        LXI     D,LDNGMST
+        CALL    OUTSTR
+        POP     H
+        JMP     IBLNCT
+
+IBNONAME:
+        PUSH    H
+        LXI     D,NAMNMST
+        CALL    OUTSTR
+        POP     H
+        JMP     IBNMDN
+
+IBNAME: MVI     B,8
+IBNMLP: MOV     A,M
+        ANI     7FH
+        CPI     ' '
+        JZ      IBNMDN
+        PUSH    B
+        PUSH    H
+        CALL    OUTCHAR
+        POP     H
+        POP     B
+        INX     H
+        DCR     B
+        JNZ     IBNMLP
+IBNMDN:
+        ; Extension
+        LHLD    CURBDP
+        MVI     A,BD_FNAME+9
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A
+        MOV     A,M
+        ANI     7FH
+        CPI     ' '
+        JZ      IBNEXT
+        MVI     A,'.'
+        PUSH    H
+        CALL    OUTCHAR
+        POP     H
+        MVI     B,3
+IBEXTL: MOV     A,M
+        ANI     7FH
+        CPI     ' '
+        JZ      IBNEXT
+        PUSH    B
+        PUSH    H
+        CALL    OUTCHAR
+        POP     H
+        POP     B
+        INX     H
+        DCR     B
+        JNZ     IBEXTL
+
+IBNEXT:
+        ; Modified indicator
+        LHLD    CURBDP
+        MVI     A,BD_MODIF
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A
+        MOV     A,M
+        ORA     A
+        MVI     A,'*'
+        JNZ     IBMOD1
+        MVI     A,' '
+IBMOD1: CALL    OUTCHAR
+
+IBLNCT: ; Lines count
+        LXI     D,IBLNSTR
+        CALL    OUTSTR
+        CALL    GBCNTLN
+        CALL    OUTHL4
+
+        ; Row
+        LXI     D,IBRNSTR
+        CALL    OUTSTR
+        LHLD    CURBDP
+        MVI     A,BD_CSROW
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A
+        MOV     L,M
+        MVI     H,0
+        INX     H
+        PUSH    H
+        LHLD    CURBDP
+        MVI     A,BD_TOPLN
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A
+        MOV     E,M
+        INX     H
+        MOV     D,M
+        POP     H
+        DAD     D
+        XCHG
+        LHLD    VBFLN
+        DAD     D
+        CALL    OUTHL4
+
+        ; Col (tabs expanded)
+        LXI     D,IBCNSTR
+        CALL    OUTSTR
+        LHLD    CURBDP
+        MVI     A,BD_CSCOL
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A
+        MOV     C,M
+        PUSH    B
+        CALL    GBCURLN
+        POP     B
+        MVI     D,0
+        MOV     A,C
+        ORA     A
+        JZ      IBCLDN
+        MOV     E,C
+IBCLLP: MOV     A,M
+        CPI     TAB
+        JZ      IBCLTB
+        INR     D
+        JMP     IBCLNX
+IBCLTB: MOV     A,D
+        ANI     TABWID-1
+        MOV     B,A
+        MVI     A,TABWID
+        SUB     B
+        ADD     D
+        MOV     D,A
+IBCLNX: INX     H
+        DCR     E
+        JNZ     IBCLLP
+IBCLDN: MOV     L,D
+        MVI     H,0
+        INX     H
+        CALL    OUTHL4
+
+        ; Len
+        LXI     D,IBWDSTR
+        CALL    OUTSTR
+        CALL    GBCURLN
+        MOV     L,A
+        MVI     H,0
+        CALL    OUTHL4
+
+        ; Mode
+        LDA     INSMODE
+        ORA     A
+        JNZ     IBOVRMD
+        LXI     D,IBINSTR
+        CALL    OUTSTR
+        JMP     IBVIRT
+IBOVRMD:
+        LXI     D,IBOVSTR
+        CALL    OUTSTR
+
+IBVIRT:
+        LDA     VIMODE
+        ORA     A
+        JZ      IBFREE
+        ; [Vssss,eeee]
+        MVI     A,'['
+        CALL    OUTCHAR
+        MVI     A,'V'
+        CALL    OUTCHAR
+        LHLD    VBFLN
+        INX     H
+        CALL    OUTHL4
+        MVI     A,','
+        CALL    OUTCHAR
+        CALL    GBCNTLN
+        XCHG
+        LHLD    VAFLN
+        MOV     A,E
+        SUB     L
+        MOV     L,A
+        MOV     A,D
+        SBB     H
+        MOV     H,A
+        PUSH    H
+        LHLD    VAFLN
+        MOV     A,H
+        ORA     L
+        POP     H
+        JZ      IBVDN
+        DCX     H
+IBVDN:  CALL    OUTHL4
+        MVI     A,']'
+        CALL    OUTCHAR
+        JMP     IBCLEAR
+
+IBFREE:
+        LXI     D,IBFRSTR
+        CALL    OUTSTR
+        CALL    GBGAPEN
+        XCHG
+        CALL    GBGAPBG
+        MOV     A,E
+        SUB     L
+        MOV     L,A
+        MOV     A,D
+        SBB     H
+        MOV     H,A
+        CALL    OUTN5DG
+        MVI     A,']'
+        CALL    OUTCHAR
+
+IBCLEAR:
+        LXI     D,CLREOL
+        CALL    OUTSTR
+        LXI     D,ATTOFF
+        JMP     OUTSTR
+
+;=============================================================
+; CURPOS - Position cursor at current edit position.
+;=============================================================
+CURPOS:
+        LHLD    CURBDP
+        MVI     A,BD_CSROW
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A
+        MOV     B,M
+        INX     H
+        MOV     C,M
+        MOV     A,B
+        ADI     EDITFR
+        MOV     B,A
+        PUSH    B
+        CALL    GBCURLN
+        POP     B
+        MVI     D,0
+        MOV     A,C
+        ORA     A
+        JZ      CPVDN
+        MOV     E,C
+CPVLP:  MOV     A,M
+        CPI     TAB
+        JZ      CPVTAB
+        INR     D
+        JMP     CPVNXT
+CPVTAB: MOV     A,D
+        ANI     TABWID-1
+        MOV     C,A
+        MVI     A,TABWID
+        SUB     C
+        ADD     D
+        MOV     D,A
+CPVNXT: INX     H
+        DCR     E
+        JNZ     CPVLP
+CPVDN:  LDA     HSCROL
+        MOV     C,A
+        MOV     A,D
+        SUB     C
+        ADI     TXTFCOL
+        MOV     C,A
+        JMP     CURGOTO
+
+;=============================================================
+; CURGOTO - Move cursor to row B, col C (both 1-based).
+; Cromemco 3102: ESC F line+1FH col+1FH
+;=============================================================
+CURGOTO:
+        PUSH    B
+        MVI     A,ESC
+        CALL    OUTCHAR
+        MVI     A,'F'
+        CALL    OUTCHAR
+        POP     B
+        MOV     A,B
+        ADI     1FH             ; row: 1-based + 1FH = 0-based + 20H
+        PUSH    B
+        CALL    OUTCHAR
+        POP     B
+        MOV     A,C
+        ADI     1FH             ; col: 1-based + 1FH = 0-based + 20H
+        JMP     OUTCHAR
+
+;=============================================================
+; STATMSG - Write message to status bar (row 24).
+;=============================================================
+STATMSG:
+        PUSH    D
+        MVI     B,STATROW
+        MVI     C,1
+        CALL    CURGOTO
+        LXI     D,ATTNRM
+        CALL    OUTSTR
+        LXI     D,CLREOL
+        CALL    OUTSTR
+        POP     D
+        JMP     OUTSTR
+
+;=============================================================
+; STATCLR - Clear status bar (row 24).
+;=============================================================
+STATCLR:
+        MVI     B,STATROW
+        MVI     C,1
+        CALL    CURGOTO
+        LXI     D,CLREOL
+        JMP     OUTSTR
+
+;=============================================================
+; RULRDRAW - Draw tab ruler on row 2.
+;=============================================================
+RULRDRAW:
+        MVI     B,RULRROW
+        MVI     C,1
+        CALL    CURGOTO
+        MVI     B,LNUMWID
+RLGUT:  MVI     A,' '
+        PUSH    B
+        CALL    OUTCHAR
+        POP     B
+        DCR     B
+        JNZ     RLGUT
+        LDA     RTXTCL
+        MOV     B,A
+        MVI     C,0
+RLTXLP: MOV     A,C
+        ANI     TABWID-1
+        JNZ     RLDASH
+        MVI     A,':'
+        JMP     RLOUT
+RLDASH: MVI     A,'-'
+RLOUT:  PUSH    B
+        CALL    OUTCHAR
+        POP     B
+        INR     C
+        DCR     B
+        JNZ     RLTXLP
+        RET
+
+;=============================================================
+; SEPRDRAW - Draw separator on row 23.
+;=============================================================
+SEPRDRAW:
+        MVI     B,SEPRROW
+        MVI     C,1
+        CALL    CURGOTO
+        LDA     VIMODE
+        ORA     A
+        JZ      SPRNRM
+
+        ; Virtual mode separator
+        LHLD    VBFLN
+        MOV     A,H
+        ORA     L
+        JZ      SPRNEQ
+        LXI     D,SPRUPRA
+        CALL    OUTSTR
+        LXI     D,SPRLIN
+        CALL    OUTSTR
+        LXI     H,1
+        CALL    OUTN4DG
+        MVI     A,'-'
+        CALL    OUTCHAR
+        LHLD    VBFLN
+        CALL    OUTN4DG
+        LXI     D,SPRABV
+        CALL    OUTSTR
+
+SPRNEQ: LXI     D,SPREQS
+        CALL    OUTSTR
+
+        LHLD    VAFLN
+        MOV     A,H
+        ORA     L
+        JZ      SPRNDN
+        LXI     D,SPRLIN
+        CALL    OUTSTR
+        CALL    GBCNTLN
+        XCHG
+        LHLD    VAFLN
+        MOV     A,E
+        SUB     L
+        MOV     L,A
+        MOV     A,D
+        SBB     H
+        MOV     H,A
+        CALL    OUTN4DG
+        MVI     A,'-'
+        CALL    OUTCHAR
+        CALL    GBCNTLN
+        CALL    OUTN4DG
+        LXI     D,SPRBLW
+        CALL    OUTSTR
+        LXI     D,SPRDNA
+        CALL    OUTSTR
+
+SPRNDN: LXI     D,CLREOL
+        JMP     OUTSTR
+
+SPRNRM: LXI     D,SPRBLD
+        CALL    OUTSTR
+        LDA     RSCRCL
+        SUI     SPRBLN
+        MOV     B,A
+SPRLP:  MVI     A,'='
+        PUSH    B
+        CALL    OUTCHAR
+        POP     B
+        DCR     B
+        JNZ     SPRLP
+        RET
+
+;=============================================================
+; OUTCHAR - Output single character to console.
+;=============================================================
+OUTCHAR:
+        MOV     E,A
+        MVI     C,BF_RAWIO
+        CALL    BDOS
+        RET
+
+;=============================================================
+; OUTSTR - Output '$'-terminated string.
+;=============================================================
+OUTSTR:
+        LDAX    D
+        CPI     '$'
+        RZ
+        PUSH    D
+        CALL    OUTCHAR
+        POP     D
+        INX     D
+        JMP     OUTSTR
+
+;=============================================================
+; OUTN5DG - Output number as 5-digit decimal (leading spaces).
+;=============================================================
+OUTN5DG:
+        XRA     A
+        STA     ON4LZF
+        ; Ten-thousands
+        LXI     D,10000
+        MVI     B,0
+ON5TH:  MOV     A,L
+        SUB     E
+        MOV     C,A
+        MOV     A,H
+        SBB     D
+        JC      ON5THD
+        MOV     H,A
+        MOV     L,C
+        INR     B
+        JMP     ON5TH
+ON5THD: MOV     A,B
+        ORA     A
+        JNZ     ON5THP
+        MVI     A,' '
+        PUSH    H
+        CALL    OUTCHAR
+        POP     H
+        JMP     ON4KDG
+ON5THP: ADI     '0'
+        PUSH    H
+        CALL    OUTCHAR
+        POP     H
+        MVI     A,1
+        STA     ON4LZF
+        JMP     ON4KDG
+
+;=============================================================
+; OUTN4DG - Output number as 4-digit decimal (leading spaces).
+;=============================================================
+OUTN4DG:
+        XRA     A
+        STA     ON4LZF
+ON4KDG: ; Thousands
+        LXI     D,1000
+        MVI     B,0
+ON4TH:  MOV     A,L
+        SUB     E
+        MOV     C,A
+        MOV     A,H
+        SBB     D
+        JC      ON4THD
+        MOV     H,A
+        MOV     L,C
+        INR     B
+        JMP     ON4TH
+ON4THD: MOV     A,B
+        ORA     A
+        JNZ     ON4THP
+        LDA     ON4LZF
+        ORA     A
+        JNZ     ON4THZ
+        MVI     A,' '
+        PUSH    H
+        CALL    OUTCHAR
+        POP     H
+        JMP     ON4HN
+ON4THZ: MVI     A,'0'
+        PUSH    H
+        CALL    OUTCHAR
+        POP     H
+        JMP     ON4HN
+ON4THP: ADI     '0'
+        PUSH    H
+        CALL    OUTCHAR
+        POP     H
+        MVI     A,1
+        STA     ON4LZF
+ON4HN:  ; Hundreds
+        LXI     D,100
+        MVI     B,0
+ON4HL:  MOV     A,L
+        SUB     E
+        MOV     C,A
+        MOV     A,H
+        SBB     D
+        JC      ON4HD
+        MOV     H,A
+        MOV     L,C
+        INR     B
+        JMP     ON4HL
+ON4HD:  MOV     A,B
+        ORA     A
+        JNZ     ON4HP
+        LDA     ON4LZF
+        ORA     A
+        JNZ     ON4HZ
+        MVI     A,' '
+        PUSH    H
+        CALL    OUTCHAR
+        POP     H
+        JMP     ON4TN
+ON4HZ:  MVI     A,'0'
+        PUSH    H
+        CALL    OUTCHAR
+        POP     H
+        JMP     ON4TN
+ON4HP:  ADI     '0'
+        PUSH    H
+        CALL    OUTCHAR
+        POP     H
+        MVI     A,1
+        STA     ON4LZF
+ON4TN:  ; Tens
+        MVI     B,0
+ON4TL:  MOV     A,L
+        SUI     10
+        JC      ON4TD
+        MOV     L,A
+        INR     B
+        JMP     ON4TL
+ON4TD:  MOV     A,B
+        ORA     A
+        JNZ     ON4TP
+        LDA     ON4LZF
+        ORA     A
+        JNZ     ON4TZ
+        MVI     A,' '
+        PUSH    H
+        CALL    OUTCHAR
+        POP     H
+        JMP     ON4UN
+ON4TZ:  MVI     A,'0'
+        PUSH    H
+        CALL    OUTCHAR
+        POP     H
+        JMP     ON4UN
+ON4TP:  ADI     '0'
+        PUSH    H
+        CALL    OUTCHAR
+        POP     H
+ON4UN:  MOV     A,L
+        ADI     '0'
+        JMP     OUTCHAR
+
+;=============================================================
+; OUTHL4 - Output HL as 4-digit decimal (leading spaces).
+;=============================================================
+OUTHL4:
+        XRA     A
+        STA     ON4LZF
+        JMP     OUTN4DG
+
+;=============================================================
+; DATA SEGMENT
+;=============================================================
+        DSEG
+
+ON4LZF: DB      0
+; SCRDRAW working variables
+SDTPLN: DW      0
+SDLOFF: DW      0
+SDFND:  DB      0
+SDROW:  DB      0
+; Highlight working variables
+SDHLBG: DW      0
+SDHLEN: DW      0
+SDHLMD: DB      0
+SDLNST: DW      0
+SDHLS:  DB      0
+SDHLE:  DB      0
+SDHLON: DB      0
+SDBYTI: DB      0
+SDTMPB: DB      0
+SDSKIP: DB      0
+SLSKIP: DB      0
+ISLOAD: DB      0
+
+        END
+

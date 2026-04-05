@@ -1,6 +1,6 @@
 cls
 @echo off
-REM ---------------------------------------------------------------
+REM ----------------------------------------------------------------
 REM BUILD-ALL.BAT - Build all 4 SEDIT variants
 REM
 REM   SEDIT.COM    - Mono  (no color, no highlighting)
@@ -8,11 +8,16 @@ REM   SEDIT-CL.COM - Color (color, no highlighting)
 REM   SEDIT-A.COM  - ASM   (color, ASM highlighting)
 REM   SEDIT-C.COM  - Color (color, C highlighting)
 REM   SEADM31.COM  - Mono  (no color, specific to the ADM-31)
+REM   SEC3102.COM  - Mono  (no color, soecific to the Cromemco 3102)
 REM
 REM Requires: cpmulator.exe, M80.COM, L80.COM, Python (CPMFMT.PY)
-REM ---------------------------------------------------------------
+REM ----------------------------------------------------------------
 
 echo === SEDIT Multi-Variant Build ===
+
+echo First cleanup
+if exist SE*.COM del SE*.COM 2>nul
+if exist *.REL   del *.REL   2>nul
 
 REM --- Format and assemble all non-variant modules (once) ---
 echo Formatting source files...
@@ -26,6 +31,13 @@ python CPMFMT.PY SESEARCH.MAC
 if errorlevel 1 goto fail
 python CPMFMT.PY COL80.MAC COL132.MAC CLS.MAC MEMTEST.MAC COLORS.MAC
 if errorlevel 1 goto fail
+REM Specific to the ADM 31 terminal
+python CPMFMT.PY SEADM31
+if errorlevel 1 goto fail
+REM Specific to the Cromemco 3102 terminal
+python CPMFMT.PY SEC3102.MAC SEC3102K.MAC
+if errorlevel 1 goto fail
+
 
 echo Assembling shared modules...
 for %%M in (SEDIT SEBLOCK SEFILEIO SEGAPBUF SEHELP SEKEY SEKEYBND SEMENU SESEARCH SEVIRTIO) do (
@@ -117,6 +129,19 @@ cpmulator L80.COM SEDIT,SEADM31,SEKEY,SEGAPBUF,SEFILEIO,SEMENU,SESEARCH,SEBLOCK,
 echo Built SEADM31.COM
 echo --- End of ADM-31 Editor ---
 
+echo --- Build SEC3102 Editor ---
+cpmulator M80.COM =SESCREEN
+if errorlevel 1 goto fail
+cpmulator M80.COM =SESYNTAX
+if errorlevel 1 goto fail
+cpmulator M80.COM =SEC3102
+if errorlevel 1 goto fail
+cpmulator M80.COM =SEC3102K
+if errorlevel 1 goto fail
+cpmulator L80.COM SEDIT,SEC3102,SEC3102K,SEGAPBUF,SEFILEIO,SEMENU,SESEARCH,SEBLOCK,SESYNTAX,SEKEYBND,SEVIRTIO,SEHELP,SEC3102/N/E
+echo Built SEC3102.COM
+echo --- End of Cromemco 3102 Editor ---
+
 REM --- Link standalone utilities ---
 echo.
 echo Linking standalone utilities...
@@ -149,6 +174,7 @@ echo   SEDIT-CL.COM - Color (WordStar/VT100, color   , no highlighting)
 echo   SEDIT-A.COM  - ASM   (WordStar/VT100, color + ASM highlighting)
 echo   SEDIT-C.COM  - Color (WordStar/VT100, color + C highlighting)
 echo   SEADM31.COM  - Mono  (ADM-31        , no color, no highlighting)
+echo   SEC3102.COM  - Mono  (Cromemco 3102  ,no color, no highlighting)
 goto end
 
 :fail
