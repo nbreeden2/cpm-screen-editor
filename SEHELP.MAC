@@ -284,6 +284,12 @@ HLPKEY: MVI     E,0FFH
         ORA     A
         JZ      HLPKEY          ; no char yet, keep polling
 
+        ; Clear the footer line before returning
+        MVI     B,STATROW
+        MVI     C,1
+        CALL    CURGOTO
+        LXI     D,HLPCEL
+        CALL    OUTSTR
         ; Reset attribute
         LXI     D,HLPNRM
         JMP     OUTSTR
@@ -293,6 +299,7 @@ HLPKEY: MVI     E,0FFH
 ;=============================================================
 
 HLPCLR:  DB     ESC,'[0m',ESC,'[2J',ESC,'[H$'
+HLPCEL:  DB     ESC,'[K$'
 HLPNRM:  DB     ESC,'[0m$'
 HLPHDR:  DB     ESC,'[7m'
          DB     ' SEDIT v1.18 Key Reference'
