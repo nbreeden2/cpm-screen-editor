@@ -22,6 +22,7 @@ SEDIT is a full-screen plain-text editor for CP/M 2.2 written in Intel 8080 asse
 - Optional syntax highlighting for assembly language (`.MAC`, `.ASM`, `.INC`) and C language (`.C`, `.H`) files (compile-time option)
 - User-configurable key bindings loaded from `SEDIT.KEY` on startup
 - Horizontal scrolling for lines wider than the visible text area
+- Auto-indent on Enter (copies leading whitespace from the current line)
 - Clean return to CP/M on exit; no file corruption on abort
 
 ### 1.2 Non-Goals
@@ -206,7 +207,7 @@ Menu geometry: top-left at row 6/col 28, bottom-right at row 17/col 54.
 
 #### 6. Help (H)
 - Displays a full-screen key reference overlay (see section 4)
-- Press any key to return to editing
+- Press any key to return to editing; the footer prompt is cleared on dismiss
 
 #### 7. About (B)
 - Displays `SEDIT v1.18 CP/M Screen Editor` on the status bar
@@ -260,8 +261,10 @@ These bindings are active with the default configuration. ESC always opens the m
 | `^G` / Delete | Delete character at cursor |
 | `^Y` | Delete current line |
 | `^I` / Tab | Insert tab |
-| `^M` / Enter | Insert newline (CR+LF) |
+| `^M` / Enter | Insert newline with auto-indent |
 | `^V` / Insert | Toggle Insert / Overwrite mode |
+
+**Auto-indent:** When Enter is pressed, the new line automatically inherits the leading whitespace (spaces and tabs) from the current line. This applies to all file types.
 
 ### 4.3 Block Operations
 
@@ -501,9 +504,14 @@ When SYNHI=2, C language files (`.C`, `.H`) are also highlighted:
 | Numeric literal | 34 | Blue |
 | Line comment (`//`) | 32 | Green |
 | Block comment (`/* */`) | 32 | Green |
+| Open/close brace (depth 0) | 91 | Bright red |
+| Open/close brace (depth 1) | 92 | Bright green |
+| Open/close brace (depth 2) | 94 | Bright blue |
 | Normal text | 0 | Normal |
 
-Block comments spanning multiple lines are tracked across screen redraws via a pre-scan from the start of the file.
+Braces (`{` and `}`) are colored by nesting depth, cycling through red, green, and blue (depth mod 3). A closing brace matches the color of its corresponding opening brace.
+
+Block comments and brace nesting depth spanning multiple lines are tracked across screen redraws via a pre-scan from the start of the file.
 
 Syntax mode is set automatically by SYNINIT based on file extension (`.MAC`, `.ASM`, `.INC` -> SYN_ASM; `.C`, `.H` -> SYN_C; all others -> SYN_NONE).
 
@@ -523,7 +531,8 @@ Syntax mode is set automatically by SYNINIT based on file extension (`.MAC`, `.A
    - LF marks line boundary
    - Lines wider than MAXCOLS (255) chars generate a warning
 6. Close file; move cursor to top; clear MODIFIED flag
-7. Call SYNINIT to detect syntax mode from extension
+7. If virtual mode was activated during loading, rebalance the buffer around line 1 via VIGOTO to provide ~4 KB of editing headroom (without this, the gap would be only ~300-500 bytes after a large file load)
+8. Call SYNINIT to detect syntax mode from extension
 
 ### 9.2 Save File
 

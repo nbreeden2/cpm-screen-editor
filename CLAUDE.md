@@ -9,6 +9,7 @@
 - BDOS calls clobber ALL registers. Any value needed across CALL must be saved to memory or stack.
 - When fixing off-by-one or boundary bugs, trace exact values at edges (0, 1, max-1, max) before writing the fix.
 - Version shown via ESC menu -> "8. About". Update in SEMENU.MAC.
+- Version also in: SEHELP.MAC (help header), SESCREEN.MAC/SEADM31.MAC/SEC3102.MAC (separator), SEDIT.md, README.md.
 
 ## Build
 
@@ -52,7 +53,7 @@ INFOBAR and CURPOS always run at MLDONE regardless of flags.
 | SEMENU.MAC | ESC menu overlay | MNUSHOW |
 | SESEARCH.MAC | Find / replace | SRFNDNX, SRREPLACE |
 | SEBLOCK.MAC | Block mark, copy, delete, paste | BLMARK, BLCOPY, BLDEL, BLPASTE |
-| SESYNTAX.MAC | Assembly syntax highlighting | SYNINIT, SYNLINE, SNTBL, SNCNT |
+| SESYNTAX.MAC | ASM + C syntax highlighting, rainbow braces | SYNINIT, SYNLINE, SNTBL, SNCNT, SNCMST, BRDEPTH |
 | SEKEYBND.MAC | Key binding init from SEDIT.KEY | KBINIT |
 | SEVIRTIO.MAC | Virtual buffer I/O for large files | VIMODE, VISAVALL, VIGOTO, VAFLN, VAFCB, VAFEX, VIOVFL |
 | SEHELP.MAC | Help screen overlay, BMDATEND | HLPSHOW |
@@ -69,7 +70,7 @@ Memory:  [pre-gap text R1][---GAP---][post-gap text R2]
 - **R1** = base .. base+GAPBG-1 (text before cursor)
 - **R2** = base+GAPEN .. base+BSIZE-1 (text after cursor)
 - Cursor is always at the gap. Insert = write at GAPBG, advance GAPBG. Delete = adjust gap boundaries.
-- Line delimiter: LF (0x0A). Files stored as CR+LF on disk, LF-only in buffer.
+- Line delimiter: LF (0x0A). Files stored as CR+LF on disk, CR+LF in buffer.
 
 ## Buffer Descriptor (BD_SIZE = 34 bytes, via CURBDP)
 

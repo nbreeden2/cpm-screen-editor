@@ -1,9 +1,9 @@
 # SEDIT User Manual
 
-**SEDIT v1.02 — Screen Editor for CP/M 2.2**
+**SEDIT v1.18 — Screen Editor for CP/M 2.2**
 
 A full-screen text editor for CP/M 2.2 systems with VT100/ANSI terminals.
-Uses WordStar-compatible control key conventions.
+Uses WordStar-compatible control key conventions with ANSI arrow key support.
 
 ---
 
@@ -13,7 +13,7 @@ Uses WordStar-compatible control key conventions.
 
 - CP/M 2.2 or compatible operating system
 - VT100/ANSI compatible terminal (80 columns x 24 rows)
-- Minimum 18 KB free TPA (Transient Program Area)
+- Minimum 9 KB free TPA (Transient Program Area)
 
 ### Starting SEDIT
 
@@ -40,7 +40,7 @@ The info bar (row 1) shows:
 | Lines | Total line count in buffer |
 | Row / Col | Cursor position (1-based) |
 | INS or OVR | Current editing mode |
-| Buffer number | Which of the 2 edit buffers is active |
+| Free / Virtual | Free buffer space or virtual mode line range |
 
 ---
 
@@ -66,8 +66,8 @@ control key shortcut and (where applicable) a standard terminal key equivalent.
 
 | Key | Alternative | Action |
 |-----|-------------|--------|
-| ^E | Up arrow | Move cursor up one line |
-| ^X | Down arrow | Move cursor down one line |
+| ^E | Up arrow | Move cursor up one line (sticky column) |
+| ^X | Down arrow | Move cursor down one line (sticky column) |
 | ^S | Left arrow | Move cursor left one character |
 | ^D | Right arrow | Move cursor right one character |
 | ^A | | Move to previous word |
@@ -90,7 +90,7 @@ control key shortcut and (where applicable) a standard terminal key equivalent.
 
 | Key | Action |
 |-----|--------|
-| ^M / Enter | Insert new line (carriage return + line feed) |
+| ^M / Enter | Insert new line with auto-indent |
 | ^I / Tab | Insert tab character (displayed as spaces to next 4-column stop) |
 | ^V | Toggle insert / overwrite mode |
 
@@ -101,7 +101,6 @@ control key shortcut and (where applicable) a standard terminal key equivalent.
 | ^H | Backspace | Delete character to the left |
 | ^G | Del | Delete character to the right |
 | ^Y | | Delete entire current line |
-| ^T | | Delete word to the right |
 
 ### Block Operations
 
@@ -183,40 +182,15 @@ Press **ESC** or **F4** to open the command menu. Navigate with:
 
 | # | Option | Description |
 |---|--------|-------------|
-| 1 | Open File | Load a file into the current buffer |
-| 2 | Save File | Save the current buffer to disk |
+| 1 | Open File | Load a file into the buffer |
+| 2 | Save File | Save the buffer to disk |
 | 3 | Save As... | Save with a new filename |
-| 4 | Switch Buffer | Toggle between the two edit buffers |
-| 5 | Find / Replace | Search and replace dialog |
-| 6 | Go To Line... | Jump to a specific line number |
-| 7 | Help | Display key reference overlay |
-| 8 | About | Show version information |
-| 9 | Quit / Exit | Exit the editor |
-
-### Find / Replace (Menu Option 5)
-
-The Find / Replace dialog prompts for a search string and a replacement string.
-It replaces all occurrences from the top of the file forward.
-
-    Search: _
-    Replace: _
-
-Press Enter with an empty search string to cancel.
-
----
-
-## Dual Buffers
-
-SEDIT supports two independent edit buffers. Each buffer has its own:
-
-- File content and filename
-- Cursor position
-- Block marks
-- Modified flag
-- Syntax highlighting mode
-
-Switch between buffers using **ESC → 4 (Switch Buffer)**. This allows you to
-edit two files simultaneously, switching back and forth as needed.
+| 4 | Find text... | Search for text from cursor position |
+| 5 | Go To Line... | Jump to a specific line number |
+| 6 | Help | Display key reference overlay |
+| 7 | About | Show version information |
+| 8 | Toggle 80/132 col | Switch between 80 and 132 column modes |
+| 9 | Exit | Exit the editor (with save prompt if modified) |
 
 ---
 
@@ -253,13 +227,15 @@ current directory. If this file is not present, the built-in defaults
 (listed above) are used.
 
 The file format is plain text with one binding per line. Lines starting with
-`$` are comments.
+`;` are comments.
 
 ### Binding Format
 
 ```
-$ This is a comment
-CTRL <n> <action>       Bind Ctrl-<n> to an action (n = 1-26)
+; This is a comment
+CTRL <n> <action>       Bind Ctrl-<n> to an action (n = 0-31)
+CSI  <byte> <param> <action>  Bind CSI escape sequence
+SS3  <byte> <action>    Bind SS3 escape sequence
 CTK  <char> <action>    Bind Ctrl-K + <char> to an action
 CTQ  <char> <action>    Bind Ctrl-Q + <char> to an action
 ```
@@ -278,11 +254,11 @@ MENU
 ### Example SEDIT.KEY
 
 ```
-$ Custom key bindings
-CTRL 5 CURUP       $ Ctrl-E = cursor up
-CTRL 24 CURDN      $ Ctrl-X = cursor down
-CTK S FSAVE        $ Ctrl-K S = save file
-CTQ F MENU         $ Ctrl-Q F = open menu instead of find
+; Custom key bindings
+CTRL 5 CURUP       ; Ctrl-E = cursor up
+CTRL 24 CURDN      ; Ctrl-X = cursor down
+CTK S FSAVE        ; Ctrl-K S = save file
+CTQ F MENU         ; Ctrl-Q F = open menu instead of find
 ```
 
 ---
@@ -291,13 +267,15 @@ CTQ F MENU         $ Ctrl-Q F = open menu instead of find
 
 | Item | Limit |
 |------|-------|
-| Edit buffers | 2 |
+| Edit buffers | 1 (single buffer) |
 | Clipboard size | 2,048 bytes |
 | Search string | 64 characters |
-| Visible line numbers | Up to 999 (3-digit gutter) |
-| Text columns per line | 74 (80 minus 4-column gutter and margins) |
+| Max line length | 255 characters (MAXCOLS) |
+| Visible line numbers | Up to 9999 (4-digit gutter) |
+| Text columns per line | 73 (80 minus 5-column gutter and margins) |
 | Tab stops | Every 4 columns |
-| Minimum TPA | 18 KB |
+| Minimum TPA | 9 KB |
+| File size | Unlimited (virtual buffer mode for files larger than TPA) |
 
 ---
 
@@ -332,10 +310,10 @@ During operation, SEDIT displays brief messages on row 24:
  ^E  Up         ^QS Home  ^H  Backspace        ^KB  Mark start/end
  ^X  Down       ^QD End   ^G  Delete right      ^KC  Copy block
  ^S  Left       ^QR Top   ^Y  Delete line       ^KD  Delete block
- ^D  Right      ^QC End   ^T  Delete word        ^KP  Paste
- ^A  Word left             ^V  Ins/Ovr toggle    ^KS  Save (F2)
- ^F  Word right            ^I  Tab               ^KX  Exit
- ^R  Page up               ^M  New line          ^KQ  Quit
+ ^D  Right      ^QC End   ^V  Ins/Ovr toggle    ^KP  Paste
+ ^A  Word left             ^I  Tab               ^KS  Save (F2)
+ ^F  Word right            ^M  New line (auto-   ^KX  Exit
+ ^R  Page up                    indent)          ^KQ  Quit
  ^C  Page down                                   ^QF  Find
  ^W  Scroll up             ESC Menu (F4)         ^L   Find next (F1)
  ^Z  Scroll down           F3  Block mark
