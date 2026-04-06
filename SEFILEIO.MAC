@@ -42,6 +42,7 @@
         EXTRN   VIWFCB          ; output FCB pointer
         EXTRN   VIOPOS          ; output buffer position
         EXTRN   VIFLUSH         ; flush output buffer
+        EXTRN   VIGOTO          ; merge-split at target line
 
 ;--- Exports ----------------------------------------------
         PUBLIC  FIOPEN          ; load file into buffer
@@ -690,6 +691,14 @@ FIEOF:
         LXI     D,WRKFCB
         MVI     C,BF_FCLOSE
         CALL    BDOS
+
+        ; If virtual mode, rebalance buffer around line 1
+        ; so the gap has ~4 KB of editing headroom.
+        LDA     VIMODE
+        ORA     A
+        JZ      FIOOPN
+        LXI     H,1             ; target line 1
+        CALL    VIGOTO          ; merge-split rebalance
 
 FIOOPN: ; New or loaded: move cursor to top, clear modified
         XRA     A
