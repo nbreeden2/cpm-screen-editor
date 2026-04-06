@@ -544,11 +544,52 @@ DO_DLN: CALL    GBDLLN
 DO_TAB: MVI     A,TAB
         CALL    GBINSRT
         JMP     MLDRTL          ; redraw current line only
-DO_NLN: MVI     A,CR
+DO_NLN:
+        ; Auto-indent: capture leading whitespace before newline
+        CALL    GBCURLN         ; HL = GGLBUF, A = length
+        MVI     B,0             ; B = indent char count
+        ORA     A
+        JZ      DONLCR          ; empty line, skip scan
+        MOV     C,A             ; C = line length
+        LXI     D,NLIBUF        ; DE = indent buffer
+DONLSC: MOV     A,M
+        CPI     ' '
+        JZ      DONLWS
+        CPI     TAB
+        JZ      DONLWS
+        JMP     DONLCR          ; non-whitespace, done scanning
+DONLWS: STAX    D               ; save whitespace byte
+        INX     H
+        INX     D
+        INR     B
+        DCR     C
+        JZ      DONLCR          ; end of line
+        MOV     A,B
+        CPI     64              ; cap at 64 chars
+        JC      DONLSC
+DONLCR: MOV     A,B
+        STA     NLICNT          ; save indent count
+        ; Insert CR+LF
+        MVI     A,CR
         CALL    GBINSRT
         MVI     A,LF
         CALL    GBINSRT
-        JMP     MLDIRT
+        ; Insert saved indent
+        LDA     NLICNT
+        ORA     A
+        JZ      DONLDN          ; no indent to insert
+        MOV     B,A
+        LXI     H,NLIBUF
+DONLIL: MOV     A,M
+        PUSH    H
+        PUSH    B
+        CALL    GBINSRT
+        POP     B
+        POP     H
+        INX     H
+        DCR     B
+        JNZ     DONLIL
+DONLDN: JMP     MLDIRT
 DO_TIN: LDA     INSMODE         ; toggle insert mode
         XRI     1
         STA     INSMODE
@@ -976,6 +1017,8 @@ MLSROW: DB      0               ; saved CSROW for marking mode
 OLDTPLN: DW     0               ; saved TOPLN for scroll detect
 GOALCOL: DB     0FFH            ; target col for vertical moves (FF=unset)
 PVGOAL: DB      0FFH            ; previous GOALCOL (for sticky detection)
+NLICNT: DB      0               ; auto-indent char count
+NLIBUF: DS      64              ; auto-indent whitespace buffer
 CURBDP: DW      0               ; ptr to active buf desc
 BDESC0: DS      BD_SIZE         ; single buffer descriptor (34 bytes)
 
