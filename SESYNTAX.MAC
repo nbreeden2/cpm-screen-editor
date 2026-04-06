@@ -49,6 +49,7 @@ SYNHI   EQU     0           ; 0=none, 1=ASM, 2=C
         PUBLIC  SYNATTR         ; per-byte attribute buffer
         IF SYNHI
         PUBLIC  SNCMST          ; comment state (for SESCREEN)
+        PUBLIC  BRDEPTH         ; brace depth (for SESCREEN)
         PUBLIC  SNCMSCAN        ; pre-scan comment state
         ENDIF
 
@@ -130,6 +131,9 @@ ATTR_MAG EQU    35H         ; magenta foreground
 ATTR_RED EQU    31H         ; red foreground
 ATTR_BLU EQU    34H         ; blue foreground
 ATTR_BYL EQU    93H         ; bright yellow foreground
+ATTR_BGN EQU    92H         ; bright green foreground
+ATTR_BBL EQU    94H         ; bright blue foreground
+ATTR_BRD EQU    91H         ; bright red foreground
 
 ;--- Syntax highlighting option (defined above imports) -----
 
@@ -974,6 +978,11 @@ SNCLP:
         CPI     '"'
         JZ      SNCSTR
 
+        CPI     '{'
+        JZ      SNCOBR          ; open brace
+        CPI     '}'
+        JZ      SNCCBR          ; close brace
+
         CPI     '0'
         JC      SNCWRD
         CPI     '9'+1
@@ -1400,6 +1409,66 @@ SNCNMD:
         CALL    SNFILL
         JMP     SNCLP
 
+;------------------------------------------------------------
+; SNCOBR - Open brace '{': color with depth, then increment.
+;------------------------------------------------------------
+SNCOBR:
+        MOV     D,C             ; D = start col
+        MOV     E,C
+        INR     E               ; E = end col (exclusive)
+        CALL    BRCATT          ; A = color for current depth
+        CALL    SNFILL
+        ; Increment depth (mod 3)
+        LDA     BRDEPTH
+        INR     A
+        CPI     3
+        JC      SNCOB1
+        XRA     A               ; wrap to 0
+SNCOB1: STA     BRDEPTH
+        INR     C
+        JMP     SNCLP
+
+;------------------------------------------------------------
+; SNCCBR - Close brace '}': decrement depth, then color.
+;------------------------------------------------------------
+SNCCBR:
+        ; Decrement depth (mod 3)
+        LDA     BRDEPTH
+        ORA     A
+        JZ      SNCCB0
+        DCR     A
+        JMP     SNCCB1
+SNCCB0: MVI     A,2             ; wrap to 2
+SNCCB1: STA     BRDEPTH
+        MOV     D,C             ; D = start col
+        MOV     E,C
+        INR     E               ; E = end col (exclusive)
+        CALL    BRCATT          ; A = color for current depth
+        CALL    SNFILL
+        INR     C
+        JMP     SNCLP
+
+;------------------------------------------------------------
+; BRCATT - Return attribute for current brace depth.
+; Entry:  BRDEPTH = 0, 1, or 2
+; Exit:   A = attribute byte
+;------------------------------------------------------------
+BRCATT:
+        LDA     BRDEPTH
+        LXI     H,BRCLUT
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A
+        MOV     A,M
+        RET
+
+; Rainbow brace color table (depth 0, 1, 2)
+BRCLUT: DB      ATTR_BRD        ; depth 0: bright red
+        DB      ATTR_BGN        ; depth 1: bright green
+        DB      ATTR_BBL        ; depth 2: bright blue
+
 SNCDNE:
         ; C tokenizer done — SNCMST already set by comment handlers
         ; If we reach here without going through a block comment handler,
@@ -1558,6 +1627,7 @@ SNCMSCAN:
         JZ      SCMS01
         XRA     A
         STA     SNCMST
+        STA     BRDEPTH
         RET
 
 SCMS01:
@@ -1568,6 +1638,7 @@ SCMS01:
         ; Offset is 0: no scan needed
         XRA     A
         STA     SNCMST
+        STA     BRDEPTH
         RET
 
 SCMS02:
@@ -1575,6 +1646,7 @@ SCMS02:
         XRA     A
         STA     SNCMST          ; state = 0 (normal)
         STA     SCMPV           ; previous char = 0
+        STA     BRDEPTH         ; brace depth = 0
         LXI     H,0             ; HL = current offset
 
 SCMSLP:
@@ -1633,7 +1705,29 @@ SCMSQ:  ; Check for string/char literals to skip
         CPI     '/'
         JZ      SCMSLC          ; // -> line comment
 
-SCMSSV: ; Save prev and advance
+SCMSSV: ; Track brace depth for rainbow braces
+        MOV     A,B
+        CPI     '{'
+        JNZ     SCMSV1
+        ; Increment depth mod 3
+        LDA     BRDEPTH
+        INR     A
+        CPI     3
+        JC      SCMSV0
+        XRA     A
+SCMSV0: STA     BRDEPTH
+        JMP     SCMSV2
+SCMSV1: CPI     '}'
+        JNZ     SCMSV2
+        ; Decrement depth mod 3
+        LDA     BRDEPTH
+        ORA     A
+        JZ      SCMSV3
+        DCR     A
+        JMP     SCMSV4
+SCMSV3: MVI     A,2
+SCMSV4: STA     BRDEPTH
+SCMSV2: ; Save prev and advance
         MOV     A,B
         STA     SCMPV
         INX     H
@@ -1795,6 +1889,9 @@ SNSAVD: DB      0
         IF SYNHI
 ; C comment state (0=normal, 1=in block comment)
 SNCMST: DB      0
+
+; Brace nesting depth for rainbow braces (0-2, mod 3)
+BRDEPTH: DB     0
 
 ; Pre-scan variables
 SCMPV:  DB      0               ; previous char for two-char detection

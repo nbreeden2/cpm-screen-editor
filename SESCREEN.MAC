@@ -92,6 +92,9 @@ ATTR_MAG EQU    35H         ; magenta foreground
 ATTR_RED EQU    31H         ; red foreground
 ATTR_BLU EQU    34H         ; blue foreground
 ATTR_BYL EQU    93H         ; bright yellow foreground
+ATTR_BGN EQU    92H         ; bright green foreground
+ATTR_BBL EQU    94H         ; bright blue foreground
+ATTR_BRD EQU    91H         ; bright red foreground
 
 ;--- Color assembly option ---------------------------
 COLOR   EQU     0           ; 1 = color, 0 = monochrome
@@ -210,6 +213,7 @@ SRCHMAX EQU     64          ; max find string length
         EXTRN   SYNLINE         ; tokenize line for highlighting
         EXTRN   SYNATTR         ; per-byte attribute buffer
         EXTRN   SNCMST          ; comment state (from SESYNTAX)
+        EXTRN   BRDEPTH         ; brace depth (from SESYNTAX)
         EXTRN   SNCMSCAN        ; pre-scan comment state
         EXTRN   DIRTY           ; screen redraw flag (from SEDIT)
         ENDIF
@@ -249,6 +253,8 @@ SGRCYN:  DB     ESC,'[','0',';','3','6','m','$'  ; SGR reset+cyan
 SGRWHT:  DB     ESC,'[','0',';','3','7','m','$'  ; SGR reset+white
 SGRBYL:  DB     ESC,'[','0',';','9','3','m','$'  ; SGR reset+bright yellow
 SGRBGN:  DB     ESC,'[','0',';','1',';','3','2','m','$'  ; SGR reset+bold+green
+SGRBGRN: DB     ESC,'[','0',';','9','2','m','$'  ; SGR reset+bright green
+SGRBRED: DB     ESC,'[','0',';','9','1','m','$'  ; SGR reset+bright red
         ENDIF
 
 ;--- Info bar label strings ---------------------------
@@ -436,9 +442,11 @@ SDHLDN:
         IF SYNHI
         ; Pre-scan comment state from file start to TOPLN
         LHLD    SDLOFF          ; logical offset of TOPLN
-        CALL    SNCMSCAN        ; compute comment state -> SNCMST
+        CALL    SNCMSCAN        ; compute comment+brace state
         LDA     SNCMST
         STA     CMLST           ; CMLST[0] = initial state for row 0
+        LDA     BRDEPTH
+        STA     BRLST           ; BRLST[0] = initial brace depth
         ENDIF
 
         ; --- Draw each row ---
@@ -551,7 +559,7 @@ SDHNHL: ; No highlight on this line
         STA     SDHLE
 SDHSET: POP     D               ; restore text pointer
         IF SYNHI
-        ; Set comment entry state from CMLST[row]
+        ; Set comment and brace state from CMLST/BRLST[row]
         LDA     SDROW
         LXI     H,CMLST
         ADD     L
@@ -561,6 +569,15 @@ SDHSET: POP     D               ; restore text pointer
         MOV     H,A
         MOV     A,M
         STA     SNCMST
+        LDA     SDROW
+        LXI     H,BRLST
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A
+        MOV     A,M
+        STA     BRDEPTH
         ; Tokenize line for syntax highlighting
         PUSH    D               ; save text pointer
         MVI     B,MAXCOLS
@@ -754,7 +771,7 @@ SDCLR3:
         INR     A
         STA     SDROW
         IF SYNHI
-        ; Store exit comment state for this row
+        ; Store exit comment and brace state for this row
         ; SDROW was just incremented, so it = row+1
         LXI     H,CMLST
         ADD     L
@@ -764,6 +781,15 @@ SDCLR3:
         MOV     H,A
         LDA     SNCMST
         MOV     M,A             ; CMLST[row+1] = exit comment state
+        LDA     SDROW
+        LXI     H,BRLST
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A
+        LDA     BRDEPTH
+        MOV     M,A             ; BRLST[row+1] = exit brace depth
         ENDIF
         JMP     SDRWLP
 
@@ -851,6 +877,12 @@ SGRLUT: DB      ATTR_BLD
         DW      SGRBLU
         DB      ATTR_BYL
         DW      SGRBYL
+        DB      ATTR_BGN
+        DW      SGRBGRN
+        DB      ATTR_BBL
+        DW      SGRBLU
+        DB      ATTR_BRD
+        DW      SGRBRED
         DB      0               ; end sentinel
         ENDIF
 
@@ -883,7 +915,7 @@ SCREDCL:
         POP     B               ; B = screen row (0-based)
         JZ      SCRECF          ; no line -> empty buffer fallback
         IF SYNHI
-        ; Save cursor row and load comment entry state
+        ; Save cursor row and load comment+brace entry state
         MOV     A,B
         STA     SCRCSV          ; save screen row
         LXI     H,CMLST
@@ -894,10 +926,19 @@ SCREDCL:
         MOV     H,A
         MOV     A,M             ; CMLST[row]
         STA     SNCMST          ; set comment entry state
+        LDA     SCRCSV
+        LXI     H,BRLST
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A
+        MOV     A,M             ; BRLST[row]
+        STA     BRDEPTH         ; set brace entry depth
         ENDIF
         CALL    SLEDRAW
         IF SYNHI
-        ; Check if comment state changed -> need full redraw
+        ; Check if comment or brace state changed -> need full redraw
         LDA     SCRCSV
         INR     A               ; row + 1
         LXI     H,CMLST
@@ -910,8 +951,22 @@ SCREDCL:
         MOV     B,A
         LDA     SNCMST          ; new exit state from SYNLINE
         CMP     B
+        JNZ     SCRECD          ; comment state changed -> dirty
+        ; Check brace depth change
+        LDA     SCRCSV
+        INR     A
+        LXI     H,BRLST
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A
+        MOV     A,M             ; BRLST[row+1] (old exit depth)
+        MOV     B,A
+        LDA     BRDEPTH         ; new exit depth
+        CMP     B
         JZ      SCRECR          ; same -> no action
-        MVI     A,1
+SCRECD: MVI     A,1
         STA     DIRTY           ; force full redraw next cycle
 SCRECR:
         ENDIF
@@ -2028,6 +2083,7 @@ SDSKIP: DB      0               ; horizontal skip target (HSCROL copy)
 SDCATT: DB      0               ; current syntax attribute
 SLBYTI: DB      0               ; byte index for SCREDLN
 CMLST:  DS      EDITROW+1       ; per-line comment entry state (21 bytes)
+BRLST:  DS      EDITROW+1       ; per-line brace depth state (21 bytes)
 SCRCSV: DB      0               ; saved cursor row for SCREDCL
         ENDIF
 SLSKIP: DB      0               ; SLEDRAW horizontal skip target
