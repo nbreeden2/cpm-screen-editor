@@ -3,7 +3,7 @@
 ; PROJECT: SEDIT - Screen Editor for CP/M 2.2
 ; VERSION: 1.0
 ; DATE:    1984-01-01
-; AUTHOR:
+; AUTHOR: Claude Code and RetroTechReboot
 ;------------------------------------------------------------
 ; DESCRIPTION:
 ;   Key input and decoding. Reads raw bytes from the
@@ -44,7 +44,7 @@ ESCTMO  EQU     500
 ; PROJECT: SEDIT - Screen Editor for CP/M 2.2
 ; VERSION: 1.0
 ; DATE:    1984-01-01
-; AUTHOR:
+; AUTHOR: Claude Code and RetroTechReboot
 ;------------------------------------------------------------
 ; DESCRIPTION:
 ;   Shared equates for all SEDIT modules.

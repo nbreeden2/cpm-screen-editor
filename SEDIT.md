@@ -234,8 +234,8 @@ These bindings are active with the default configuration. ESC always opens the m
 
 | Key | Action |
 |-----|--------|
-| `^E` / Up arrow | Cursor up |
-| `^X` / Down arrow | Cursor down |
+| `^E` / Up arrow | Cursor up (sticky column) |
+| `^X` / Down arrow | Cursor down (sticky column) |
 | `^S` / Left arrow | Cursor left |
 | `^D` / Right arrow | Cursor right |
 | `^A` | Previous word |
@@ -248,6 +248,8 @@ These bindings are active with the default configuration. ESC always opens the m
 | `^QD` / End | Jump to end of line |
 | `^QR` | Jump to top of file |
 | `^QC` | Jump to end of file |
+
+**Sticky column:** When moving up or down, the cursor maintains its original column position across consecutive vertical moves. If a line is shorter than the remembered column, the cursor moves to the end of that line but resumes the original column on subsequent lines that are long enough. Any non-vertical action (typing, left/right, etc.) resets the sticky column.
 
 ### 4.2 Editing
 
