@@ -19,6 +19,7 @@
         EXTRN   CURGOTO         ; position cursor (B=row,C=col)
         EXTRN   OUTSTR          ; write $-string to console
         EXTRN   OUTCHAR         ; write single char
+        EXTRN   RSTAT           ; runtime status row
 
 ;--- Exports ----------------------------------------------
         PUBLIC  HLPSHOW         ; show help and wait
@@ -285,7 +286,8 @@ HLPKEY: MVI     E,0FFH
         JZ      HLPKEY          ; no char yet, keep polling
 
         ; Clear the footer line before returning
-        MVI     B,STATROW
+        LDA     RSTAT
+        MOV     B,A
         MVI     C,1
         CALL    CURGOTO
         LXI     D,HLPCEL

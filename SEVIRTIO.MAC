@@ -196,6 +196,7 @@ SRCHMAX EQU     64          ; max find string length
         EXTRN   DIRTY           ; full redraw flag
         EXTRN   VTMPDRV         ; virtual temp file drive
         EXTRN   STATMSG         ; display status message
+        EXTRN   STATCLR         ; clear status line
         EXTRN   OUTSTR          ; write $-string to console
         EXTRN   SYNINIT         ; detect syntax mode from filename
         EXTRN   WRKFCB          ; working FCB (for VISAVALL)
@@ -729,10 +730,7 @@ VGT_DN:
         CALL    CURPOS
         XRA     A
         STA     DIRTY           ; clear dirty (already drawn)
-        LXI     D,VIGDMSG
-        JMP     STATMSG
-
-VIGDMSG: DB     'Virtual buffer repositioned.$'
+        JMP     STATCLR         ; clear status line and return
 
 ;=============================================================
 ; VISAVALL - Three-phase save: BEFORE + buffer + AFTER.

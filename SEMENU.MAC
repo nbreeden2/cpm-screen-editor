@@ -205,6 +205,7 @@ SRCHMAX EQU     64          ; max find string length
         EXTRN   OUTSTR          ; write $-string
         EXTRN   OUTCHAR         ; write single char
         EXTRN   STATMSG         ; status bar message
+        EXTRN   STATCLR         ; clear status line
         EXTRN   SAVWMSG         ; "Saving file" message
         EXTRN   SYNINIT         ; detect syntax mode from filename
         EXTRN   COLMOD          ; column mode (0=80, 1=132)
@@ -213,6 +214,7 @@ SRCHMAX EQU     64          ; max find string length
         EXTRN   RTXTTB          ; runtime TXTCOLS-TABWID
         EXTRN   HSCROL          ; horizontal scroll offset
         EXTRN   SCRINIT         ; screen init
+        EXTRN   RSTAT           ; runtime status row
 
 ;--- Exports ----------------------------------------------
         PUBLIC  MNUSHOW         ; show menu and process
@@ -399,7 +401,7 @@ MNSAVE:
 MNSVGO: LXI     D,SAVWMSG
         CALL    STATMSG
         CALL    FISAVE
-MNSVDN: RET
+MNSVDN: JMP     STATCLR         ; clear leftover prompt
 
 ;--- Save As ----------------------------------------------
 MNSVAS:
@@ -421,7 +423,7 @@ MNSVAS:
         LXI     D,SAVWMSG
         CALL    STATMSG
         CALL    FISAVE
-MNSADN: RET
+MNSADN: JMP     STATCLR         ; clear leftover prompt
 
 ;--- Find text -------------------------------------------
 MNFIND:
@@ -433,7 +435,8 @@ MNFIND:
 ;--- Go To Line ------------------------------------------
 MNGOTO:
         ; Position cursor at status bar for prompt
-        MVI     B,STATROW
+        LDA     RSTAT
+        MOV     B,A
         MVI     C,1
         CALL    CURGOTO
         LXI     D,GTOPMT

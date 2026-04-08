@@ -43,6 +43,7 @@
         EXTRN   VIOPOS          ; output buffer position
         EXTRN   VIFLUSH         ; flush output buffer
         EXTRN   VIGOTO          ; merge-split at target line
+        EXTRN   RSTAT           ; runtime status row
 
 ;--- Exports ----------------------------------------------
         PUBLIC  FIOPEN          ; load file into buffer
@@ -780,7 +781,8 @@ FSVERE: LXI     D,ERRMSG
 ;=============================================================
 FIPROMPT:
         PUSH    D               ; save prompt string pointer
-        MVI     B,STATROW       ; row 24
+        LDA     RSTAT
+        MOV     B,A             ; status row
         MVI     C,1             ; col 1
         CALL    CURGOTO         ; position cursor on status line
         POP     D               ; restore prompt pointer

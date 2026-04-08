@@ -102,6 +102,9 @@ MODE_OVR EQU    1
         EXTRN   GBGAPEN
         EXTRN   GBFNDCS
         EXTRN   GBRDLNO
+        EXTRN   REROWS
+        EXTRN   RSEPR
+        EXTRN   RSTAT
 
 ;--- Exports ------------------------------------------
         PUBLIC  SCRINIT
@@ -302,8 +305,10 @@ SDHLDN:
         STA     SDROW
 
         ; --- Draw each row ---
-SDRWLP: LDA     SDROW
-        CPI     EDITROW
+SDRWLP: LDA     REROWS
+        MOV     B,A
+        LDA     SDROW
+        CMP     B
         JNC     SDRWDN
 
         ; Position cursor at this row
@@ -1180,7 +1185,8 @@ CURGOTO:
 ;=============================================================
 STATMSG:
         PUSH    D
-        MVI     B,STATROW
+        LDA     RSTAT
+        MOV     B,A
         MVI     C,1
         CALL    CURGOTO
         LXI     D,ATTOFF
@@ -1196,7 +1202,8 @@ STATMSG:
 ; Exit:   Row 24 blank; regs clobbered
 ;=============================================================
 STATCLR:
-        MVI     B,STATROW
+        LDA     RSTAT
+        MOV     B,A
         MVI     C,1
         CALL    CURGOTO
         LXI     D,CLREOL
@@ -1240,7 +1247,8 @@ RLOUT:  PUSH    B
 ; In virtual mode shows range info.
 ;=============================================================
 SEPRDRAW:
-        MVI     B,SEPRROW
+        LDA     RSEPR
+        MOV     B,A
         MVI     C,1
         CALL    CURGOTO
         ; Check virtual mode

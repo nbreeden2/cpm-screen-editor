@@ -113,6 +113,9 @@ MODE_OVR EQU    1
         EXTRN   VIMODE
         EXTRN   GBFNDCS
         EXTRN   GBRDLNO
+        EXTRN   REROWS
+        EXTRN   RSEPR
+        EXTRN   RSTAT
 
 ;--- Exports ------------------------------------------
         PUBLIC  SCRINIT
@@ -302,8 +305,10 @@ SDHLDN:
         STA     SDROW
 
         ; --- Draw each row ---
-SDRWLP: LDA     SDROW
-        CPI     EDITROW
+SDRWLP: LDA     REROWS
+        MOV     B,A
+        LDA     SDROW
+        CMP     B
         JNC     SDRWDN
 
         ADI     EDITFR
@@ -1135,7 +1140,8 @@ CURGOTO:
 ;=============================================================
 STATMSG:
         PUSH    D
-        MVI     B,STATROW
+        LDA     RSTAT
+        MOV     B,A
         MVI     C,1
         CALL    CURGOTO
         LXI     D,ATTNRM
@@ -1149,7 +1155,8 @@ STATMSG:
 ; STATCLR - Clear status bar (row 24).
 ;=============================================================
 STATCLR:
-        MVI     B,STATROW
+        LDA     RSTAT
+        MOV     B,A
         MVI     C,1
         CALL    CURGOTO
         LXI     D,CLREOL
@@ -1190,7 +1197,8 @@ RLOUT:  PUSH    B
 ; SEPRDRAW - Draw separator on row 23.
 ;=============================================================
 SEPRDRAW:
-        MVI     B,SEPRROW
+        LDA     RSEPR
+        MOV     B,A
         MVI     C,1
         CALL    CURGOTO
         LDA     VIMODE

@@ -262,6 +262,9 @@ SRCHMAX EQU     64          ; max find string length
         PUBLIC  RSCRCL          ; runtime screen columns
         PUBLIC  RTXTTB          ; runtime TXTCOLS-TABWID
         PUBLIC  VTMPDRV         ; virtual temp file drive (0=default)
+        PUBLIC  REROWS          ; runtime edit rows
+        PUBLIC  RSEPR           ; runtime separator row
+        PUBLIC  RSTAT           ; runtime status row
 
 ;=============================================================
 ; CODE SEGMENT
@@ -721,7 +724,8 @@ DXYES:
         ; No name - clear status bar and prompt for filename
         LXI     D,CLRMSG
         CALL    STATMSG         ; clear status bar
-        MVI     B,STATROW
+        LDA     RSTAT
+        MOV     B,A
         MVI     C,1
         CALL    CURGOTO
         LXI     D,EXTASPMT      ; "Save as: "
@@ -741,12 +745,12 @@ DXEXIT:
         ORA     A
         JZ      DXRS80
         ; Restore to 132-col
-        LXI     D,DXWIDE
-        CALL    DSPRT
+        LXI     H,DXWIDE
+        CALL    DSOUT
         JMP     DXRSD
 DXRS80: ; Restore to 80-col
-        LXI     D,DXNORM
-        CALL    DSPRT
+        LXI     H,DXNORM
+        CALL    DSOUT
 DXRSD:  LXI     D,CLRMSG
         CALL    STATMSG
         JMP     WBOOT           ; return to CP/M
@@ -850,22 +854,22 @@ VRTADL: CALL    GBMVRT
 ; Moves cursor to far corner, queries position, parses
 ; row and column from response. Sets 132-col mode if
 ; width > 80. On error, leaves 80-col defaults.
-; Uses BDOS function 9 for output, blocking poll for input
-; (same approach as GETSIZE.MAC).
+; Uses BDOS function 6 (raw I/O) for output to avoid
+; function 9's ^S/^C check consuming response bytes.
 ; Exit:   COLMOD, RTXTCL, RSCRCL, RTXTTB set if 132-col
 ;         INITCOL, DSROWS, DSCOLS set
 ;         All regs clobbered
 ;------------------------------------------------------------
 DETSIZ:
         ; Save cursor position
-        LXI     D,DSSAV
-        CALL    DSPRT
+        LXI     H,DSSAV
+        CALL    DSOUT
         ; Move cursor to far corner (row 999, col 999)
-        LXI     D,DSFAR
-        CALL    DSPRT
+        LXI     H,DSFAR
+        CALL    DSOUT
         ; Send Device Status Report
-        LXI     D,DSDSR
-        CALL    DSPRT
+        LXI     H,DSDSR
+        CALL    DSOUT
         ; Read response: ESC [ row ; col R
         ; Wait for ESC
         CALL    DSWAIT
@@ -914,8 +918,8 @@ DSRCOL: CALL    DSWAIT
         JMP     DSRCOL
 DSGCOL: SHLD    DSCOLS          ; save column count
         ; Restore cursor position
-        LXI     D,DSRST
-        CALL    DSPRT
+        LXI     H,DSRST
+        CALL    DSOUT
         ; Check if width > 80
         LHLD    DSCOLS
         MOV     A,H
@@ -927,7 +931,7 @@ DSGCOL: SHLD    DSCOLS          ; save column count
         ; Width <= 80: defaults correct
         XRA     A
         STA     INITCOL
-        RET
+        JMP     DSSETROW
 DS132:  ; Set 132-col runtime variables
         MVI     A,1
         STA     COLMOD
@@ -938,20 +942,52 @@ DS132:  ; Set 132-col runtime variables
         STA     RSCRCL
         MVI     A,121           ; 125 - TABWID(4)
         STA     RTXTTB
+        ; Fall through to DSSETROW
+DSSETROW:
+        ; Compute runtime row variables from DSROWS.
+        ; REROWS = DSROWS - 4 (info + ruler at top, separator + status at bottom)
+        ; RSEPR  = DSROWS - 1
+        ; RSTAT  = DSROWS
+        ; Clamp DSROWS to minimum 24.
+        LHLD    DSROWS
+        MOV     A,L             ; only low byte matters (max ~30)
+        CPI     24
+        JNC     DSROK
+        MVI     A,24            ; clamp to 24
+DSROK:  STA     RSTAT           ; status row = DSROWS
+        DCR     A
+        STA     RSEPR           ; separator row = DSROWS - 1
+        LDA     RSTAT
+        SUI     4               ; edit rows = DSROWS - 4
+        STA     REROWS
         RET
-DSFAIL: ; Error: restore cursor, keep 80-col defaults
-        LXI     D,DSRST
-        CALL    DSPRT
+DSFAIL: ; Error: restore cursor, keep all defaults (24-row)
+        LXI     H,DSRST
+        CALL    DSOUT
         XRA     A
         STA     INITCOL
+        LXI     H,24
+        SHLD    DSROWS
+        ; REROWS/RSEPR/RSTAT already initialized to 24-row defaults
         RET
 
 ;------------------------------------------------------------
-; DSPRT - Print $-terminated string via BDOS function 9.
+; DSOUT - Output NUL-terminated string at HL via BDOS RAWIO.
+; Uses function 6 to avoid ^S/^C check consuming input.
+; Entry:  HL = NUL-terminated string
+; Exit:   HL past NUL; AF DE clobbered
 ;------------------------------------------------------------
-DSPRT:
-        MVI     C,BF_PRTSTR
-        JMP     BDOS
+DSOUT:
+        MOV     A,M
+        ORA     A
+        RZ                      ; NUL = done
+        MOV     E,A
+        PUSH    H
+        MVI     C,BF_RAWIO
+        CALL    BDOS
+        POP     H
+        INX     H
+        JMP     DSOUT
 
 ;------------------------------------------------------------
 ; DSWAIT - Read one byte from console, blocking.
@@ -973,14 +1009,14 @@ DSWLP:  MVI     C,BF_RAWIO
         RET
 
 ;------------------------------------------------------------
-; DETSIZ string constants ($-terminated for BDOS function 9)
+; DETSIZ string constants (NUL-terminated for DSOUT)
 ;------------------------------------------------------------
-DSSAV:  DB      ESC,'7','$'
-DSRST:  DB      ESC,'8','$'
-DSFAR:  DB      ESC,'[','9','9','9',';','9','9','9','H','$'
-DSDSR:  DB      ESC,'[','6','n','$'
-DXWIDE: DB      ESC,'[','?','3','h','$'
-DXNORM: DB      ESC,'[','?','3','l','$'
+DSSAV:  DB      ESC,'7',0
+DSRST:  DB      ESC,'8',0
+DSFAR:  DB      ESC,'[','9','9','9',';','9','9','9','H',0
+DSDSR:  DB      ESC,'[','6','n',0
+DXWIDE: DB      ESC,'[','?','3','h',0
+DXNORM: DB      ESC,'[','?','3','l',0
 
 ;------------------------------------------------------------
 ; AUTOSCR - Auto-adjust HSCROL so cursor stays visible.
@@ -1163,6 +1199,9 @@ COLMOD: DB      0               ; column mode: 0=80, 1=132
 INITCOL: DB     0               ; initial column mode at startup
 DSROWS: DW      0               ; detected terminal rows
 DSCOLS: DW      0               ; detected terminal columns
+REROWS: DB      EDITROW         ; runtime edit rows (default 20)
+RSEPR:  DB      SEPRROW         ; runtime separator row (default 23)
+RSTAT:  DB      STATROW         ; runtime status row (default 24)
 RTXTCL: DB      TXTCOLS         ; runtime text columns (73 or 125)
 RSCRCL: DB      SCRCOLS         ; runtime screen columns (80 or 132)
 RTXTTB: DB      TXTCOLS-TABWID  ; runtime TXTCOLS-TABWID (69 or 121)

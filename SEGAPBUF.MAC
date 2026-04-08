@@ -200,6 +200,7 @@ SRCHMAX EQU     64          ; max find string length
         EXTRN   VBFLN           ; lines in BEFORE temp
         EXTRN   VAFLN           ; lines in AFTER temp
         EXTRN   VIGOTO          ; merge-split at target line
+        EXTRN   REROWS          ; runtime edit rows
 
         PUBLIC  GBINIT          ; init an empty buffer
         PUBLIC  GBINSRT         ; insert char at cursor
@@ -214,7 +215,7 @@ SRCHMAX EQU     64          ; max find string length
         PUBLIC  GBMLNE         ; cursor to line end
         PUBLIC  GBMVTOP         ; cursor to file top
         PUBLIC  GBMVEND         ; cursor to file end
-        PUBLIC  GBPGUP          ; page up (EDITROW lines)
+        PUBLIC  GBPGUP          ; page up (REROWS lines)
         PUBLIC  GBPGDN          ; page down
         PUBLIC  GBDLLN         ; delete current line
         PUBLIC  GBWRDPV         ; move to previous word
@@ -401,16 +402,26 @@ GBILCS: ; After LF: col=0, row++
         CALL    GBCSROW         ; HL = screen row
         INX     H
         MOV     A,L
-        CPI     EDITROW         ; scroll if needed
+        PUSH    B
+        PUSH    H
+        LDA     REROWS
+        MOV     B,A
+        MOV     A,L
+        CMP     B               ; compare row vs REROWS
+        POP     H
+        POP     B
         JNC     GBISCRL
         CALL    GBSETCSROW
         JMP     GBIDONE
 GBISCRL:
-        ; Scroll: increment TOPLN, keep row at EDITROW-1
+        ; Scroll: increment TOPLN, keep row at REROWS-1
         CALL    GBTOPLN         ; HL = TOPLN
         INX     H
         CALL    GBSETTOPLN
-        LXI     H,EDITROW-1
+        LDA     REROWS
+        DCR     A
+        MOV     L,A
+        MVI     H,0
         CALL    GBSETCSROW
 
 GBIDONE:
@@ -774,14 +785,24 @@ GBRTNL:
         CALL    GBCSROW
         INX     H
         MOV     A,L
-        CPI     EDITROW
+        PUSH    B
+        PUSH    H
+        LDA     REROWS
+        MOV     B,A
+        MOV     A,L
+        CMP     B               ; compare row vs REROWS
+        POP     H
+        POP     B
         JNC     GBRTSC
         JMP     GBSETCSROW
 GBRTSC:
         CALL    GBTOPLN
         INX     H
         CALL    GBSETTOPLN
-        LXI     H,EDITROW-1
+        LDA     REROWS
+        DCR     A
+        MOV     L,A
+        MVI     H,0
         JMP     GBSETCSROW
 GBRTAT: RET
 
@@ -1002,28 +1023,40 @@ GVECLP: MOV     A,M
         CALL    GBSETCSOFF
 GVEPOS: ; Compute TOPLN and CSROW from total line count
         CALL    GBCNTLN         ; HL = total lines
-        ; Is total_lines <= EDITROW?
+        ; Is total_lines <= REROWS?
         MOV     A,H
         ORA     A
         JNZ     GVESCR          ; > 255 lines, must scroll
+        PUSH    B
+        LDA     REROWS
+        INR     A
+        MOV     B,A
         MOV     A,L
-        CPI     EDITROW+1
-        JNC     GVESCR          ; > EDITROW lines
-        ; total_lines <= EDITROW: TOPLN=0, CSROW=lines-1
+        CMP     B               ; compare lines vs REROWS+1
+        POP     B
+        JNC     GVESCR          ; > REROWS lines
+        ; total_lines <= REROWS: TOPLN=0, CSROW=lines-1
         DCX     H
         CALL    GBSETCSROW
         LXI     H,0
         CALL    GBSETTOPLN
         JMP     GVECOL
-GVESCR: ; total_lines > EDITROW: TOPLN = lines - EDITROW
+GVESCR: ; total_lines > REROWS: TOPLN = lines - REROWS
+        PUSH    B
+        LDA     REROWS
+        MOV     B,A
         MOV     A,L
-        SUI     EDITROW
+        SUB     B
         MOV     L,A
         MOV     A,H
         SBI     0
         MOV     H,A
+        POP     B
         CALL    GBSETTOPLN
-        LXI     H,EDITROW-1
+        LDA     REROWS
+        DCR     A
+        MOV     L,A
+        MVI     H,0
         CALL    GBSETCSROW
 GVECOL: CALL    GBCURLNL
         JMP     GBSETCSCOL
@@ -1107,12 +1140,16 @@ GGTCHK:
         MOV     L,C
         JMP     GGTLNRM
 GGTVIG:
-        ; Reposition buffer with margin: VIGOTO(max(1, target-EDITROW))
-        ; This keeps EDITROW lines before target in the buffer
+        ; Reposition buffer with margin: VIGOTO(max(1, target-REROWS))
+        ; This keeps REROWS lines before target in the buffer
         LHLD    GPGTMP          ; HL = absolute target
-        LXI     D,-EDITROW
-        DAD     D               ; HL = target - EDITROW
-        JNC     GGTVI1          ; underflow: target < EDITROW
+        LDA     REROWS
+        CMA
+        INR     A
+        MOV     E,A
+        MVI     D,0FFH          ; DE = -REROWS
+        DAD     D               ; HL = target - REROWS
+        JNC     GGTVI1          ; underflow: target < REROWS
         MOV     A,H
         ORA     L
         JNZ     GGTVI2          ; result > 0, use it
@@ -1268,13 +1305,18 @@ GGTCLP: MOV     A,M
         CALL    GBSETCSOFF
 GGTPOS: ; Set TOPLN and CSROW based on target line
         LHLD    GGTLIN          ; HL = target line (1-based)
-        ; If target <= EDITROW: TOPLN=0, CSROW=target-1
+        ; If target <= REROWS: TOPLN=0, CSROW=target-1
         MOV     A,H
         ORA     A
         JNZ     GGTSRL          ; > 255, must scroll
+        PUSH    B
+        LDA     REROWS
+        INR     A
+        MOV     B,A
         MOV     A,L
-        CPI     EDITROW+1
-        JNC     GGTSRL          ; > EDITROW, must scroll
+        CMP     B               ; compare target vs REROWS+1
+        POP     B
+        JNC     GGTSRL          ; > REROWS, must scroll
         ; No scroll: TOPLN = 0, CSROW = target - 1
         DCX     H
         CALL    GBSETCSROW
@@ -1291,12 +1333,12 @@ GGTCOL: ; CSCOL = 0 (at start of line)
         JMP     GBSETCSCOL
 
 ;=============================================================
-; GBPGUP - Scroll up one page (EDITROW lines).
+; GBPGUP - Scroll up one page (REROWS lines).
 ; Uses bulk gap move for performance: scans backward for
-; EDITROW LFs, then copies bytes in one tight loop instead
+; REROWS LFs, then copies bytes in one tight loop instead
 ; of calling GBMVRT per character.
 ; Entry:  (none)
-; Exit:   Cursor moved up EDITROW lines; regs clobbered
+; Exit:   Cursor moved up REROWS lines; regs clobbered
 ;=============================================================
 GBPGUP:
         ; Check if already at top of file
@@ -1312,13 +1354,18 @@ GBPGUP:
         MOV     A,H
         ORA     L
         RZ                      ; no BEFORE lines, true BOF
-        ; Virtual: compute display target = VBFLN + TOPLN - EDITROW + 1
+        ; Virtual: compute display target = VBFLN + TOPLN - REROWS + 1
         CALL    GBTOPLN         ; HL = TOPLN
         XCHG                    ; DE = TOPLN
         LHLD    VBFLN           ; HL = VBFLN
         DAD     D               ; HL = VBFLN + TOPLN
-        LXI     D,-EDITROW+1
-        DAD     D               ; HL = VBFLN + TOPLN - EDITROW + 1
+        LDA     REROWS
+        DCR     A               ; A = REROWS-1
+        CMA
+        INR     A               ; A = -(REROWS-1)
+        MOV     E,A
+        MVI     D,0FFH          ; DE = -(REROWS-1)
+        DAD     D               ; HL = VBFLN + TOPLN - REROWS + 1
         ; Clamp to minimum 1
         MOV     A,H
         ORA     A
@@ -1329,10 +1376,14 @@ GPUVGO: MOV     A,H
         JNZ     GPUVG1
         LXI     H,1             ; if zero, clamp to 1
 GPUVG1:
-        ; Save display target, then load with EDITROW margin
+        ; Save display target, then load with REROWS margin
         SHLD    GPGTMP          ; save display target
-        LXI     D,-EDITROW
-        DAD     D               ; HL = target - EDITROW (margin)
+        LDA     REROWS
+        CMA
+        INR     A
+        MOV     E,A
+        MVI     D,0FFH          ; DE = -REROWS
+        DAD     D               ; HL = target - REROWS (margin)
         JNC     GPUVC1          ; underflow: clamp to 1
         MOV     A,H
         ORA     L
@@ -1372,13 +1423,14 @@ GPUNRM:
         XCHG                    ; DE = scan start
         LHLD    GPGBAS          ; HL = base
         XCHG                    ; DE = base, HL = scan start
-        MVI     B,EDITROW       ; LF counter
-        ; --- Backward scan for EDITROW LFs ---
+        LDA     REROWS
+        MOV     B,A             ; B = REROWS (LF counter)
+        ; --- Backward scan for REROWS LFs ---
 GPUSLP: MOV     A,M
         CPI     LF
         JNZ     GPUSNL
         DCR     B
-        JZ      GPUFND          ; found all EDITROW LFs
+        JZ      GPUFND          ; found all REROWS LFs
 GPUSNL: MOV     A,H             ; check if ptr == base
         CMP     D
         JNZ     GPUSGO
@@ -1389,11 +1441,12 @@ GPUSGO: DCX     H
         JMP     GPUSLP
 GPUFND: ; Found all LFs. HL = address of last LF.
         INX     H               ; cursor target = byte after LF
-        MVI     A,EDITROW-1     ; effective lines back (not L)
+        LDA     REROWS
+        DCR     A               ; A = REROWS-1 (effective lines back)
         STA     GPGLFS          ; backward scan: L LFs = L-1 lines
         JMP     GPUCPY
 GPUBOF: ; Reached beginning of file.
-        MVI     A,EDITROW
+        LDA     REROWS
         SUB     B               ; A = LFs actually found
         JZ      GPURT           ; 0 LFs above cursor, nothing to do
         STA     GPGLFS
@@ -1514,12 +1567,12 @@ GPUCOL: CALL    GBCURLNL
 GPURT:  RET
 
 ;=============================================================
-; GBPGDN - Scroll down one page (EDITROW lines).
+; GBPGDN - Scroll down one page (REROWS lines).
 ; Uses bulk gap move for performance: scans forward for
-; EDITROW LFs, then copies bytes in one tight loop instead
+; REROWS LFs, then copies bytes in one tight loop instead
 ; of calling GBMVRT per character.
 ; Entry:  (none)
-; Exit:   Cursor moved down EDITROW lines; regs clobbered
+; Exit:   Cursor moved down REROWS lines; regs clobbered
 ;=============================================================
 GBPGDN:
         ; Check if at end of file
@@ -1540,13 +1593,16 @@ GBPGDN:
         MOV     A,H
         ORA     L
         RZ                      ; no AFTER lines, true EOF
-        ; Virtual: target = VBFLN + TOPLN + EDITROW + 1
+        ; Virtual: target = VBFLN + TOPLN + REROWS + 1
         CALL    GBTOPLN         ; HL = TOPLN
         XCHG                    ; DE = TOPLN
         LHLD    VBFLN           ; HL = VBFLN
         DAD     D               ; HL = VBFLN + TOPLN
-        LXI     D,EDITROW+1
-        DAD     D               ; HL = VBFLN + TOPLN + EDITROW + 1
+        LDA     REROWS
+        INR     A
+        MOV     E,A
+        MVI     D,0             ; DE = REROWS+1
+        DAD     D               ; HL = VBFLN + TOPLN + REROWS + 1
         JMP     VIGOTO
 GPDNRM:
         ; Save base address
@@ -1564,8 +1620,9 @@ GPDNRM:
         DAD     D               ; HL = base + BSIZE = src end
         XCHG                    ; DE = src end
         POP     H               ; HL = src start
-        MVI     B,EDITROW       ; LF counter
-        ; --- Forward scan for EDITROW LFs ---
+        LDA     REROWS
+        MOV     B,A             ; B = REROWS (LF counter)
+        ; --- Forward scan for REROWS LFs ---
 GPDSLP: MOV     A,H             ; compare ptr with end
         CMP     D
         JNZ     GPDSNE
@@ -1578,11 +1635,11 @@ GPDSNE: MOV     A,M             ; read byte
         JNZ     GPDSLP
         DCR     B               ; counted a LF
         JNZ     GPDSLP
-        ; Found all EDITROW LFs. HL = after last LF.
+        ; Found all REROWS LFs. HL = after last LF.
         JMP     GPDCNT
 GPDEOF: ; Reached end with fewer LFs. HL = end.
 GPDCNT: ; HL = copy-end position, B = remaining LF count
-        MVI     A,EDITROW
+        LDA     REROWS
         SUB     B
         STA     GPGLFS          ; LFs found
         ; Compute N = HL - (base + GAPEN)
@@ -1654,8 +1711,14 @@ GPDCLP: MOV     A,M
         CALL    GBCSROW
         MOV     A,L             ; A = current row (R)
         ADD     B               ; A = R + L
-        CPI     EDITROW
-        JC      GPDNSC          ; R + L < EDITROW, no scroll
+        PUSH    B
+        MOV     C,A             ; save R+L in C
+        LDA     REROWS
+        MOV     B,A             ; B = REROWS
+        MOV     A,C             ; A = R+L
+        CMP     B               ; compare (R+L) vs REROWS
+        POP     B
+        JC      GPDNSC          ; R + L < REROWS, no scroll
         ; Scroll: TOPLN += L, CSROW unchanged (stays at R)
         LDA     GPGLFS
         MOV     C,A
@@ -1746,11 +1809,16 @@ GVUBOT:
         MOV     A,H
         ORA     L
         RZ                      ; no BEFORE lines, true BOF
-        ; Virtual: target = max(1, VBFLN - EDITROW + 1)
+        ; Virtual: target = max(1, VBFLN - REROWS + 1)
         ; Load buffer with margin so target line is near bottom of screen
         LHLD    VBFLN
-        LXI     D,-EDITROW+1
-        DAD     D               ; HL = VBFLN - EDITROW + 1
+        LDA     REROWS
+        DCR     A               ; A = REROWS-1
+        CMA
+        INR     A               ; A = -(REROWS-1)
+        MOV     E,A
+        MVI     D,0FFH          ; DE = -(REROWS-1)
+        DAD     D               ; HL = VBFLN - REROWS + 1
         JNC     GVUB1           ; underflow: clamp to 1
         MOV     A,H
         ORA     L

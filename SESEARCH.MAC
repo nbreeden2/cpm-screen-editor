@@ -24,6 +24,7 @@
         EXTRN   CURGOTO         ; position cursor (B=row,C=col)
         EXTRN   STATMSG         ; status bar message
         EXTRN   DIRTY           ; screen redraw flag
+        EXTRN   RSTAT           ; runtime status row
 
 ;--- Exports ----------------------------------------------
         PUBLIC  SRFIND          ; find (always prompt)
@@ -229,7 +230,8 @@ SRFNDNX:
         JNZ     SRFNDS          ; already have a string
 
         ; Prompt for search string on status line
-        MVI     B,STATROW
+        LDA     RSTAT
+        MOV     B,A
         MVI     C,1
         CALL    CURGOTO
         LXI     D,SRCHPMT

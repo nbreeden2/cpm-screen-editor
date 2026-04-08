@@ -41,13 +41,17 @@ if errorlevel 1 goto fail
 
 echo Assembling shared modules...
 for %%M in (SEDIT SEBLOCK SEFILEIO SEGAPBUF SEHELP SEKEY SEKEYBND SEMENU SESEARCH SEVIRTIO) do (
-    cpmulator M80.COM =%%M
+	cpmulator M80.COM =%%M
+    echo %%M
+	pause
     if errorlevel 1 goto fail
 )
 
 echo Assembling standalone utilities...
 for %%M in (GETSIZE MEMTEST KEYCODE COL80 COL132 CLS COLORS) do (
     cpmulator M80.COM =%%M
+    echo %%M
+	pause
     if errorlevel 1 goto fail
 )
 

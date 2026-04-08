@@ -209,6 +209,9 @@ SRCHMAX EQU     64          ; max find string length
         EXTRN   GBGAPEN         ; HL = gap end offset
         EXTRN   GBFNDCS         ; find TOPLN offset via backward scan
         EXTRN   GBRDLNO         ; read line at given offset
+        EXTRN   REROWS          ; runtime edit rows (replaces EDITROW)
+        EXTRN   RSEPR           ; runtime separator row (replaces SEPRROW)
+        EXTRN   RSTAT           ; runtime status row (replaces STATROW)
         IF SYNHI
         EXTRN   SYNLINE         ; tokenize line for highlighting
         EXTRN   SYNATTR         ; per-byte attribute buffer
@@ -450,9 +453,11 @@ SDHLDN:
         ENDIF
 
         ; --- Draw each row ---
-SDRWLP: LDA     SDROW
-        CPI     EDITROW
-        JNC     SDRWDN          ; done all 20 rows
+SDRWLP: LDA     REROWS
+        MOV     B,A
+        LDA     SDROW
+        CMP     B
+        JNC     SDRWDN          ; done all edit rows
 
         ; Position cursor at this row
         ADI     EDITFR          ; terminal row (1-based)
@@ -1647,7 +1652,8 @@ RLOUT:  PUSH    B
 ; Exit:   Row 23 drawn; regs clobbered
 ;=============================================================
 SEPRDRAW:
-        MVI     B,SEPRROW
+        LDA     RSEPR
+        MOV     B,A
         MVI     C,1
         CALL    CURGOTO
         LXI     D,SGRDIM
@@ -1740,7 +1746,8 @@ SPRLP:  MVI     A,'='
 ;=============================================================
 STATMSG:
         PUSH    D               ; save message pointer
-        MVI     B,STATROW
+        LDA     RSTAT
+        MOV     B,A
         MVI     C,1
         CALL    CURGOTO
         LXI     D,SGRRES
@@ -1756,7 +1763,8 @@ STATMSG:
 ; Exit:   Row 24 blank; regs clobbered
 ;=============================================================
 STATCLR:
-        MVI     B,STATROW
+        LDA     RSTAT
+        MOV     B,A
         MVI     C,1
         CALL    CURGOTO
         LXI     D,CLREOL
@@ -2082,8 +2090,8 @@ SDSKIP: DB      0               ; horizontal skip target (HSCROL copy)
         IF SYNHI
 SDCATT: DB      0               ; current syntax attribute
 SLBYTI: DB      0               ; byte index for SCREDLN
-CMLST:  DS      EDITROW+1       ; per-line comment entry state (21 bytes)
-BRLST:  DS      EDITROW+1       ; per-line brace depth state (21 bytes)
+CMLST:  DS      27              ; per-line comment state (max 26 edit rows + 1)
+BRLST:  DS      27              ; per-line brace depth (max 26 edit rows + 1)
 SCRCSV: DB      0               ; saved cursor row for SCREDCL
         ENDIF
 SLSKIP: DB      0               ; SLEDRAW horizontal skip target
