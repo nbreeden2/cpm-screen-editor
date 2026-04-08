@@ -36,7 +36,7 @@ SEDIT is a full-screen plain-text editor for CP/M 2.2 written in Intel 8080 asse
 
 ## 2. Screen Layout
 
-80 columns x 24 rows, VT100 terminal. The screen is divided into five fixed zones.
+VT100 terminal, 80 or 132 columns (auto-detected at startup, togglable via ESC menu). Row count is auto-detected (24-30+ rows supported). The screen is divided into five zones; the edit area grows dynamically with terminal height.
 
 ```
 Row  1  +-- Info bar ----------------------------------------------------------------+
@@ -215,8 +215,10 @@ Menu geometry: top-left at row 6/col 28, bottom-right at row 18/col 54.
 
 #### 8. Toggle 80/132 col (W)
 - Toggles between 80 and 132 column display modes via VT100 DECCOLM escape sequences
+- Editor auto-detects the current column mode at startup; the toggle switches between the two modes
 
 #### 9. Exit (X/E)
+- Restores terminal to the column mode detected at startup
 - If buffer is modified, prompts to save
 - Clears screen and warm boots via `JMP 0000H`
 
@@ -606,7 +608,7 @@ All source files follow CP/M 8.3 naming. SEDIT is built from 12 modules plus a s
 | `SEVIRTIO.MAC` | Virtual buffer I/O for large files |
 | `SEHELP.MAC` | Help screen overlay, BMDATEND marker |
 
-Standalone utilities (not linked into SEDIT): `KEYCODE.MAC` (key diagnostic), `GETWIDTH.MAC` (terminal width detection), `COL80.MAC` (set 80-column mode), `COL132.MAC` (set 132-column mode), `CLS.MAC` (clear screen).
+Standalone utilities (not linked into SEDIT): `KEYCODE.MAC` (key diagnostic), `GETSIZE.MAC` (terminal size detection), `COL80.MAC` (set 80-column mode), `COL132.MAC` (set 132-column mode), `CLS.MAC` (clear screen).
 
 ### 11.1 Build Process
 
@@ -648,10 +650,11 @@ SEHELP must be the **last** module in the link order. `BMDATEND EQU $` is define
 4. Initialize single gap buffer (base = BMDATEND, size = available RAM)
 5. Set up buffer descriptor (BDESC0); fill BD_FNAME with spaces
 6. Load and parse `SEDIT.KEY`; fall back to compiled-in defaults if not found
-7. Initialize screen: clear, draw info bar, ruler, separator
-8. If a filename was passed on command line (FCB at `005CH`), load file
-9. Draw initial edit area; position cursor at line 1, col 1
-10. Enter main edit loop
+7. Detect terminal size via VT100 DSR: query row count and column width; set 132-column mode if detected; compute dynamic edit area rows; save initial column mode for restore on exit
+8. Initialize screen: clear, draw info bar, ruler, separator
+9. If a filename was passed on command line (FCB at `005CH`), load file
+10. Draw initial edit area; position cursor at line 1, col 1
+11. Enter main edit loop
 
 ---
 
@@ -659,8 +662,9 @@ SEHELP must be the **last** module in the link order. `BMDATEND EQU $` is define
 
 1. If buffer is modified, prompt user to save
 2. Save as directed
-3. Clear screen (`ESC [ 2 J ESC [ H`)
-4. Warm boot via `JMP 0000H`
+3. Restore terminal to column mode detected at startup (DECCOLM)
+4. Clear screen (`ESC [ 2 J ESC [ H`)
+5. Warm boot via `JMP 0000H`
 
 ---
 

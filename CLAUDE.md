@@ -19,16 +19,18 @@ M80 =<module>                       # assemble (one per .MAC)
 L80 SEDIT,SESCREEN,SEKEY,SEGAPBUF,SEFILEIO,SEMENU,SESEARCH,SEBLOCK,SESYNTAX,SEKEYBND,SEVIRTIO,SEHELP,SEDIT/N/E
 ```
 
-## Screen Layout (VT100/ANSI, 80x24)
+## Screen Layout (VT100/ANSI, 80/132 x 24-30+)
+
+Terminal size auto-detected at startup via VT100 DSR. Column mode (80/132) and row count are dynamic. Runtime variables REROWS, RSEPR, RSTAT replace compile-time EDITROW, SEPRROW, STATROW.
 
 ```
 Row  1: INFOBAR  — filename, line count, row, col, ins/ovr mode
 Row  2: RULRDRAW — tab ruler (`:` every 4 cols), dim attribute
-Row  3-22: EDIT AREA — 20 lines (EDITROW=20, EDITFR=3)
+Row  3..N-2: EDIT AREA — REROWS lines (default 20, up to 26+)
          Cols 1-4: line number gutter (LNUMWID=4)
          Cols 5-78: text area (TXTCOLS=74, TXTFCOL=5)
-Row 23: SEPRDRAW — separator line (80 `=` chars)
-Row 24: STATROW  — status messages / prompts
+Row N-1: SEPRDRAW — separator line (`=` chars), RSEPR
+Row  N: STATROW  — status messages / prompts, RSTAT
 ```
 
 ## Selective Redraw System (SEDIT.MAC main loop)
@@ -58,7 +60,7 @@ INFOBAR and CURPOS always run at MLDONE regardless of flags.
 | SEVIRTIO.MAC | Virtual buffer I/O for large files | VIMODE, VISAVALL, VIGOTO, VAFLN, VAFCB, VAFEX, VIOVFL |
 | SEHELP.MAC | Help screen overlay, BMDATEND | HLPSHOW |
 | KEYCODE.MAC | Standalone key diagnostic (not linked) | — |
-| GETWIDTH.MAC | Standalone terminal width detection (not linked) | — |
+| GETSIZE.MAC | Standalone terminal size detection (not linked) | — |
 
 ## Gap Buffer Architecture (SEGAPBUF.MAC)
 

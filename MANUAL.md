@@ -12,7 +12,7 @@ Uses WordStar-compatible control key conventions with ANSI arrow key support.
 ### System Requirements
 
 - CP/M 2.2 or compatible operating system
-- VT100/ANSI compatible terminal (80 columns x 24 rows)
+- VT100/ANSI compatible terminal (80 or 132 columns, 24-30+ rows, auto-detected)
 - Minimum 9 KB free TPA (Transient Program Area)
 
 ### Starting SEDIT
@@ -27,9 +27,9 @@ From the CP/M command prompt:
 ```
 Row  1: Info bar — filename, line count, cursor position, INS/OVR mode
 Row  2: Tab ruler — tick marks every 4 columns
-Rows 3-22: Edit area — 20 lines of text with line numbers in left gutter
-Row 23: Separator bar
-Row 24: Status / message line
+Rows 3..N-2: Edit area — text with line numbers (rows scale with terminal height)
+Row N-1: Separator bar
+Row  N: Status / message line
 ```
 
 The info bar (row 1) shows:
