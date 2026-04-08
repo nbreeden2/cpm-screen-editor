@@ -322,6 +322,9 @@ BFINLP: MVI     M,' '
         ; Initialize key bindings table
         CALL    KBINIT
 
+        ; Detect terminal size and set column mode
+        CALL    DETSIZ
+
         ; Initialize and clear screen, draw chrome
         CALL    SCRINIT
 
@@ -733,7 +736,18 @@ DXSAVE:
 
 DXEXIT:
         CALL    VICLEAN
-        LXI     D,CLRMSG
+        ; Restore terminal to initial column mode
+        LDA     INITCOL
+        ORA     A
+        JZ      DXRS80
+        ; Restore to 132-col
+        LXI     D,DXWIDE
+        CALL    DSPRT
+        JMP     DXRSD
+DXRS80: ; Restore to 80-col
+        LXI     D,DXNORM
+        CALL    DSPRT
+DXRSD:  LXI     D,CLRMSG
         CALL    STATMSG
         JMP     WBOOT           ; return to CP/M
 
@@ -830,6 +844,143 @@ VRTADL: CALL    GBMVRT
         DCR     B
         JNZ     VRTADL
         RET
+
+;------------------------------------------------------------
+; DETSIZ - Detect terminal size via VT100 DSR.
+; Moves cursor to far corner, queries position, parses
+; row and column from response. Sets 132-col mode if
+; width > 80. On error, leaves 80-col defaults.
+; Uses BDOS function 9 for output, blocking poll for input
+; (same approach as GETSIZE.MAC).
+; Exit:   COLMOD, RTXTCL, RSCRCL, RTXTTB set if 132-col
+;         INITCOL, DSROWS, DSCOLS set
+;         All regs clobbered
+;------------------------------------------------------------
+DETSIZ:
+        ; Save cursor position
+        LXI     D,DSSAV
+        CALL    DSPRT
+        ; Move cursor to far corner (row 999, col 999)
+        LXI     D,DSFAR
+        CALL    DSPRT
+        ; Send Device Status Report
+        LXI     D,DSDSR
+        CALL    DSPRT
+        ; Read response: ESC [ row ; col R
+        ; Wait for ESC
+        CALL    DSWAIT
+        CPI     ESC
+        JNZ     DSFAIL
+        ; Wait for '['
+        CALL    DSWAIT
+        CPI     '['
+        JNZ     DSFAIL
+        ; Read row digits until ';'
+        LXI     H,0
+DSRROW: CALL    DSWAIT
+        CPI     ';'
+        JZ      DSGROW
+        SUI     '0'
+        MOV     C,A
+        PUSH    B
+        MOV     B,H
+        MOV     C,L
+        DAD     H               ; HL*2
+        DAD     H               ; HL*4
+        DAD     B               ; HL*5
+        DAD     H               ; HL*10
+        POP     B
+        MVI     B,0
+        DAD     B               ; HL = HL*10 + digit
+        JMP     DSRROW
+DSGROW: SHLD    DSROWS          ; save row count
+        ; Read col digits until 'R'
+        LXI     H,0
+DSRCOL: CALL    DSWAIT
+        CPI     'R'
+        JZ      DSGCOL
+        SUI     '0'
+        MOV     C,A
+        PUSH    B
+        MOV     B,H
+        MOV     C,L
+        DAD     H               ; HL*2
+        DAD     H               ; HL*4
+        DAD     B               ; HL*5
+        DAD     H               ; HL*10
+        POP     B
+        MVI     B,0
+        DAD     B               ; HL = HL*10 + digit
+        JMP     DSRCOL
+DSGCOL: SHLD    DSCOLS          ; save column count
+        ; Restore cursor position
+        LXI     D,DSRST
+        CALL    DSPRT
+        ; Check if width > 80
+        LHLD    DSCOLS
+        MOV     A,H
+        ORA     A
+        JNZ     DS132           ; high byte > 0
+        MOV     A,L
+        CPI     81
+        JNC     DS132           ; >= 81
+        ; Width <= 80: defaults correct
+        XRA     A
+        STA     INITCOL
+        RET
+DS132:  ; Set 132-col runtime variables
+        MVI     A,1
+        STA     COLMOD
+        STA     INITCOL
+        MVI     A,125           ; 132 - LNUMWID(5) - 2
+        STA     RTXTCL
+        MVI     A,132
+        STA     RSCRCL
+        MVI     A,121           ; 125 - TABWID(4)
+        STA     RTXTTB
+        RET
+DSFAIL: ; Error: restore cursor, keep 80-col defaults
+        LXI     D,DSRST
+        CALL    DSPRT
+        XRA     A
+        STA     INITCOL
+        RET
+
+;------------------------------------------------------------
+; DSPRT - Print $-terminated string via BDOS function 9.
+;------------------------------------------------------------
+DSPRT:
+        MVI     C,BF_PRTSTR
+        JMP     BDOS
+
+;------------------------------------------------------------
+; DSWAIT - Read one byte from console, blocking.
+; Polls BDOS raw I/O until a character arrives.
+; Exit:   A = character received; BC DE HL preserved
+;------------------------------------------------------------
+DSWAIT:
+        PUSH    B
+        PUSH    D
+        PUSH    H
+DSWLP:  MVI     C,BF_RAWIO
+        MVI     E,0FFH
+        CALL    BDOS
+        ORA     A
+        JZ      DSWLP
+        POP     H
+        POP     D
+        POP     B
+        RET
+
+;------------------------------------------------------------
+; DETSIZ string constants ($-terminated for BDOS function 9)
+;------------------------------------------------------------
+DSSAV:  DB      ESC,'7','$'
+DSRST:  DB      ESC,'8','$'
+DSFAR:  DB      ESC,'[','9','9','9',';','9','9','9','H','$'
+DSDSR:  DB      ESC,'[','6','n','$'
+DXWIDE: DB      ESC,'[','?','3','h','$'
+DXNORM: DB      ESC,'[','?','3','l','$'
 
 ;------------------------------------------------------------
 ; AUTOSCR - Auto-adjust HSCROL so cursor stays visible.
@@ -1009,6 +1160,9 @@ DIRTY:  DB      1               ; 1 = full screen redraw needed
 DRTLINE: DB     0               ; 1 = redraw current line only
 HSCROL: DB      0               ; horizontal scroll offset (tab-aligned)
 COLMOD: DB      0               ; column mode: 0=80, 1=132
+INITCOL: DB     0               ; initial column mode at startup
+DSROWS: DW      0               ; detected terminal rows
+DSCOLS: DW      0               ; detected terminal columns
 RTXTCL: DB      TXTCOLS         ; runtime text columns (73 or 125)
 RSCRCL: DB      SCRCOLS         ; runtime screen columns (80 or 132)
 RTXTTB: DB      TXTCOLS-TABWID  ; runtime TXTCOLS-TABWID (69 or 121)
