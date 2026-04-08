@@ -21,8 +21,8 @@
 ;   Terminal size: 80 columns x 24 rows
 ;------------------------------------------------------------
 ; REVISION HISTORY:
-;   1.00  1984-01-01  Initial version (GETWIDTH)
-;   1.01  2026-04-07  Renamed GETSIZE, added row detection
+;   1.00  1984-01-01  Initial version (GETWIDTH, columns only)
+;   1.01  2026-04-08  Renamed GETSIZE, added row detection
 ;============================================================
 
 BF_COUT EQU     2           ; BDOS console output
@@ -40,8 +40,7 @@ START:
         LXI     D,SAVSTR
         CALL    PRTSTR
 
-        ; --- Move cursor to column 999 and row 999 ---
-        ; ESC[999;999H  (cursor to far corner)
+        ; --- Move cursor to far corner (row 999, col 999) ---
         LXI     D,FARSTR
         CALL    PRTSTR
 
@@ -106,9 +105,6 @@ RDCOL:  CALL    RDWAIT
 GOTCOL: ; HL = terminal width (column count)
         SHLD    WIDTH
 
-        ; --- Drain any stale input bytes (timeout-based) ---
-        CALL    DRNTMO
-
         ; --- Restore cursor position ---
         LXI     D,RSTSTR
         CALL    PRTSTR
@@ -132,8 +128,6 @@ GOTCOL: ; HL = terminal width (column count)
         JMP     0000H       ; warm boot
 
 FAIL:
-        ; --- Drain stale input (timeout-based) ---
-        CALL    DRNTMO
         ; --- Restore cursor position ---
         LXI     D,RSTSTR
         CALL    PRTSTR
@@ -159,25 +153,6 @@ RDW1:   MVI     C,BF_RAWIO
         POP     H
         POP     D
         POP     B
-        RET
-
-;------------------------------------------------------------
-; DRNTMO - Drain input with timeout.
-; Waits ~50ms for any stale bytes to arrive, discards them.
-;------------------------------------------------------------
-DRNTMO:
-        LXI     B,10000         ; timeout counter
-DRNLP:  PUSH    B
-        MVI     C,BF_RAWIO
-        MVI     E,0FFH
-        CALL    0005H
-        POP     B
-        ORA     A
-        JNZ     DRNTMO          ; got a byte, restart timeout
-        DCX     B
-        MOV     A,B
-        ORA     C
-        JNZ     DRNLP           ; keep waiting
         RET
 
 ;------------------------------------------------------------
@@ -274,10 +249,10 @@ CHROUT:
 ;------------------------------------------------------------
 ; Data
 ;------------------------------------------------------------
-SAVSTR: DB      ESC,'7','$'             ; save cursor (DECSC)
-RSTSTR: DB      ESC,'8','$'             ; restore cursor (DECRC)
-FARSTR: DB      ESC,'[','9','9','9',';','9','9','9','H','$' ; cursor to far corner
-DSRSTR: DB      ESC,'[','6','n','$'     ; device status report
+SAVSTR: DB      ESC,'7','$'                             ; save cursor (DECSC)
+RSTSTR: DB      ESC,'8','$'                             ; restore cursor (DECRC)
+FARSTR: DB      ESC,'[','9','9','9',';','9','9','9','H','$' ; far corner
+DSRSTR: DB      ESC,'[','6','n','$'                     ; device status report
 MSG1:   DB      'Terminal size: ','$'
 MSG2:   DB      ' columns x ','$'
 MSG3:   DB      ' rows',CR,LF,'$'

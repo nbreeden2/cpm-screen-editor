@@ -29,7 +29,7 @@ python CPMFMT.PY SEHELP.MAC SEKEY.MAC SEKEYBND.MAC SEMENU.MAC
 if errorlevel 1 goto fail
 python CPMFMT.PY SESEARCH.MAC
 if errorlevel 1 goto fail
-python CPMFMT.PY COL80.MAC COL132.MAC CLS.MAC MEMTEST.MAC COLORS.MAC
+python CPMFMT.PY COL80.MAC COL132.MAC CLS.MAC MEMTEST.MAC COLORS.MAC GETSIZE.MAC
 if errorlevel 1 goto fail
 REM Specific to the ADM 31 terminal
 python CPMFMT.PY SEADM31 SEADM31K
@@ -46,7 +46,7 @@ for %%M in (SEDIT SEBLOCK SEFILEIO SEGAPBUF SEHELP SEKEY SEKEYBND SEMENU SESEARC
 )
 
 echo Assembling standalone utilities...
-for %%M in (GETWIDTH MEMTEST KEYCODE COL80 COL132 CLS COLORS) do (
+for %%M in (GETSIZE MEMTEST KEYCODE COL80 COL132 CLS COLORS) do (
     cpmulator M80.COM =%%M
     if errorlevel 1 goto fail
 )
@@ -147,7 +147,7 @@ echo --- End of Cromemco 3102 Editor ---
 REM --- Link standalone utilities ---
 echo.
 echo Linking standalone utilities...
-cpmulator L80.COM GETWIDTH,GETWIDTH/n/e
+cpmulator L80.COM GETSIZE,GETSIZE/n/e
 if errorlevel 1 goto fail
 cpmulator L80.COM KEYCODE,KEYCODE/n/e
 if errorlevel 1 goto fail
