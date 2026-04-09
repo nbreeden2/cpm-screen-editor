@@ -603,7 +603,7 @@ DO_TIN: LDA     INSMODE         ; toggle insert mode
         STA     INSMODE
         CALL    INFOBAR         ; update mode display
         JMP     MAINLP
-DO_LIT: JMP     MAINLP          ; literal next - TODO
+DO_LIT: JMP     MAINLP          ; literal next - unused
 DO_FNX: CALL    SRFNDNX
         JMP     MLDIRT
 DO_FND: CALL    SRFIND

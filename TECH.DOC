@@ -1,6 +1,6 @@
 
 
-                      SEDIT v1.17 Technical Manual
+                      SEDIT v1.20 Technical Manual
                   Build Environment and Source Reference
 
                     ================================
@@ -40,8 +40,8 @@
                            overflow to virtual buffer (FIOVFL)
     SEMENU.MAC       ~850  ESC menu overlay, 9 menu options with
                            handlers, column mode toggle, about box
-    SESEARCH.MAC     ~620  Find and find-next, case-insensitive
-                           string search through gap buffer
+    SESEARCH.MAC    ~1040  Find, find-next, find-and-replace,
+                                                      case-insensitive search through gap buffer
     SEBLOCK.MAC      ~720  Block mark, copy, delete, paste with
                            2048-byte clipboard buffer
     SESYNTAX.MAC    ~1800  Syntax highlighting tokenizers (ASM + C),
@@ -67,7 +67,7 @@
     COL80.COM         ~35  Set terminal to 80-column mode
     COL132.COM        ~35  Set terminal to 132-column mode
     CLS.COM           ~35  Clear screen and home cursor
-    GETWIDTH.COM     ~250  Terminal width detection utility
+    GETSIZE.COM      ~300  Terminal size detection utility
     KEYCODE.COM     ~3600  Key code diagnostic tool
     MEMTEST.COM      ~500  TPA memory test (7 patterns, looping)
     COLORS.COM       ~200  ANSI/VT100 color test display
@@ -75,6 +75,8 @@
     2.3a Alternate Terminal Drivers
 
     SEADM31.MAC     ~1500  ADM-31 terminal driver (replaces
+    SEC3102.MAC     ~1200  Cromemco 3102 terminal driver (replaces
+                           SESCREEN.MAC in link command)
                            SESCREEN.MAC in link command)
 
     2.4  Build Scripts and Tools
@@ -648,9 +650,14 @@
     pair: (character, action_code).  Tables are terminated by a
     zero byte.
 
-    7.3  Screen Dimensions
+    7.3  Screen Dimensions (Dynamic)
 
     Screen size constants are in SEDIT.INC:
+r
+    These are compile-time defaults.  At startup, DETSIZ queries
+    the terminal via VT100 DSR and computes runtime variables:
+    REROWS (edit rows), RSEPR (separator row), RSTAT (status row).
+    EDITFR (3), INFOROW (1), RULRROW (2) remain fixed.
 
         SCRROWS  EQU  24       Terminal rows
         SCRCOLS  EQU  80       Terminal columns
@@ -789,6 +796,21 @@
 
     10. REVISION HISTORY
 
+    v1.20   Find and replace (^QA): interactive Y/N/A/Esc
+            per match with reverse-video highlight.  Delete
+            word right (^T).
+    v1.19   Auto-detect terminal width (80/132) and row count
+            (24-30+) at startup via VT100 DSR.  Dynamic edit
+            area rows (REROWS/RSEPR/RSTAT runtime variables
+            replace compile-time EDITROW/SEPRROW/STATROW).
+            Restore initial column mode on exit.  Collect-then-
+            parse DSR response handling.  GETSIZE.MAC utility.
+            Clear stale status messages.  Cromemco 3102 driver.
+    v1.18   Virtual buffer post-load rebalance (VIGOTO line 1
+            after overflow).  Sticky column for cursor up/down.
+            Help screen footer cleared on dismiss.  Rainbow
+            brace coloring for C syntax (red/green/blue by
+            depth).  Auto-indent on Enter.  Author attribution.
     v1.17   Fix block delete (GBDELRT clobbered BC count
             register via BDOS). Low memory warning fix.
             Version string on separator row. Fix GBCURLN

@@ -100,6 +100,7 @@ control key shortcut and (where applicable) a standard terminal key equivalent.
 |-----|-------------|--------|
 | ^H | Backspace | Delete character to the left |
 | ^G | Del | Delete character to the right |
+| ^T | | Delete word to the right |
 | ^Y | | Delete entire current line |
 
 ### Block Operations
@@ -153,11 +154,16 @@ On exit (^KX or ^KQ), if the buffer has been modified you will see:
 | Key | Alternative | Action |
 |-----|-------------|--------|
 | ^QF | | Find — prompts for search string |
+| ^QA | | Find and replace — interactive (Y/N/A/Esc per match) |
 | ^L | F1 | Find next — repeat last search |
 
 Search is **case-insensitive** by default. The search starts from the current
 cursor position and moves forward. If the end of file is reached without a
 match, the search wraps around from the top.
+
+Find and replace (`^QA`) prompts for a search string, then a replacement
+string. Each match is highlighted in reverse video. Press **Y** to replace,
+**N** to skip, **A** to replace all remaining, or **Esc** to stop.
 
 Maximum search string length: 64 characters.
 
@@ -248,7 +254,7 @@ PGUP    PGDN    SCRUP   SCRDN   LINST   LINEN
 FTOP    FEND    DELLF   DELRT   DELWD   DELLN
 INSTB   INSNL   TOGIN   LITNX   FNDNX   FSAVE
 FOPEN   FEXIT   BLKMK   BLKCP   BLKDL   BLKPS
-MENU
+MENU    FIND    REPL
 ```
 
 ### Example SEDIT.KEY
@@ -309,12 +315,12 @@ During operation, SEDIT displays brief messages on row 24:
  CURSOR MOVEMENT          EDITING              BLOCK / FILE
  ^E  Up         ^QS Home  ^H  Backspace        ^KB  Mark start/end
  ^X  Down       ^QD End   ^G  Delete right      ^KC  Copy block
- ^S  Left       ^QR Top   ^Y  Delete line       ^KD  Delete block
- ^D  Right      ^QC End   ^V  Ins/Ovr toggle    ^KP  Paste
- ^A  Word left             ^I  Tab               ^KS  Save (F2)
- ^F  Word right            ^M  New line (auto-   ^KX  Exit
- ^R  Page up                    indent)          ^KQ  Quit
- ^C  Page down                                   ^QF  Find
- ^W  Scroll up             ESC Menu (F4)         ^L   Find next (F1)
- ^Z  Scroll down           F3  Block mark
+ ^S  Left       ^QR Top   ^T  Delete word       ^KD  Delete block
+ ^D  Right      ^QC End   ^Y  Delete line       ^KP  Paste
+ ^A  Word left             ^V  Ins/Ovr toggle    ^KS  Save (F2)
+ ^F  Word right            ^I  Tab               ^KX  Exit
+ ^R  Page up               ^M  New line (auto-   ^KQ  Quit
+ ^C  Page down                  indent)          ^QF  Find
+ ^W  Scroll up             ESC Menu (F4)         ^QA  Find/Replace
+ ^Z  Scroll down           F3  Block mark        ^L   Find next (F1)
 ```

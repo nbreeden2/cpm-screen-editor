@@ -260,6 +260,7 @@ These bindings are active with the default configuration. ESC always opens the m
 | Printable character | Insert (Insert mode) or Overwrite |
 | `^H` / Backspace | Delete character left |
 | `^G` / Delete | Delete character at cursor |
+| `^T` | Delete word right |
 | `^Y` | Delete current line |
 | `^I` / Tab | Insert tab |
 | `^M` / Enter | Insert newline with auto-indent |
@@ -285,6 +286,7 @@ These bindings are active with the default configuration. ESC always opens the m
 | `^KX` | Exit (with save prompt) |
 | `^KQ` | Quit (with save prompt) |
 | `^QF` | Find text (prompt for search string) |
+| `^QA` | Find and replace (interactive Y/N/A/Esc per match) |
 | `^L` / F1 | Find next occurrence |
 | ESC / F4 | Open menu |
 
@@ -384,6 +386,8 @@ Action names are case-insensitive. Supported names:
 | `BLKDL` | Block delete |
 | `BLKPS` | Block paste |
 | `MENU` | Open ESC menu |
+| `FIND` | Find text (always prompt) |
+| `REPL` | Find and replace |
 
 ---
 
@@ -551,6 +555,15 @@ Syntax mode is set automatically by SYNINIT based on file extension (`.MAC`, `.A
 
 ## 10. VT100 Terminal Interface
 
+### 10.0 Tera Term Setup
+
+A keyboard mapping file `SEDIT.CNF` is included for Tera Term users. To install:
+1. Copy `SEDIT.CNF` to your Tera Term directory
+2. In Tera Term: Setup -> Keyboard -> Read keyboard file -> select `SEDIT.CNF`
+   (or set `KeyCnfFN=SEDIT.CNF` in `TERATERM.INI`)
+
+This maps PC keyboard keys (arrows, Home, End, PgUp, PgDn, Insert, Delete, F1-F4) to the VT100 escape sequences SEDIT expects.
+
 ### 10.1 Cursor Positioning
 ```
 ESC [ row ; col H       (rows and cols are 1-based)
@@ -608,7 +621,7 @@ All source files follow CP/M 8.3 naming. SEDIT is built from 12 modules plus a s
 | `SEGAPBUF.MAC` | Gap buffer text engine |
 | `SEFILEIO.MAC` | File load/save, FCB management, .BAK backup |
 | `SEMENU.MAC` | ESC menu overlay, item dispatch, row 24 prompts |
-| `SESEARCH.MAC` | Find text search |
+| `SESEARCH.MAC` | Find and replace |
 | `SEBLOCK.MAC` | Block mark, copy, delete, paste, clipboard buffer |
 | `SESYNTAX.MAC` | Syntax highlighting tokenizer (ASM + C), keyword tables |
 | `SEKEYBND.MAC` | Key binding init from `SEDIT.KEY` |
@@ -697,7 +710,6 @@ SEHELP must be the **last** module in the link order. `BMDATEND EQU $` is define
 - Virtual buffer mode requires ~3x file size in free disk space
 - Single edit buffer (no split view or buffer switching)
 - No undo
-- No find-and-replace (find only)
 - CP/M 8.3 filenames only; no subdirectories
 - No binary file support (NUL bytes not handled)
 - Line numbers display up to 9999

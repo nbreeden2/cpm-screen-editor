@@ -1,6 +1,6 @@
 
 
-                         SEDIT v1.17 User Manual
+                         SEDIT v1.20 User Manual
                      CP/M 2.2 Full-Screen Text Editor
 
                     ================================
@@ -83,19 +83,19 @@
 
     4.  SCREEN LAYOUT
 
-    SEDIT uses a 24-row by 80-column display (132-column mode is
-    also available via the ESC menu).
+    SEDIT auto-detects the terminal size at startup (80 or 132 columns,
+    24-30+ rows).  Column mode can be toggled via the ESC menu.
 
         Row  1    Information bar: filename (* if modified), line
                   count, cursor position (row:col), file length,
                   insert/overwrite mode, free memory or virtual
                   buffer range indicator
         Row  2    Tab ruler (: marks every 4 columns)
-        Rows 3-22 Edit area (20 lines of text)
+        Rows 3..N-2 Edit area (scales with terminal height)
                   Columns 1-5: line number gutter
                   Columns 6-78: text area
-        Row 23    Separator bar (=== line)
-        Row 24    Status/message line (prompts and messages)
+        Row N-1    Separator bar (=== line)
+        Row  N     Status/message line (prompts and messages)
 
     Line numbers in the gutter are 1-based and track the actual file
     line number.  The text area displays up to 73 characters per line
@@ -112,8 +112,8 @@
 
     5.1  Cursor Movement
 
-        ^E          Cursor up one line
-        ^X          Cursor down one line
+        ^E          Cursor up one line (sticky column)
+        ^X          Cursor down one line (sticky column)
         ^S          Cursor left one character
         ^D          Cursor right one character
         ^A          Move to previous word
@@ -134,7 +134,7 @@
 
         ^V          Toggle insert/overwrite mode (default: insert)
         ^I          Insert a tab character
-        ^M          Insert a new line (carriage return)
+        ^M          Insert a new line (with auto-indent)
         ^N          Insert a new line (alternate binding)
 
     In insert mode, typed characters are inserted at the cursor and
@@ -148,6 +148,7 @@
         ^H          Delete character to the left (Backspace)
         ^G          Delete character to the right
         Del         Delete character to the right
+        ^T          Delete word to the right
         ^Y          Delete entire current line
         ^K,W        Delete word to the right
 
@@ -173,12 +174,18 @@
     5.5  Find
 
         ^Q,F        Find text (prompts for search string)
+        ^Q,A        Find and replace (interactive)
         ^L          Find next (repeat last search)
         F1          Find next (repeat last search)
 
     The search string may be up to 64 characters.  Search is case-
     insensitive and starts from the current cursor position.  If the
     text is not found forward, the search does not wrap.  The status
+r
+    Find and replace (^Q,A) prompts for a search string and a
+    replacement string.  Each match is highlighted in reverse video.
+    Press Y to replace, N to skip, A to replace all remaining
+    without asking, or Esc to stop.
     line displays "Found." or "Not found." as appropriate.
 
     5.6  File Operations
@@ -266,6 +273,7 @@
         Numbers                Blue
         Comments (// and /**/) Green
         Normal text            White
+        Braces { }             Bright red/green/blue (by nesting depth)
 
     Syntax highlighting is a compile-time option controlled by the
     SYNHI equate: 0=none, 1=ASM, 2=C.  The COLOR equate controls
@@ -282,22 +290,48 @@
 
     File format (plain text, one binding per line):
 
-        $ This is a comment line
+        ; This is a comment line
         CTRL 5 WRDPV
         CTRL 6 WRDNX
         CTRL 18 PGUP
 
     Each CTRL line maps a control character (0-31) to an action name.
-    Action names correspond to the internal action codes:
+    Action names correspond to the internal action codes.
+    Names are case-insensitive.
 
-        CURUP   CURDN   CURLT   CURRT   WRDPV   WRDNX
-        PGUP    PGDN    SCRUP   SCRDN   LINST   LINEN
-        FTOP    FEND    DELLF   DELRT   DELWD   DELLN
-        INSTB   INSNL   TOGIN   LITNX   FNDNX   FSAVE
-        FOPEN   FEXIT   BLKMK   BLKCP   BLKDL   BLKPS
-        MENU
-
-    Action names are case-insensitive.
+        CURUP   Cursor up one line
+        CURDN   Cursor down one line
+        CURLT   Cursor left one character
+        CURRT   Cursor right one character
+        WRDPV   Move to previous word
+        WRDNX   Move to next word
+        PGUP    Page up (one screen)
+        PGDN    Page down (one screen)
+        SCRUP   Scroll screen up one line
+        SCRDN   Scroll screen down one line
+        LINST   Jump to start of line (Home)
+        LINEN   Jump to end of line (End)
+        FTOP    Jump to top of file
+        FEND    Jump to end of file
+        DELLF   Delete character left (Backspace)
+        DELRT   Delete character right (Delete)
+        DELWD   Delete word to the right
+        DELLN   Delete entire current line
+        INSTB   Insert tab character
+        INSNL   Insert newline (Enter)
+        TOGIN   Toggle insert/overwrite mode
+        LITNX   Next character is literal (unused)
+        FNDNX   Find next occurrence
+        FSAVE   Save file
+        FOPEN   Open file (via menu)
+        FEXIT   Exit editor (with save prompt)
+        BLKMK   Toggle block mark (start/end/clear)
+        BLKCP   Copy marked block to clipboard
+        BLKDL   Delete marked block
+        BLKPS   Paste clipboard at cursor
+        MENU    Open ESC menu
+        FIND    Find text (always prompts)
+        REPL    Find and replace (interactive)
 
 
     10. VIRTUAL BUFFER MODE
@@ -385,7 +419,19 @@
       - DECCOLM (optional): ESC [ ? 3 h / ESC [ ? 3 l
                             (for 80/132 column toggle)
 
-    The terminal must support at least 80 columns by 24 rows.
+    The terminal must support at least 80 columns by 24 rows.  SEDIT
+    auto-detects the actual terminal size via VT100 DSR and adjusts
+r
+    A Tera Term keyboard mapping file (SEDIT.CNF) is included for
+    users connecting via Tera Term.  To install:
+      1. Copy SEDIT.CNF to your Tera Term directory
+      2. In Tera Term: Setup -> Keyboard -> Read keyboard file ->
+         select SEDIT.CNF
+      Or set KeyCnfFN=SEDIT.CNF in TERATERM.INI
+    This maps PC keyboard keys (arrows, Home, End, PgUp, PgDn,
+    Insert, Delete, F1-F4) to the VT100 escape sequences SEDIT
+    expects.
+    the edit area dynamically (24-30+ rows supported).
 
     Input escape sequences recognized:
 
@@ -407,7 +453,8 @@
         ESC -> 9    Menu exit
 
     If the file has been modified, you are prompted to save.  SEDIT
-    returns to CP/M via a warm boot.
+    restores the terminal to the column mode detected at startup and
+    then returns to CP/M via a warm boot.
 
 
     16. UTILITY PROGRAMS
@@ -437,13 +484,13 @@
         Sends the VT100 erase-screen sequence (ESC [ 2 J) followed
         by the cursor-home sequence (ESC [ H).
 
-    GETWIDTH.COM    Detect and display terminal width.
+    GETSIZE.COM     Detect and display terminal size.
 
-        A>GETWIDTH
-        Terminal width: 80 columns
+        A>GETSIZE
+        Terminal size: 80 columns x 24 rows
 
         Queries the terminal using VT100 Device Status Report and
-        displays the detected column count.
+        displays the detected column and row count.
 
     KEYCODE.COM     Display key codes for terminal input.
 

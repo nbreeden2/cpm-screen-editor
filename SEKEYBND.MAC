@@ -184,7 +184,9 @@ ACT_BLKCP EQU   28          ; copy block
 ACT_BLKDL EQU   29          ; delete block
 ACT_BLKPS EQU   30          ; paste clipboard
 ACT_MENU  EQU   31          ; open ESC menu
-ACT_MAX   EQU   31          ; highest action code
+ACT_FIND  EQU   32          ; find (always prompt)
+ACT_REPL  EQU   33          ; find and replace
+ACT_MAX   EQU   33          ; highest action code
 
 ;--- Block mark sentinel ------------------------------
 NO_MARK EQU     0FFFFH      ; marks absent/unset
@@ -244,6 +246,8 @@ ACTNMTB:
         DB      5,'B','L','K','D','L',ACT_BLKDL
         DB      5,'B','L','K','P','S',ACT_BLKPS
         DB      4,'M','E','N','U',ACT_MENU
+        DB      4,'F','I','N','D',ACT_FIND
+        DB      4,'R','E','P','L',ACT_REPL
         DB      0               ; end of table
 
 ;=============================================================

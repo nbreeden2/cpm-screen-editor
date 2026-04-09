@@ -53,7 +53,7 @@ INFOBAR and CURPOS always run at MLDONE regardless of flags.
 | SEGAPBUF.MAC | Gap buffer text engine | GBINIT, GBINSRT, GBDLFT, GBDELRT, GBMV*, GBPG*, GBDLLN, GBWRD*, GBGETLN, GBCNTLN, GBFNDCS, GBRDLNO, GBTMP |
 | SEFILEIO.MAC | File load/save (FCB, BDOS) | FIOPEN, FISAVE, FIPROMPT, FISAVFN, FISMOD |
 | SEMENU.MAC | ESC menu overlay | MNUSHOW |
-| SESEARCH.MAC | Find / replace | SRFNDNX, SRREPLACE |
+| SESEARCH.MAC | Find / replace | SRFNDNX, SRREPL |
 | SEBLOCK.MAC | Block mark, copy, delete, paste | BLMARK, BLCOPY, BLDEL, BLPASTE |
 | SESYNTAX.MAC | ASM + C syntax highlighting, rainbow braces | SYNINIT, SYNLINE, SNTBL, SNCNT, SNCMST, BRDEPTH |
 | SEKEYBND.MAC | Key binding init from SEDIT.KEY | KBINIT |
