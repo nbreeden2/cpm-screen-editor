@@ -181,7 +181,8 @@ ACT_BLKDL EQU   29          ; delete block
 ACT_BLKPS EQU   30          ; paste clipboard
 ACT_MENU  EQU   31          ; open ESC menu
 ACT_FIND  EQU   32          ; find (always prompt)
-ACT_MAX   EQU   32          ; highest action code
+ACT_REPL  EQU   33          ; find and replace
+ACT_MAX   EQU   33          ; highest action code
 
 ;--- Block mark sentinel ------------------------------
 NO_MARK EQU     0FFFFH      ; marks absent/unset
@@ -495,7 +496,7 @@ KBDTBL:
         DB      0               ; 17 ^Q  - prefix (quick)
         DB      ACT_PGUP        ; 18 ^R  - page up
         DB      ACT_CURLT       ; 19 ^S  - cursor left
-        DB      0               ; 20 ^T  - unused
+        DB      ACT_DELWD       ; 20 ^T  - delete word right
         DB      0               ; 21 ^U  - unused
         DB      ACT_TOGIN       ; 22 ^V  - toggle insert
         DB      ACT_SCRUP       ; 23 ^W  - scroll up
@@ -561,6 +562,8 @@ CTKTBL:
 
 ; Ctrl-Q prefix table: (char, action) pairs
 CTQTBL:
+        DB      'A',ACT_REPL        ; ^QA find and replace
+        DB      'a',ACT_REPL
         DB      'F',ACT_FIND        ; ^QF find (always prompt)
         DB      'f',ACT_FIND
         DB      'S',ACT_LINST       ; ^QS line start (HOME)

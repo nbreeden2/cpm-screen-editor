@@ -263,8 +263,9 @@ HLPLP:  LDA     HLPIDX
         JMP     HLPLP
 
 HLPWAIT:
-        ; Footer prompt at row 24
-        MVI     B,24
+        ; Footer prompt at bottom row
+        LDA     RSTAT
+        MOV     B,A
         MVI     C,1
         CALL    CURGOTO
         LXI     D,HLPFTR
@@ -304,7 +305,7 @@ HLPCLR:  DB     ESC,'[0m',ESC,'[2J',ESC,'[H$'
 HLPCEL:  DB     ESC,'[K$'
 HLPNRM:  DB     ESC,'[0m$'
 HLPHDR:  DB     ESC,'[7m'
-         DB     ' SEDIT v1.19 Key Reference'
+         DB     ' SEDIT v1.20 Key Reference'
          DB     '                              '
          DB     ESC,'[0m$'
 HLPFTR:  DB     ESC,'[7m'
@@ -335,25 +336,25 @@ HLL19:  DB  '^V   Toggle insert/ovr     $'
 HLL20:  DB  '^I   Insert tab            $'
 
 ; Right column lines
-HLR01:  DB  '^G   Delete right          $'
+HLR01:  DB  '^G/Del Delete right        $'
 HLR02:  DB  '^H   Backspace (del left)  $'
-HLR03:  DB  'Del  Delete right          $'
+HLR03:  DB  '^T   Delete word right     $'
 HLR04:  DB  '^Y   Delete line           $'
 HLR05:  DB  '^KB  Block mark start/end  $'
 HLR06:  DB  '^KC  Block copy            $'
 HLR07:  DB  '^KD  Block delete          $'
 HLR08:  DB  '^KP  Paste clipboard       $'
-HLR09:  DB  '^QF  Find / search         $'
-HLR10:  DB  '^L   Find next             $'
-HLR11:  DB  '^KS  Save file             $'
-HLR12:  DB  '^KX  Exit (save)           $'
-HLR13:  DB  '^KQ  Quit (save)           $'
-HLR14:  DB  'ESC  Open menu             $'
-HLR15:  DB  'F1   Find next             $'
-HLR16:  DB  'F2   Save file             $'
-HLR17:  DB  'F3   Block mark            $'
-HLR18:  DB  'F4   Menu                  $'
-HLR19:  DB  '                           $'
+HLR09:  DB  '^QF  Find text             $'
+HLR10:  DB  '^QA  Find and replace      $'
+HLR11:  DB  '^L   Find next             $'
+HLR12:  DB  '^KS  Save file             $'
+HLR13:  DB  '^KX  Exit (save)           $'
+HLR14:  DB  '^KQ  Quit (save)           $'
+HLR15:  DB  'ESC  Open menu             $'
+HLR16:  DB  'F1   Find next             $'
+HLR17:  DB  'F2   Save file             $'
+HLR18:  DB  'F3   Block mark            $'
+HLR19:  DB  'F4   Menu                  $'
 HLR20:  DB  '^M   Insert newline        $'
 
 HLPLINES EQU    20              ; number of help line pairs

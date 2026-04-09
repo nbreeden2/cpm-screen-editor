@@ -278,7 +278,7 @@ SPRABV: DB      ' above$'
 SPREQS: DB      ' === $'
 SPRBLW: DB      ' below$'
 SPRDNA: DB      ' vvv$'
-SPRBLD: DB      ' V1.19 $'
+SPRBLD: DB      ' V1.20 $'
 SPRBLN  EQU     8               ; length of SPRBLD (excluding $)
 
 ;=============================================================

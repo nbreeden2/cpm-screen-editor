@@ -20,15 +20,23 @@
         EXTRN   CURBDP          ; current buffer descriptor
         EXTRN   GBMVRT          ; move cursor right one char
         EXTRN   GBMVTOP         ; move cursor to file top
+        EXTRN   GBINSRT         ; insert char at cursor
+        EXTRN   GBDELRT         ; delete char right
         EXTRN   OUTSTR          ; write $-string to console
+        EXTRN   OUTCHAR         ; write single char
         EXTRN   CURGOTO         ; position cursor (B=row,C=col)
         EXTRN   STATMSG         ; status bar message
+        EXTRN   STATCLR         ; clear status line
         EXTRN   DIRTY           ; screen redraw flag
         EXTRN   RSTAT           ; runtime status row
+        EXTRN   SCRDRAW         ; full screen redraw
+        EXTRN   INFOBAR         ; update info bar
+        EXTRN   CURPOS          ; position hardware cursor
 
 ;--- Exports ----------------------------------------------
         PUBLIC  SRFIND          ; find (always prompt)
         PUBLIC  SRFNDNX         ; find next
+        PUBLIC  SRREPL          ; find and replace
 
 ;=============================================================
 ; SRFNDNX - Find next occurrence of SRCHSTR.
@@ -583,6 +591,387 @@ SRGAFT: ; After gap: physical addr = BSTAR + logical + (GAPEN - GAPBG)
         RET
 
 ;=============================================================
+; SRREPL - Find and replace (interactive).
+; Prompts for search string, then replacement string.
+; For each match found: redraws screen, shows cursor at match,
+; prompts "Replace? (Y/N/A/Esc)" on status line.
+;   Y = replace this one and continue
+;   N = skip this one and continue
+;   A = replace all remaining without asking
+;   Esc = stop
+; Entry:  (none)
+; Exit:   Status message shows count; DIRTY set.
+;=============================================================
+SRREPL:
+        ; Prompt for search string
+        CALL    STATCLR
+        LDA     RSTAT
+        MOV     B,A
+        MVI     C,1
+        CALL    CURGOTO
+        LXI     D,SRCHPMT
+        CALL    OUTSTR
+        LXI     D,SRDINBUF
+        MVI     C,BF_RDLINE
+        CALL    BDOS
+        LDA     SRDINBUF+1
+        ORA     A
+        JZ      SRRCAN          ; empty = cancel
+
+        ; Copy to SRCHSTR
+        MVI     B,0
+        MOV     C,A
+        LXI     H,SRDINBUF+2
+        LXI     D,SRCHSTR
+SRRCPL: MOV     A,M
+        STAX    D
+        INX     H
+        INX     D
+        INR     B
+        MOV     A,B
+        CMP     C
+        JNZ     SRRCPL
+        XRA     A
+        STAX    D               ; NUL terminate
+        MOV     A,C
+        STA     SRCHLEN
+
+        ; Prompt for replacement string
+        CALL    STATCLR
+        LDA     RSTAT
+        MOV     B,A
+        MVI     C,1
+        CALL    CURGOTO
+        LXI     D,SRRLPMT
+        CALL    OUTSTR
+        LXI     D,SRRDINBUF
+        MVI     C,BF_RDLINE
+        CALL    BDOS
+        ; Empty replacement is valid (means delete matches)
+        LDA     SRRDINBUF+1
+        STA     SRRLEN
+
+        ; Copy to SRREPSTR
+        ORA     A
+        JZ      SRRNUL          ; zero-length: just NUL terminate
+        MVI     B,0
+        MOV     C,A
+        LXI     H,SRRDINBUF+2
+        LXI     D,SRREPSTR
+SRRCP2: MOV     A,M
+        STAX    D
+        INX     H
+        INX     D
+        INR     B
+        MOV     A,B
+        CMP     C
+        JNZ     SRRCP2
+SRRNUL: LXI     H,SRREPSTR
+        LDA     SRRLEN
+        MOV     C,A
+        MVI     B,0
+        DAD     B
+        MVI     M,0             ; NUL terminate
+
+        ; Initialize: start from top of file
+        XRA     A
+        STA     SRWRAP
+        STA     SRRALL          ; not "replace all" mode
+        STA     SRRCNT          ; replacement count = 0
+        STA     SRRCNT+1
+        CALL    GBMVTOP
+
+        ; Set SRSTART = 0 (search from top)
+        LXI     H,0
+        SHLD    SRSTART
+
+        ; Cache TXEND
+        LHLD    CURBDP
+        MOV     A,L
+        ADI     BD_TXEND
+        MOV     L,A
+        MOV     A,H
+        ACI     0
+        MOV     H,A
+        MOV     E,M
+        INX     H
+        MOV     D,M
+        XCHG
+        SHLD    SRTXEND
+
+        ; Start search at offset 0
+        LXI     H,0
+        SHLD    SRPOS
+
+        ; --- Main replace loop ---
+SRRLP:
+        ; Check if SRPOS + SRCHLEN > SRTXEND
+        LHLD    SRPOS
+        LDA     SRCHLEN
+        MOV     C,A
+        MVI     B,0
+        DAD     B
+        XCHG                    ; DE = SRPOS + len
+        LHLD    SRTXEND
+        MOV     A,H
+        CMP     D
+        JC      SRRDON          ; past end
+        JNZ     SRRCHK
+        MOV     A,L
+        CMP     E
+        JC      SRRDON
+
+SRRCHK:
+        ; Try match at SRPOS
+        LHLD    SRPOS
+        CALL    SRTRY
+        JNZ     SRRADV          ; no match, advance
+
+        ; Match found — navigate cursor to SRPOS
+        CALL    GBMVTOP
+        LHLD    SRPOS
+        SHLD    SRNAV
+SRRNAVL:
+        LHLD    SRNAV
+        MOV     A,H
+        ORA     L
+        JZ      SRRNAVD
+        CALL    GBMVRT
+        LHLD    SRNAV
+        DCX     H
+        SHLD    SRNAV
+        JMP     SRRNAVL
+SRRNAVD:
+        ; Redraw screen to show cursor at match
+        CALL    SCRDRAW
+        CALL    INFOBAR
+        CALL    CURPOS
+
+        ; Highlight matched text in reverse video
+        LXI     D,SRHLRV        ; ESC[7m — reverse on
+        CALL    OUTSTR
+        LDA     SRCHLEN
+        STA     SRHLCNT
+        LHLD    SRPOS
+        SHLD    SRHLOFF
+SRHLLP: LDA     SRHLCNT
+        ORA     A
+        JZ      SRHLDN
+        LHLD    SRHLOFF
+        CALL    SRGBRD          ; A = byte at logical offset
+        MOV     E,A
+        PUSH    H
+        MVI     C,BF_RAWIO
+        CALL    BDOS
+        POP     H
+        LHLD    SRHLOFF
+        INX     H
+        SHLD    SRHLOFF
+        LDA     SRHLCNT
+        DCR     A
+        STA     SRHLCNT
+        JMP     SRHLLP
+SRHLDN: LXI     D,SRHLNR        ; ESC[0m — reset
+        CALL    OUTSTR
+
+        ; Check "replace all" mode
+        LDA     SRRALL
+        ORA     A
+        JNZ     SRRYES          ; auto-replace
+
+        ; Prompt: Replace? (Y/N/A/Esc)
+        LDA     RSTAT
+        MOV     B,A
+        MVI     C,1
+        CALL    CURGOTO
+        LXI     D,SRRQPMT
+        CALL    OUTSTR
+
+        ; Wait for response
+SRRKEY: MVI     E,0FFH
+        MVI     C,BF_RAWIO
+        CALL    BDOS
+        ORA     A
+        JZ      SRRKEY
+        ; Check response
+        CPI     'Y'
+        JZ      SRRYES
+        CPI     'y'
+        JZ      SRRYES
+        CPI     'N'
+        JZ      SRRNO
+        CPI     'n'
+        JZ      SRRNO
+        CPI     'A'
+        JZ      SRRALL1
+        CPI     'a'
+        JZ      SRRALL1
+        CPI     ESC
+        JZ      SRRDON
+        JMP     SRRKEY          ; unrecognised, try again
+
+SRRALL1:
+        MVI     A,1
+        STA     SRRALL          ; enable replace-all mode
+        ; Fall through to replace
+
+SRRYES:
+        ; Delete SRCHLEN bytes at cursor
+        LDA     SRCHLEN
+        STA     SRRDCNT
+SRRYDL: LDA     SRRDCNT
+        ORA     A
+        JZ      SRRYINS
+        CALL    GBDELRT
+        LDA     SRRDCNT
+        DCR     A
+        STA     SRRDCNT
+        JMP     SRRYDL
+
+SRRYINS:
+        ; Insert replacement string
+        LDA     SRRLEN
+        ORA     A
+        JZ      SRRYDN          ; empty replacement
+        STA     SRRICNT
+        LXI     H,SRREPSTR
+        SHLD    SRRIPTR
+SRRYILP:
+        LHLD    SRRIPTR
+        MOV     A,M
+        PUSH    H
+        CALL    GBINSRT
+        POP     H
+        INX     H
+        SHLD    SRRIPTR
+        LDA     SRRICNT
+        DCR     A
+        STA     SRRICNT
+        JNZ     SRRYILP
+
+SRRYDN:
+        ; Increment replacement count
+        LHLD    SRRCNT
+        INX     H
+        SHLD    SRRCNT
+
+        ; Re-cache TXEND (length changed)
+        LHLD    CURBDP
+        MOV     A,L
+        ADI     BD_TXEND
+        MOV     L,A
+        MOV     A,H
+        ACI     0
+        MOV     H,A
+        MOV     E,M
+        INX     H
+        MOV     D,M
+        XCHG
+        SHLD    SRTXEND
+
+        ; Read new CSOFF as next SRPOS (cursor is past replacement)
+        LHLD    CURBDP
+        MOV     A,L
+        ADI     BD_CSOFF
+        MOV     L,A
+        MOV     A,H
+        ACI     0
+        MOV     H,A
+        MOV     E,M
+        INX     H
+        MOV     D,M
+        XCHG
+        SHLD    SRPOS
+        JMP     SRRLP
+
+SRRNO:
+        ; Skip: advance SRPOS past this match
+        LHLD    SRPOS
+        INX     H
+        SHLD    SRPOS
+        JMP     SRRLP
+
+SRRADV:
+        ; No match: advance by 1
+        LHLD    SRPOS
+        INX     H
+        SHLD    SRPOS
+        JMP     SRRLP
+
+SRRDON:
+        ; Done — show result
+        MVI     A,1
+        STA     DIRTY
+        LHLD    SRRCNT
+        MOV     A,H
+        ORA     L
+        JZ      SRRD0
+        ; Show "N replacements."
+        CALL    STATCLR
+        LDA     RSTAT
+        MOV     B,A
+        MVI     C,1
+        CALL    CURGOTO
+        LHLD    SRRCNT
+        CALL    SRDECHL         ; print count as decimal
+        LXI     D,SRRPMSG
+        JMP     OUTSTR
+
+SRRD0:  LXI     D,SRNFMS        ; "Not found."
+        JMP     STATMSG
+
+SRRCAN: ; Cancel from prompts
+        JMP     STATCLR
+
+;------------------------------------------------------------
+; SRDECHL - Print HL as decimal, no leading zeros.
+; Clobbers all regs.
+;------------------------------------------------------------
+SRDECHL:
+        LXI     D,10000
+        MVI     B,0             ; leading zero suppress
+        CALL    SRDDIG
+        LXI     D,1000
+        CALL    SRDDIG
+        LXI     D,100
+        CALL    SRDDIG
+        LXI     D,10
+        CALL    SRDDIG
+        MOV     A,L
+        ADI     '0'
+        MOV     E,A
+        MVI     C,BF_RAWIO
+        JMP     BDOS
+SRDDIG: MVI     C,0
+SRDDLP: MOV     A,L
+        SUB     E
+        MOV     L,A
+        MOV     A,H
+        SBB     D
+        MOV     H,A
+        JC      SRDDR
+        INR     C
+        JMP     SRDDLP
+SRDDR:  MOV     A,L
+        ADD     E
+        MOV     L,A
+        MOV     A,H
+        ADC     D
+        MOV     H,A
+        MOV     A,C
+        ORA     A
+        JNZ     SRDDO
+        MOV     A,B
+        ORA     A
+        RZ                      ; leading zero, skip
+SRDDO:  MVI     B,1
+        MOV     A,C
+        ADI     '0'
+        MOV     E,A
+        MVI     C,BF_RAWIO
+        JMP     BDOS
+
+;=============================================================
 ; DATA SEGMENT
 ;=============================================================
         DSEG
@@ -609,8 +998,35 @@ SRDINBUF: DB   SRCHMAX          ; max len
           DB   0                ; actual len
           DS   SRCHMAX+2        ; chars
 
+; Replacement string (NUL terminated)
+SRREPSTR: DS   SRCHMAX+1
+SRRLEN:  DB    0               ; replacement string length
+
+; Replace state
+SRRALL:  DB    0               ; 1 = replace all without asking
+SRRCNT:  DW    0               ; replacement count
+SRRDCNT: DB    0               ; delete counter (working)
+SRRICNT: DB    0               ; insert counter (working)
+SRRIPTR: DW    0               ; insert pointer (working)
+
+; Replacement input buffer
+SRRDINBUF: DB  SRCHMAX         ; max len
+           DB  0               ; actual len
+           DS  SRCHMAX+2       ; chars
+
+; Highlight working variables
+SRHLCNT: DB    0               ; highlight byte counter
+SRHLOFF: DW    0               ; highlight logical offset
+
+; Highlight SGR strings
+SRHLRV: DB     ESC,'[','0',';','7','m','$'  ; reverse video on
+SRHLNR: DB     ESC,'[','0','m','$'          ; reset attributes
+
 ; Status messages
 SRCHPMT: DB    'Search: $'
+SRRLPMT: DB    'Replace: $'
+SRRQPMT: DB    'Replace? (Y/N/A/Esc) $'
+SRRPMSG: DB    ' replacement(s).$'
 SRFMSG:  DB    'Found.  $'
 SRNFMS:  DB    'Not found.$'
 
