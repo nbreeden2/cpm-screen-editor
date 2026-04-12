@@ -156,7 +156,7 @@ On exit (^KX or ^KQ), if the buffer has been modified you will see:
 | ^QF | | Find — prompts for search string |
 | ^QA | | Find and replace — interactive (Y/N/A/Esc per match) |
 | ^L | F1 | Find next — repeat last search |
-| ^Q[ | ^Q] | Jump to matching brace `{` / `}` |
+| ^Q[ | ^Q] | Jump to matching `{`/`}` or `(`/`)` |
 
 Search is **case-insensitive** by default. The search starts from the current
 cursor position and moves forward. If the end of file is reached without a

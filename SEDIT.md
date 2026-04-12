@@ -288,7 +288,7 @@ These bindings are active with the default configuration. ESC always opens the m
 | `^QF` | Find text (prompt for search string) |
 | `^QA` | Find and replace (interactive Y/N/A/Esc per match) |
 | `^L` / F1 | Find next occurrence |
-| `^Q[` or `^Q]` | Jump to matching brace (`{` / `}`) |
+| `^Q[` or `^Q]` | Jump to matching `{`/`}` or `(`/`)` |
 | ESC / F4 | Open menu |
 
 ### 4.5 Function Keys

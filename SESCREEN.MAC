@@ -95,6 +95,9 @@ ATTR_BYL EQU    93H         ; bright yellow foreground
 ATTR_BGN EQU    92H         ; bright green foreground
 ATTR_BBL EQU    94H         ; bright blue foreground
 ATTR_BRD EQU    91H         ; bright red foreground
+ATTR_BMG EQU    95H         ; bright magenta foreground
+ATTR_BCN EQU    96H         ; bright cyan foreground
+ATTR_BWT EQU    97H         ; bright white foreground
 
 ;--- Color assembly option ---------------------------
 COLOR   EQU     0           ; 1 = color, 0 = monochrome
@@ -217,6 +220,7 @@ SRCHMAX EQU     64          ; max find string length
         EXTRN   SYNATTR         ; per-byte attribute buffer
         EXTRN   SNCMST          ; comment state (from SESYNTAX)
         EXTRN   BRDEPTH         ; brace depth (from SESYNTAX)
+        EXTRN   BRPDEP          ; paren depth (from SESYNTAX)
         EXTRN   SNCMSCAN        ; pre-scan comment state
         EXTRN   DIRTY           ; screen redraw flag (from SEDIT)
         ENDIF
@@ -258,6 +262,9 @@ SGRBYL:  DB     ESC,'[','0',';','9','3','m','$'  ; SGR reset+bright yellow
 SGRBGN:  DB     ESC,'[','0',';','1',';','3','2','m','$'  ; SGR reset+bold+green
 SGRBGRN: DB     ESC,'[','0',';','9','2','m','$'  ; SGR reset+bright green
 SGRBRED: DB     ESC,'[','0',';','9','1','m','$'  ; SGR reset+bright red
+SGRBMG:  DB     ESC,'[','0',';','9','5','m','$'  ; SGR reset+bright magenta
+SGRBCN:  DB     ESC,'[','0',';','9','6','m','$'  ; SGR reset+bright cyan
+SGRBWT:  DB     ESC,'[','0',';','9','7','m','$'  ; SGR reset+bright white
         ENDIF
 
 ;--- Info bar label strings ---------------------------
@@ -450,6 +457,8 @@ SDHLDN:
         STA     CMLST           ; CMLST[0] = initial state for row 0
         LDA     BRDEPTH
         STA     BRLST           ; BRLST[0] = initial brace depth
+        LDA     BRPDEP
+        STA     BRPLST          ; BRPLST[0] = initial paren depth
         ENDIF
 
         ; --- Draw each row ---
@@ -583,6 +592,15 @@ SDHSET: POP     D               ; restore text pointer
         MOV     H,A
         MOV     A,M
         STA     BRDEPTH
+        LDA     SDROW
+        LXI     H,BRPLST
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A
+        MOV     A,M
+        STA     BRPDEP
         ; Tokenize line for syntax highlighting
         PUSH    D               ; save text pointer
         MVI     B,MAXCOLS
@@ -795,6 +813,15 @@ SDCLR3:
         MOV     H,A
         LDA     BRDEPTH
         MOV     M,A             ; BRLST[row+1] = exit brace depth
+        LDA     SDROW
+        LXI     H,BRPLST
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A
+        LDA     BRPDEP
+        MOV     M,A             ; BRPLST[row+1] = exit paren depth
         ENDIF
         JMP     SDRWLP
 
@@ -888,6 +915,12 @@ SGRLUT: DB      ATTR_BLD
         DW      SGRBLU
         DB      ATTR_BRD
         DW      SGRBRED
+        DB      ATTR_BMG
+        DW      SGRBMG
+        DB      ATTR_BCN
+        DW      SGRBCN
+        DB      ATTR_BWT
+        DW      SGRBWT
         DB      0               ; end sentinel
         ENDIF
 
@@ -940,6 +973,15 @@ SCREDCL:
         MOV     H,A
         MOV     A,M             ; BRLST[row]
         STA     BRDEPTH         ; set brace entry depth
+        LDA     SCRCSV
+        LXI     H,BRPLST
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A
+        MOV     A,M             ; BRPLST[row]
+        STA     BRPDEP          ; set paren entry depth
         ENDIF
         CALL    SLEDRAW
         IF SYNHI
@@ -969,6 +1011,20 @@ SCREDCL:
         MOV     A,M             ; BRLST[row+1] (old exit depth)
         MOV     B,A
         LDA     BRDEPTH         ; new exit depth
+        CMP     B
+        JNZ     SCRECD          ; brace depth changed -> dirty
+        ; Check paren depth change
+        LDA     SCRCSV
+        INR     A
+        LXI     H,BRPLST
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A
+        MOV     A,M             ; BRPLST[row+1] (old exit depth)
+        MOV     B,A
+        LDA     BRPDEP          ; new exit depth
         CMP     B
         JZ      SCRECR          ; same -> no action
 SCRECD: MVI     A,1
@@ -2092,6 +2148,7 @@ SDCATT: DB      0               ; current syntax attribute
 SLBYTI: DB      0               ; byte index for SCREDLN
 CMLST:  DS      73              ; per-line comment state (max 72 edit rows + 1)
 BRLST:  DS      73              ; per-line brace depth (max 72 edit rows + 1)
+BRPLST: DS      73              ; per-line paren depth (max 72 edit rows + 1)
 SCRCSV: DB      0               ; saved cursor row for SCREDCL
         ENDIF
 SLSKIP: DB      0               ; SLEDRAW horizontal skip target

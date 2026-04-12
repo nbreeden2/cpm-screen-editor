@@ -50,6 +50,7 @@ SYNHI   EQU     0           ; 0=none, 1=ASM, 2=C
         IF SYNHI
         PUBLIC  SNCMST          ; comment state (for SESCREEN)
         PUBLIC  BRDEPTH         ; brace depth (for SESCREEN)
+        PUBLIC  BRPDEP          ; paren depth (for SESCREEN)
         PUBLIC  SNCMSCAN        ; pre-scan comment state
         ENDIF
 
@@ -134,6 +135,9 @@ ATTR_BYL EQU    93H         ; bright yellow foreground
 ATTR_BGN EQU    92H         ; bright green foreground
 ATTR_BBL EQU    94H         ; bright blue foreground
 ATTR_BRD EQU    91H         ; bright red foreground
+ATTR_BMG EQU    95H         ; bright magenta foreground
+ATTR_BCN EQU    96H         ; bright cyan foreground
+ATTR_BWT EQU    97H         ; bright white foreground
 
 ;--- Syntax highlighting option (defined above imports) -----
 
@@ -982,6 +986,10 @@ SNCLP:
         JZ      SNCOBR          ; open brace
         CPI     '}'
         JZ      SNCCBR          ; close brace
+        CPI     '('
+        JZ      SNCOPR          ; open paren
+        CPI     ')'
+        JZ      SNCCPR          ; close paren
 
         CPI     '0'
         JC      SNCWRD
@@ -1469,6 +1477,64 @@ BRCLUT: DB      ATTR_BRD        ; depth 0: bright red
         DB      ATTR_BGN        ; depth 1: bright green
         DB      ATTR_BBL        ; depth 2: bright blue
 
+;------------------------------------------------------------
+; SNCOPR - Open paren '(': color with paren depth, increment.
+;------------------------------------------------------------
+SNCOPR:
+        MOV     D,C             ; D = start col
+        MOV     E,C
+        INR     E               ; E = end col (exclusive)
+        CALL    BRPATT          ; A = color for paren depth
+        CALL    SNFILL
+        ; Increment paren depth (mod 3)
+        LDA     BRPDEP
+        INR     A
+        CPI     3
+        JC      SNCOP1
+        XRA     A               ; wrap to 0
+SNCOP1: STA     BRPDEP
+        INR     C
+        JMP     SNCLP
+
+;------------------------------------------------------------
+; SNCCPR - Close paren ')': decrement paren depth, color.
+;------------------------------------------------------------
+SNCCPR:
+        ; Decrement paren depth (mod 3)
+        LDA     BRPDEP
+        ORA     A
+        JZ      SNCCP0
+        DCR     A
+        JMP     SNCCP1
+SNCCP0: MVI     A,2             ; wrap to 2
+SNCCP1: STA     BRPDEP
+        MOV     D,C             ; D = start col
+        MOV     E,C
+        INR     E               ; E = end col (exclusive)
+        CALL    BRPATT          ; A = color for paren depth
+        CALL    SNFILL
+        INR     C
+        JMP     SNCLP
+
+;------------------------------------------------------------
+; BRPATT - Return attribute for current paren depth.
+;------------------------------------------------------------
+BRPATT:
+        LDA     BRPDEP
+        LXI     H,BRPLUT
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A
+        MOV     A,M
+        RET
+
+; Rainbow paren color table (depth 0, 1, 2)
+BRPLUT: DB      ATTR_BMG        ; depth 0: bright magenta
+        DB      ATTR_BCN        ; depth 1: bright cyan
+        DB      ATTR_BWT        ; depth 2: bright white
+
 SNCDNE:
         ; C tokenizer done — SNCMST already set by comment handlers
         ; If we reach here without going through a block comment handler,
@@ -1628,6 +1694,7 @@ SNCMSCAN:
         XRA     A
         STA     SNCMST
         STA     BRDEPTH
+        STA     BRPDEP
         RET
 
 SCMS01:
@@ -1639,6 +1706,7 @@ SCMS01:
         XRA     A
         STA     SNCMST
         STA     BRDEPTH
+        STA     BRPDEP
         RET
 
 SCMS02:
@@ -1647,6 +1715,7 @@ SCMS02:
         STA     SNCMST          ; state = 0 (normal)
         STA     SCMPV           ; previous char = 0
         STA     BRDEPTH         ; brace depth = 0
+        STA     BRPDEP          ; paren depth = 0
         LXI     H,0             ; HL = current offset
 
 SCMSLP:
@@ -1727,7 +1796,29 @@ SCMSV1: CPI     '}'
         JMP     SCMSV4
 SCMSV3: MVI     A,2
 SCMSV4: STA     BRDEPTH
-SCMSV2: ; Save prev and advance
+        ; Track paren depth for rainbow parens
+SCMSV2: MOV     A,B
+        CPI     '('
+        JNZ     SCMPV1
+        ; Increment paren depth mod 3
+        LDA     BRPDEP
+        INR     A
+        CPI     3
+        JC      SCMPV0
+        XRA     A
+SCMPV0: STA     BRPDEP
+        JMP     SCMPV2
+SCMPV1: CPI     ')'
+        JNZ     SCMPV2
+        ; Decrement paren depth mod 3
+        LDA     BRPDEP
+        ORA     A
+        JZ      SCMPV3
+        DCR     A
+        JMP     SCMPV4
+SCMPV3: MVI     A,2
+SCMPV4: STA     BRPDEP
+SCMPV2: ; Save prev and advance
         MOV     A,B
         STA     SCMPV
         INX     H
@@ -1892,6 +1983,8 @@ SNCMST: DB      0
 
 ; Brace nesting depth for rainbow braces (0-2, mod 3)
 BRDEPTH: DB     0
+; Paren nesting depth for rainbow parens (0-2, mod 3)
+BRPDEP: DB      0
 
 ; Pre-scan variables
 SCMPV:  DB      0               ; previous char for two-char detection

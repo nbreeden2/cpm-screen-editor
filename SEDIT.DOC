@@ -175,7 +175,7 @@
 
         ^Q,F        Find text (prompts for search string)
         ^Q,A        Find and replace (interactive)
-        ^Q,[        Jump to matching brace { or }
+        ^Q,[        Jump to matching {} or ()
         ^L          Find next (repeat last search)
         F1          Find next (repeat last search)
 
@@ -333,7 +333,7 @@ r
         MENU    Open ESC menu
         FIND    Find text (always prompts)
         REPL    Find and replace (interactive)
-        JMPM    Jump to matching brace { or }
+        JMPM    Jump to matching {} or ()
 
 
     10. VIRTUAL BUFFER MODE

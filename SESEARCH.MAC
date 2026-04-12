@@ -1014,13 +1014,42 @@ SRJMPM:
         LHLD    SJMPOS
         CALL    SRGBRD          ; A = byte at cursor
         CPI     '{'
-        JZ      SJMFWD          ; scan forward for }
+        JZ      SJMOBR          ; open brace: forward for }
         CPI     '}'
-        JZ      SJMBWD          ; scan backward for {
-        ; Not on a brace — silently ignore
+        JZ      SJMCBR          ; close brace: backward for {
+        CPI     '('
+        JZ      SJMOPR          ; open paren: forward for )
+        CPI     ')'
+        JZ      SJMCPR          ; close paren: backward for (
+        ; Not on a matchable char — silently ignore
         RET
 
-SJMFWD: ; Scan forward from CSOFF+1 for matching }
+SJMOBR: ; { -> scan forward for }
+        MVI     A,'{'
+        STA     SJMOPN
+        MVI     A,'}'
+        STA     SJMCLS
+        JMP     SJMFWD
+SJMCBR: ; } -> scan backward for {
+        MVI     A,'{'
+        STA     SJMOPN
+        MVI     A,'}'
+        STA     SJMCLS
+        JMP     SJMBWD
+SJMOPR: ; ( -> scan forward for )
+        MVI     A,'('
+        STA     SJMOPN
+        MVI     A,')'
+        STA     SJMCLS
+        JMP     SJMFWD
+SJMCPR: ; ) -> scan backward for (
+        MVI     A,'('
+        STA     SJMOPN
+        MVI     A,')'
+        STA     SJMCLS
+        JMP     SJMBWD
+
+SJMFWD: ; Scan forward from CSOFF+1 for matching close char
         ; depth = 1 (we're on the opening {)
         MVI     A,1
         STA     SJMDEP
@@ -1041,9 +1070,15 @@ SJMFOK: XCHG                    ; HL = current offset
         PUSH    H
         CALL    SRGBRD          ; A = byte
         POP     H
-        CPI     '{'
+        PUSH    H
+        LXI     H,SJMOPN
+        CMP     M               ; match open char?
+        POP     H
         JZ      SJMFINC
-        CPI     '}'
+        PUSH    H
+        LXI     H,SJMCLS
+        CMP     M               ; match close char?
+        POP     H
         JZ      SJMFDEC
         INX     H
         JMP     SJMFLP
@@ -1074,9 +1109,15 @@ SJMBWD: ; Scan backward from CSOFF-1 for matching {
 SJMBLP: PUSH    H
         CALL    SRGBRD          ; A = byte
         POP     H
-        CPI     '}'
+        PUSH    H
+        LXI     H,SJMCLS
+        CMP     M               ; match close char?
+        POP     H
         JZ      SJMBINC
-        CPI     '{'
+        PUSH    H
+        LXI     H,SJMOPN
+        CMP     M               ; match open char?
+        POP     H
         JZ      SJMBDEC
         ; Check if at offset 0
         MOV     A,H
@@ -1196,6 +1237,8 @@ SJMPOS:  DW    0               ; cursor offset
 SJMEND:  DW    0               ; text end
 SJMDEP:  DB    0               ; nesting depth counter
 SJMTGT:  DW    0               ; target offset (match location)
+SJMOPN:  DB    0               ; open char for current match ({ or ()
+SJMCLS:  DB    0               ; close char for current match (} or ))
 
         END
 
