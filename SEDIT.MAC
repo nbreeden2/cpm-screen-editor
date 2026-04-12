@@ -174,7 +174,8 @@ ACT_BLKPS EQU   30          ; paste clipboard
 ACT_MENU  EQU   31          ; open ESC menu
 ACT_FIND  EQU   32          ; find (always prompt)
 ACT_REPL  EQU   33          ; find and replace
-ACT_MAX   EQU   33          ; highest action code
+ACT_JMPM  EQU   34          ; jump to matching brace
+ACT_MAX   EQU   34          ; highest action code
 
 ;--- Block mark sentinel ------------------------------
 NO_MARK EQU     0FFFFH      ; marks absent/unset
@@ -243,6 +244,7 @@ SRCHMAX EQU     64          ; max find string length
         EXTRN   SRFIND          ; find (always prompt)
         EXTRN   SRFNDNX         ; find next
         EXTRN   SRREPL          ; find and replace
+        EXTRN   SRJMPM          ; jump to matching brace
         EXTRN   BLMARK          ; toggle block mark
         EXTRN   BLCOPY          ; copy block
         EXTRN   BLDEL           ; delete block
@@ -610,6 +612,8 @@ DO_FND: CALL    SRFIND
         JMP     MLDIRT
 DO_RPL: CALL    SRREPL
         JMP     MLDIRT
+DO_JMP: CALL    SRJMPM
+        JMP     MAINLP          ; SRJMPM sets DIRTY if needed
 DO_SAV:
         ; Check if filename exists (BD_FNAME[1] != space)
         MVI     A,BD_FNAME+1
@@ -1314,6 +1318,7 @@ ACTTBL:
         DW      DO_MNU          ; 31 ACT_MENU
         DW      DO_FND          ; 32 ACT_FIND
         DW      DO_RPL          ; 33 ACT_REPL
+        DW      DO_JMP          ; 34 ACT_JMPM
 
 ;--- String constants ---------------------------------
 NOMEMSG: DB    'Insufficient memory',CR,LF,'$'

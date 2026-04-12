@@ -182,7 +182,8 @@ ACT_BLKPS EQU   30          ; paste clipboard
 ACT_MENU  EQU   31          ; open ESC menu
 ACT_FIND  EQU   32          ; find (always prompt)
 ACT_REPL  EQU   33          ; find and replace
-ACT_MAX   EQU   33          ; highest action code
+ACT_JMPM  EQU   34          ; jump to matching brace
+ACT_MAX   EQU   34          ; highest action code
 
 ;--- Block mark sentinel ------------------------------
 NO_MARK EQU     0FFFFH      ; marks absent/unset
@@ -576,6 +577,8 @@ CTQTBL:
         DB      'c',ACT_FEND
         DB      'W',ACT_BLKPS       ; ^QW paste
         DB      'w',ACT_BLKPS
+        DB      '[',ACT_JMPM       ; ^Q[ jump to matching brace
+        DB      ']',ACT_JMPM       ; ^Q] jump to matching brace
         DB      0,0                 ; end
 
 ; High-byte key table: (byte, action) pairs

@@ -1,6 +1,6 @@
 
 
-                         SEDIT v1.20 User Manual
+                         SEDIT v1.21 User Manual
                      CP/M 2.2 Full-Screen Text Editor
 
                     ================================
@@ -175,6 +175,7 @@
 
         ^Q,F        Find text (prompts for search string)
         ^Q,A        Find and replace (interactive)
+        ^Q,[        Jump to matching brace { or }
         ^L          Find next (repeat last search)
         F1          Find next (repeat last search)
 
@@ -332,6 +333,7 @@ r
         MENU    Open ESC menu
         FIND    Find text (always prompts)
         REPL    Find and replace (interactive)
+        JMPM    Jump to matching brace { or }
 
 
     10. VIRTUAL BUFFER MODE
@@ -372,6 +374,10 @@ r
       - Maximum line length: 255 characters
       - Maximum clipboard size: 2048 bytes
       - Maximum search string: 64 characters
+r
+    Brace matching (^Q,[) only scans within the in-memory buffer.
+    In virtual buffer mode, a match outside the loaded region will
+    not be found.
 
     SEDIT requires a minimum of 9 KB free TPA.  If insufficient
     memory is available, the message "Insufficient memory" is

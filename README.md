@@ -4,7 +4,7 @@
 **Assembler:** Microsoft M80 / L80
 **Terminal:** VT100 / ANSI
 **Editing Model:** Full-screen, ESC-menu driven, WordStar-compatible control keys
-**Version:** 1.20
+**Version:** 1.21
 
 ---
 
@@ -210,7 +210,7 @@ Menu geometry: top-left at row 6/col 28, bottom-right at row 18/col 54.
 - Press any key to return to editing; the footer prompt is cleared on dismiss
 
 #### 7. About (B)
-- Displays `SEDIT v1.20 CP/M Screen Editor` on the status bar
+- Displays `SEDIT v1.21 CP/M Screen Editor` on the status bar
 - Press any key to dismiss
 
 #### 8. Toggle 80/132 col (W)
@@ -284,6 +284,7 @@ These bindings are active with the default configuration. ESC always opens the m
 | `^QF` | Find text (prompt for search string) |
 | `^QA` | Find and replace (interactive Y/N/A/Esc per match) |
 | `^L` / F1 | Find next occurrence |
+| `^Q[` or `^Q]` | Jump to matching brace (`{` / `}`) |
 | ESC / F4 | Open menu |
 
 ### 4.5 Function Keys
@@ -384,6 +385,7 @@ Action names are case-insensitive. Supported names:
 | `MENU` | Open ESC menu |
 | `FIND` | Find text (always prompt) |
 | `REPL` | Find and replace |
+| `JMPM` | Jump to matching brace |
 
 ---
 
@@ -705,3 +707,4 @@ SEHELP must be the **last** module in the link order. `BMDATEND EQU $` is define
 - CP/M 8.3 filenames only; no subdirectories
 - No binary file support (NUL bytes not handled)
 - Line numbers display up to 9999
+- Brace matching (`^Q[`) only scans within the in-memory buffer; in virtual buffer mode, a match in the BEFORE or AFTER temp file will not be found

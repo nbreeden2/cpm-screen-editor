@@ -1,6 +1,6 @@
 # SEDIT User Manual
 
-**SEDIT v1.20 — Screen Editor for CP/M 2.2**
+**SEDIT v1.21 — Screen Editor for CP/M 2.2**
 
 A full-screen text editor for CP/M 2.2 systems with VT100/ANSI terminals.
 Uses WordStar-compatible control key conventions with ANSI arrow key support.
@@ -156,6 +156,7 @@ On exit (^KX or ^KQ), if the buffer has been modified you will see:
 | ^QF | | Find — prompts for search string |
 | ^QA | | Find and replace — interactive (Y/N/A/Esc per match) |
 | ^L | F1 | Find next — repeat last search |
+| ^Q[ | ^Q] | Jump to matching brace `{` / `}` |
 
 Search is **case-insensitive** by default. The search starts from the current
 cursor position and moves forward. If the end of file is reached without a
@@ -254,7 +255,7 @@ PGUP    PGDN    SCRUP   SCRDN   LINST   LINEN
 FTOP    FEND    DELLF   DELRT   DELWD   DELLN
 INSTB   INSNL   TOGIN   LITNX   FNDNX   FSAVE
 FOPEN   FEXIT   BLKMK   BLKCP   BLKDL   BLKPS
-MENU    FIND    REPL
+MENU    FIND    REPL    JMPM
 ```
 
 ### Example SEDIT.KEY

@@ -37,6 +37,7 @@
         PUBLIC  SRFIND          ; find (always prompt)
         PUBLIC  SRFNDNX         ; find next
         PUBLIC  SRREPL          ; find and replace
+        PUBLIC  SRJMPM          ; jump to matching brace
 
 ;=============================================================
 ; SRFNDNX - Find next occurrence of SRCHSTR.
@@ -972,6 +973,165 @@ SRDDO:  MVI     B,1
         JMP     BDOS
 
 ;=============================================================
+; SRJMPM - Jump to matching brace { or }.
+; If cursor is on {, scan forward for matching }.
+; If cursor is on }, scan backward for matching {.
+; Otherwise ring bell. Scans within buffer bounds only.
+; Entry:  CURBDP valid
+; Exit:   Cursor moved if match found. DIRTY set.
+;         Bell if no match or not on a brace.
+;=============================================================
+SRJMPM:
+        ; Read CSOFF from descriptor
+        LHLD    CURBDP
+        MOV     A,L
+        ADI     BD_CSOFF
+        MOV     L,A
+        MOV     A,H
+        ACI     0
+        MOV     H,A
+        MOV     E,M
+        INX     H
+        MOV     D,M             ; DE = cursor offset
+        XCHG
+        SHLD    SJMPOS          ; save cursor offset
+
+        ; Read TXEND
+        LHLD    CURBDP
+        MOV     A,L
+        ADI     BD_TXEND
+        MOV     L,A
+        MOV     A,H
+        ACI     0
+        MOV     H,A
+        MOV     E,M
+        INX     H
+        MOV     D,M
+        XCHG
+        SHLD    SJMEND          ; save text end
+
+        ; Read byte at cursor
+        LHLD    SJMPOS
+        CALL    SRGBRD          ; A = byte at cursor
+        CPI     '{'
+        JZ      SJMFWD          ; scan forward for }
+        CPI     '}'
+        JZ      SJMBWD          ; scan backward for {
+        ; Not on a brace — silently ignore
+        RET
+
+SJMFWD: ; Scan forward from CSOFF+1 for matching }
+        ; depth = 1 (we're on the opening {)
+        MVI     A,1
+        STA     SJMDEP
+        LHLD    SJMPOS
+        INX     H               ; start at CSOFF+1
+SJMFLP: ; Check if past end
+        XCHG
+        LHLD    SJMEND
+        MOV     A,H
+        CMP     D
+        JC      SJMNOMATCH      ; past end
+        JNZ     SJMFOK
+        MOV     A,L
+        CMP     E
+        JC      SJMNOMATCH
+        JZ      SJMNOMATCH      ; at end
+SJMFOK: XCHG                    ; HL = current offset
+        PUSH    H
+        CALL    SRGBRD          ; A = byte
+        POP     H
+        CPI     '{'
+        JZ      SJMFINC
+        CPI     '}'
+        JZ      SJMFDEC
+        INX     H
+        JMP     SJMFLP
+SJMFINC: ; Deeper nesting
+        LDA     SJMDEP
+        INR     A
+        STA     SJMDEP
+        INX     H
+        JMP     SJMFLP
+SJMFDEC: ; Closing brace
+        LDA     SJMDEP
+        DCR     A
+        STA     SJMDEP
+        ORA     A
+        JZ      SJMFND          ; depth 0 = found match
+        INX     H
+        JMP     SJMFLP
+
+SJMBWD: ; Scan backward from CSOFF-1 for matching {
+        ; depth = 1 (we're on the closing })
+        MVI     A,1
+        STA     SJMDEP
+        LHLD    SJMPOS
+        MOV     A,H
+        ORA     L
+        JZ      SJMNOMATCH      ; at offset 0, can't go back
+        DCX     H               ; start at CSOFF-1
+SJMBLP: PUSH    H
+        CALL    SRGBRD          ; A = byte
+        POP     H
+        CPI     '}'
+        JZ      SJMBINC
+        CPI     '{'
+        JZ      SJMBDEC
+        ; Check if at offset 0
+        MOV     A,H
+        ORA     L
+        JZ      SJMNOMATCH
+        DCX     H
+        JMP     SJMBLP
+SJMBINC: ; Deeper nesting
+        LDA     SJMDEP
+        INR     A
+        STA     SJMDEP
+        MOV     A,H
+        ORA     L
+        JZ      SJMNOMATCH
+        DCX     H
+        JMP     SJMBLP
+SJMBDEC: ; Opening brace
+        LDA     SJMDEP
+        DCR     A
+        STA     SJMDEP
+        ORA     A
+        JZ      SJMFND          ; depth 0 = found match
+        MOV     A,H
+        ORA     L
+        JZ      SJMNOMATCH
+        DCX     H
+        JMP     SJMBLP
+
+SJMFND: ; Match found at HL — navigate cursor there
+        SHLD    SJMTGT          ; save target offset
+        CALL    GBMVTOP         ; move to top
+        LHLD    SJMTGT
+        SHLD    SRNAV
+SJMNVL: LHLD    SRNAV
+        MOV     A,H
+        ORA     L
+        JZ      SJMNVD
+        CALL    GBMVRT
+        LHLD    SRNAV
+        DCX     H
+        SHLD    SRNAV
+        JMP     SJMNVL
+SJMNVD: MVI     A,1
+        STA     DIRTY
+        RET
+
+SJMNOMATCH:
+        LXI     D,SJMNMSG
+        CALL    STATMSG
+SJMBELL:
+        MVI     E,BEL
+        MVI     C,BF_RAWIO
+        JMP     BDOS
+
+;=============================================================
 ; DATA SEGMENT
 ;=============================================================
         DSEG
@@ -1029,6 +1189,13 @@ SRRQPMT: DB    'Replace? (Y/N/A/Esc) $'
 SRRPMSG: DB    ' replacement(s).$'
 SRFMSG:  DB    'Found.  $'
 SRNFMS:  DB    'Not found.$'
+SJMNMSG: DB    'No match.$'
+
+; Jump-to-match working variables
+SJMPOS:  DW    0               ; cursor offset
+SJMEND:  DW    0               ; text end
+SJMDEP:  DB    0               ; nesting depth counter
+SJMTGT:  DW    0               ; target offset (match location)
 
         END
 
