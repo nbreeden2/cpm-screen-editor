@@ -1076,12 +1076,16 @@ DS132:  ; Set 132-col runtime variables
         ; Fall through to DSSETROW
 DSSETROW:
         ; Compute runtime row variables from DSROWS.
-        ; Clamp DSROWS to minimum 24.
+        ; Clamp to minimum 24, maximum 76.
         LHLD    DSROWS
         MOV     A,L
         CPI     24
-        JNC     DSROK
-        MVI     A,24
+        JNC     DSRMXC
+        MVI     A,24            ; clamp minimum
+        JMP     DSROK
+DSRMXC: CPI     77
+        JC      DSROK
+        MVI     A,76            ; clamp maximum
 DSROK:  STA     RSTAT           ; status row = DSROWS
         DCR     A
         STA     RSEPR           ; separator row = DSROWS - 1

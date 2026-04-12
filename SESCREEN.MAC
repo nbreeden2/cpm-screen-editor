@@ -2090,8 +2090,8 @@ SDSKIP: DB      0               ; horizontal skip target (HSCROL copy)
         IF SYNHI
 SDCATT: DB      0               ; current syntax attribute
 SLBYTI: DB      0               ; byte index for SCREDLN
-CMLST:  DS      27              ; per-line comment state (max 26 edit rows + 1)
-BRLST:  DS      27              ; per-line brace depth (max 26 edit rows + 1)
+CMLST:  DS      73              ; per-line comment state (max 72 edit rows + 1)
+BRLST:  DS      73              ; per-line brace depth (max 72 edit rows + 1)
 SCRCSV: DB      0               ; saved cursor row for SCREDCL
         ENDIF
 SLSKIP: DB      0               ; SLEDRAW horizontal skip target
