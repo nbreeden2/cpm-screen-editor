@@ -33,6 +33,7 @@ BF_FREAD  EQU   20          ; seq read: DE=FCB
 BF_FWRITE EQU   21          ; seq write: DE=FCB
 BF_FMAKE  EQU   22          ; create: DE=FCB
 BF_SETDMA EQU   26          ; set DMA: DE=addr
+BF_GETDSK EQU   25          ; get current disk: ret A=disk
 BF_USRNUM EQU   32          ; get/set user: E=num
 
 ;--- ASCII control codes ------------------------------
@@ -72,6 +73,15 @@ ATTR_CYN EQU    36H         ; cyan foreground
 ATTR_GRN EQU    32H         ; green foreground
 ATTR_YEL EQU    33H         ; yellow foreground
 ATTR_MAG EQU    35H         ; magenta foreground
+ATTR_RED EQU    31H         ; red foreground
+ATTR_BLU EQU    34H         ; blue foreground
+ATTR_BYL EQU    93H         ; bright yellow foreground
+ATTR_BGN EQU    92H         ; bright green foreground
+ATTR_BBL EQU    94H         ; bright blue foreground
+ATTR_BRD EQU    91H         ; bright red foreground
+ATTR_BMG EQU    95H         ; bright magenta foreground
+ATTR_BCN EQU    96H         ; bright cyan foreground
+ATTR_BWT EQU    97H         ; bright white foreground
 
 ;--- Buffer descriptor field offsets -----------------
 BD_BSTAR EQU    0           ; 2: buffer base address
@@ -97,6 +107,7 @@ MINMEM  EQU     9*1024      ; minimum TPA required
 ;--- Syntax mode codes --------------------------------
 SYN_NONE EQU    0           ; plain text
 SYN_ASM  EQU    1           ; 8080/Z80 assembly
+SYN_C    EQU    2           ; C language
 
 ;--- Insert / overwrite mode --------------------------
 MODE_INS EQU    0           ; insert mode (default)
@@ -140,7 +151,9 @@ ACT_BLKDL EQU   29          ; delete block
 ACT_BLKPS EQU   30          ; paste clipboard
 ACT_MENU  EQU   31          ; open ESC menu
 ACT_FIND  EQU   32          ; find (always prompt)
-ACT_MAX   EQU   32          ; highest action code
+ACT_REPL  EQU   33          ; find and replace
+ACT_JMPM  EQU   34          ; jump to matching brace
+ACT_MAX   EQU   34          ; highest action code
 
 ;--- Block mark sentinel ------------------------------
 NO_MARK EQU     0FFFFH      ; marks absent/unset
@@ -163,4 +176,3 @@ CLIPMAX EQU     2048        ; max paste buffer bytes
 
 ;--- Search string size limit -------------------------
 SRCHMAX EQU     64          ; max find string length
-

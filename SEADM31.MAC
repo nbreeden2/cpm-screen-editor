@@ -23,68 +23,7 @@
 ;              SEVIRTIO,SEHELP,SEDIT/N/E
 ;============================================================
 
-;============================================================
-; Inlined constants from SEDIT.INC
-;============================================================
-
-;--- CP/M system addresses ----------------------------
-BDOS    EQU     0005H
-WBOOT   EQU     0000H
-
-;--- BDOS function numbers ----------------------------
-BF_RAWIO  EQU   6           ; direct I/O: E=FFH->in
-
-;--- ASCII control codes ------------------------------
-NUL     EQU     00H
-BS      EQU     08H
-TAB     EQU     09H
-LF      EQU     0AH
-CR      EQU     0DH
-ESC     EQU     1BH
-
-;--- Screen layout ------------------------------------
-SCRROWS EQU     24
-SCRCOLS EQU     80
-EDITROW EQU     20
-EDITFR  EQU     3
-INFOROW EQU     1
-RULRROW EQU     2
-SEPRROW EQU     23
-STATROW EQU     24
-LNUMWID EQU     5
-TXTCOLS EQU     73
-MAXCOLS EQU     255
-TXTFCOL EQU     6
-TABWID  EQU     4
-
-;--- Buffer descriptor field offsets -----------------
-BD_BSTAR EQU    0
-BD_BSIZE EQU    2
-BD_GAPBG EQU    4
-BD_GAPEN EQU    6
-BD_TXEND EQU    8
-BD_TOPLN EQU    10
-BD_CSROW EQU    12
-BD_CSCOL EQU    13
-BD_CSOFF EQU    14
-BD_MRKBG EQU    16
-BD_MRKEN EQU    18
-BD_MODIF EQU    20
-BD_SYNMD EQU    21
-BD_FNAME EQU    22
-BD_SIZE  EQU    34
-
-;--- Syntax mode codes --------------------------------
-SYN_NONE EQU    0
-SYN_ASM  EQU    1
-SYN_C    EQU    2
-
-;--- Block mark sentinel ------------------------------
-NO_MARK EQU     0FFFFH
-
-;--- Insert / overwrite mode --------------------------
-MODE_INS EQU    0
-MODE_OVR EQU    1
+        INCLUDE SEDIT.INC
 
 ;--- Imports ------------------------------------------
         EXTRN   CURBDP

@@ -5,7 +5,8 @@
 - **Intel 8080 assembly ONLY** — no Z80 instructions (no EX, DJNZ, JR, IX/IY, etc.)
 - Assembler: **M80** (Microsoft Macro-80). Linker: **L80**.
 - After every .MAC file edit, run: `python CPMFMT.PY <file>`
-- CPMFMT.PY inlines SEDIT.INC, normalizes CR+LF, appends Ctrl-Z EOF.
+- CPMFMT.PY normalizes CR+LF, appends Ctrl-Z EOF (.MAC only, not .INC).
+- SEDIT.INC is included via M80 `INCLUDE` directive (no Ctrl-Z in .INC files so M80 returns to parent).
 - BDOS calls clobber ALL registers. Any value needed across CALL must be saved to memory or stack.
 - When fixing off-by-one or boundary bugs, trace exact values at edges (0, 1, max-1, max) before writing the fix.
 - Version shown via ESC menu -> "8. About". Update in SEMENU.MAC.
