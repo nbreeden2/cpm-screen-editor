@@ -84,7 +84,8 @@
     CPMFMT.PY              Python preprocessor (see section 3)
     SEBUILD.PY             Python EQU patcher for variant builds
     build-all.bat          Windows build script (all 4 variants)
-    BUILD.SUB              CP/M native build script (for SUBMIT)
+    BUILD.SUB              CP/M native build script (SUBMIT BUILD)
+    TOOLS.SUB              CP/M standalone utility build (SUBMIT TOOLS)
 
 
     3.  BUILD PROCESS
@@ -186,7 +187,7 @@
         SUBMIT BUILD
 
     This runs all M80 and L80 commands in sequence.  Note that
-    BUILD.SUB does not run CPMFMT.PY; source files must be
+    BUILD.SUB and TOOLS.SUB do not run CPMFMT.PY; source files must be
     preprocessed before transfer to CP/M media.
 
     3.7  Building All 4 Variants (Windows)
