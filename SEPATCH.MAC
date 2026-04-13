@@ -1,0 +1,327 @@
+;============================================================
+; FILE:    SEPATCH.MAC
+; PROJECT: SEDIT - Screen Editor for CP/M 2.2
+; VERSION: 1.0
+; DATE:    1984-01-01
+; AUTHOR:  Claude Code and RetroTechReboot
+;------------------------------------------------------------
+; DESCRIPTION:
+;   Patches COLOR and SYNHI EQU values in SECONFIG.INC for
+;   variant builds. CP/M native equivalent of SEBUILD.PY.
+;
+;   SECONFIG.INC is small (~128 bytes), so the entire file
+;   is read into a single DMA buffer, patched in memory,
+;   and written back.
+;
+; BUILD:
+;   M80 =SEPATCH
+;   L80 SEPATCH,SEPATCH/N/E
+;
+; USAGE:
+;   A>SEPATCH <color> <synhi>
+;     color = 0 or 1
+;     synhi = 0, 1, or 2
+;
+;   Examples:
+;     SEPATCH 0 0     Mono
+;     SEPATCH 1 0     Color only
+;     SEPATCH 1 1     Color + ASM highlighting
+;     SEPATCH 1 2     Color + C highlighting
+;------------------------------------------------------------
+
+BDOS    EQU     0005H
+WBOOT   EQU     0000H
+BF_PRTSTR EQU   9
+BF_CONOUT EQU   2
+BF_FOPEN  EQU   15
+BF_FCLOSE EQU   16
+BF_FDEL   EQU   19
+BF_FREAD  EQU   20
+BF_FWRITE EQU   21
+BF_FMAKE  EQU   22
+BF_SETDMA EQU   26
+RECSIZ  EQU     128
+CR      EQU     0DH
+LF      EQU     0AH
+CPMEOF  EQU     1AH
+
+        CSEG
+
+START:
+        LXI     SP,STACK
+
+        ;--- Parse command line ---
+        LDA     0080H           ; command tail length
+        ORA     A
+        JZ      USAGE
+        LXI     H,0081H
+        CALL    SKIPSP
+        ; First arg: color (0 or 1)
+        MOV     A,M
+        SUI     '0'
+        JC      USAGE
+        CPI     2
+        JNC     USAGE
+        STA     COLVAL
+        INX     H
+        CALL    SKIPSP
+        ; Second arg: synhi (0, 1, or 2)
+        MOV     A,M
+        SUI     '0'
+        JC      USAGE
+        CPI     3
+        JNC     USAGE
+        STA     SYNVAL
+        ; Validate: synhi > 0 requires color = 1
+        ORA     A
+        JZ      VALOK           ; synhi=0, any color is fine
+        LDA     COLVAL
+        ORA     A
+        JZ      ERRCFG          ; synhi>0 but color=0, illegal
+VALOK:
+
+        ;--- Load SECONFIG.INC ---
+        LXI     D,MSGLD
+        CALL    PRINT
+        ; Set DMA to our buffer
+        LXI     D,FBUF
+        MVI     C,BF_SETDMA
+        CALL    BDOS
+        ; Clear FCB fields
+        XRA     A
+        STA     FCB+12          ; extent
+        STA     FCB+32          ; current record
+        ; Open
+        LXI     D,FCB
+        MVI     C,BF_FOPEN
+        CALL    BDOS
+        INR     A
+        JZ      ERROPN
+        ; Read one record (file is < 128 bytes)
+        LXI     D,FCB
+        MVI     C,BF_FREAD
+        CALL    BDOS
+        ; Close (read-only for now)
+        LXI     D,0080H
+        MVI     C,BF_SETDMA
+        CALL    BDOS
+        LXI     D,FCB
+        MVI     C,BF_FCLOSE
+        CALL    BDOS
+
+        ;--- Patch COLOR ---
+        LXI     H,COLPAT
+        LDA     COLVAL
+        ADI     '0'
+        CALL    PATCH
+        JC      ERRCOL
+
+        ;--- Patch SYNHI ---
+        LXI     H,SYNPAT
+        LDA     SYNVAL
+        ADI     '0'
+        CALL    PATCH
+        JC      ERRSYN
+
+        ;--- Write back ---
+        LXI     D,MSGWR
+        CALL    PRINT
+        ; Delete old file
+        LXI     D,0080H
+        MVI     C,BF_SETDMA
+        CALL    BDOS
+        XRA     A
+        STA     FCB+12
+        STA     FCB+32
+        LXI     D,FCB
+        MVI     C,BF_FDEL
+        CALL    BDOS
+        ; Create new
+        XRA     A
+        STA     FCB+12
+        STA     FCB+32
+        LXI     D,FCB
+        MVI     C,BF_FMAKE
+        CALL    BDOS
+        INR     A
+        JZ      ERRWRT
+        XRA     A
+        STA     FCB+32
+        ; Write one record from FBUF
+        LXI     D,FBUF
+        MVI     C,BF_SETDMA
+        CALL    BDOS
+        LXI     D,FCB
+        MVI     C,BF_FWRITE
+        CALL    BDOS
+        ORA     A
+        JNZ     ERRWRT
+        ; Close
+        LXI     D,0080H
+        MVI     C,BF_SETDMA
+        CALL    BDOS
+        LXI     D,FCB
+        MVI     C,BF_FCLOSE
+        CALL    BDOS
+
+        ;--- Summary ---
+        LXI     D,MSGDN1
+        CALL    PRINT
+        LDA     COLVAL
+        ADI     '0'
+        CALL    CONOUT
+        LXI     D,MSGDN2
+        CALL    PRINT
+        LDA     SYNVAL
+        ADI     '0'
+        CALL    CONOUT
+        LXI     D,MSGCRLF
+        CALL    PRINT
+        JMP     WBOOT
+
+;------------------------------------------------------------
+; PATCH - Find NUL-terminated pattern at HL in FBUF, patch
+; the first digit after "EQU" + spaces with value in A.
+; Entry: HL = pattern (e.g. "COLOR   EQU")
+;        A  = ASCII digit to write
+; Exit:  CY set if not found
+;------------------------------------------------------------
+PATCH:
+        STA     PDIG
+        SHLD    PPAT
+        ; Scan FBUF for pattern match
+        LXI     H,FBUF
+PATLP:  ; Check if past end of buffer (HL >= FBUF+RECSIZ?)
+        PUSH    D
+        LXI     D,FBUF+RECSIZ
+        MOV     A,L
+        SUB     E
+        MOV     A,H
+        SBB     D
+        POP     D
+        JNC     PATNF           ; HL >= FBUF+RECSIZ, past end
+        ; Try match at HL
+        PUSH    H               ; save scan position
+        LHLD    PPAT
+        XCHG                    ; DE = pattern
+        POP     H
+        PUSH    H               ; re-save scan position
+PATCMP: LDAX    D               ; pattern byte
+        ORA     A
+        JZ      PATFND          ; end of pattern = match
+        CMP     M               ; compare with buffer
+        JNZ     PATNXT          ; mismatch
+        INX     H
+        INX     D
+        JMP     PATCMP
+PATFND: ; Matched! HL = past pattern in buffer.
+        ; Skip spaces/tabs to find the digit
+        POP     D               ; clean stack (saved scan pos)
+PATSKP: MOV     A,M
+        CPI     ' '
+        JZ      PATSK1
+        CPI     09H
+        JZ      PATSK1
+        JMP     PATDO
+PATSK1: INX     H
+        JMP     PATSKP
+PATDO:  ; HL -> digit to patch
+        LDA     PDIG
+        MOV     M,A
+        ORA     A               ; clear carry
+        RET
+PATNXT: POP     H               ; restore scan position
+        INX     H               ; advance one byte
+        JMP     PATLP
+PATNF:  STC
+        RET
+
+;------------------------------------------------------------
+; Helpers
+;------------------------------------------------------------
+SKIPSP: MOV     A,M
+        CPI     ' '
+        RNZ
+        INX     H
+        JMP     SKIPSP
+
+PRINT:  MVI     C,BF_PRTSTR
+        JMP     BDOS
+
+CONOUT: MOV     E,A
+        MVI     C,BF_CONOUT
+        JMP     BDOS
+
+;------------------------------------------------------------
+; Error handlers
+;------------------------------------------------------------
+USAGE:
+        LXI     D,MSGUSE
+        CALL    PRINT
+        JMP     WBOOT
+ERRCFG: LXI     D,MSGCFG
+        CALL    PRINT
+        JMP     WBOOT
+ERROPN: LXI     D,MSGOPN
+        CALL    PRINT
+        JMP     WBOOT
+ERRCOL: LXI     D,MSGNCL
+        CALL    PRINT
+        JMP     WBOOT
+ERRSYN: LXI     D,MSGNSY
+        CALL    PRINT
+        JMP     WBOOT
+ERRWRT: LXI     D,MSGWRE
+        CALL    PRINT
+        JMP     WBOOT
+
+;------------------------------------------------------------
+; FCB for SECONFIG.INC (drive 0 = current)
+;------------------------------------------------------------
+FCB:    DB      0,'SECONFIG','INC',0,0,0,0
+        DS      20              ; rest of FCB
+
+;------------------------------------------------------------
+; Pattern strings (NUL-terminated)
+;------------------------------------------------------------
+COLPAT: DB      'COLOR   EQU',0
+SYNPAT: DB      'SYNHI   EQU',0
+
+;------------------------------------------------------------
+; Messages
+;------------------------------------------------------------
+MSGUSE: DB      'Usage: SEPATCH <color> <synhi>',CR,LF
+        DB      '  color = 0  disable color',CR,LF
+        DB      '  color = 1  enable color',CR,LF
+        DB      '  synhi = 0  no highlighting',CR,LF
+        DB      '  synhi = 1  ASM highlighting',CR,LF
+        DB      '  synhi = 2  C highlighting',CR,LF,'$'
+MSGLD:  DB      'Reading SECONFIG.INC... $'
+MSGWR:  DB      'Writing SECONFIG.INC... $'
+MSGDN1: DB      'Done: COLOR=$'
+MSGDN2: DB      ' SYNHI=$'
+MSGCRLF: DB     CR,LF,'$'
+MSGCFG: DB      'Error: highlighting requires color.',CR,LF,'$'
+MSGOPN: DB      'Error: SECONFIG.INC not found.',CR,LF,'$'
+MSGNCL: DB      'Error: COLOR EQU not found.',CR,LF,'$'
+MSGNSY: DB      'Error: SYNHI EQU not found.',CR,LF,'$'
+MSGWRE: DB      'Error: cannot write file.',CR,LF,'$'
+
+;------------------------------------------------------------
+; DATA SEGMENT
+;------------------------------------------------------------
+        DSEG
+
+COLVAL: DB      0
+SYNVAL: DB      0
+PPAT:   DW      0
+PDIG:   DB      0
+
+        DS      64
+STACK   EQU     $
+
+; File buffer (128 bytes - one CP/M record)
+FBUF:   DS      RECSIZ
+
+        END     START
+

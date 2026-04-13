@@ -29,7 +29,7 @@ python CPMFMT.PY SEHELP.MAC SEKEY.MAC SEKEYBND.MAC SEMENU.MAC
 if errorlevel 1 goto fail
 python CPMFMT.PY SESEARCH.MAC
 if errorlevel 1 goto fail
-python CPMFMT.PY COL80.MAC COL132.MAC CLS.MAC MEMTEST.MAC COLORS.MAC GETSIZE.MAC
+python CPMFMT.PY COL80.MAC COL132.MAC CLS.MAC MEMTEST.MAC COLORS.MAC GETSIZE.MAC SEPATCH.MAC
 if errorlevel 1 goto fail
 REM Specific to the ADM 31 terminal
 python CPMFMT.PY SEADM31 SEADM31K
@@ -48,7 +48,7 @@ for %%M in (SEDIT SEBLOCK SEFILEIO SEGAPBUF SEHELP SEKEY SEKEYBND SEMENU SESEARC
 )
 
 echo Assembling standalone utilities...
-for %%M in (GETSIZE MEMTEST KEYCODE COL80 COL132 CLS COLORS) do (
+for %%M in (GETSIZE MEMTEST KEYCODE COL80 COL132 CLS COLORS SEPATCH) do (
     cpmulator M80.COM =%%M
     echo %%M
 	pause
@@ -61,7 +61,7 @@ echo.
 echo --- Variant 1/4: SEDIT.COM (mono, no highlight) ---
 python SEBUILD.PY 0 0
 if errorlevel 1 goto fail
-python CPMFMT.PY SESCREEN.MAC SESYNTAX.MAC
+python CPMFMT.PY SECONFIG.INC
 if errorlevel 1 goto fail
 cpmulator M80.COM =SESCREEN
 if errorlevel 1 goto fail
@@ -76,7 +76,7 @@ echo.
 echo --- Variant 2/4: SEDIT-CL.COM (color, no highlight) ---
 python SEBUILD.PY 1 0
 if errorlevel 1 goto fail
-python CPMFMT.PY SESCREEN.MAC SESYNTAX.MAC
+python CPMFMT.PY SECONFIG.INC
 if errorlevel 1 goto fail
 cpmulator M80.COM =SESCREEN
 if errorlevel 1 goto fail
@@ -91,7 +91,7 @@ echo.
 echo --- Variant 3/4: SEDIT-A.COM (color + ASM highlight) ---
 python SEBUILD.PY 1 1
 if errorlevel 1 goto fail
-python CPMFMT.PY SESCREEN.MAC SESYNTAX.MAC
+python CPMFMT.PY SECONFIG.INC
 if errorlevel 1 goto fail
 cpmulator M80.COM =SESCREEN
 if errorlevel 1 goto fail
@@ -106,7 +106,7 @@ echo.
 echo --- Variant 4/4: SEDIT-C.COM (color + C highlight) ---
 python SEBUILD.PY 1 2
 if errorlevel 1 goto fail
-python CPMFMT.PY SESCREEN.MAC SESYNTAX.MAC
+python CPMFMT.PY SECONFIG.INC
 if errorlevel 1 goto fail
 cpmulator M80.COM =SESCREEN
 if errorlevel 1 goto fail
@@ -120,7 +120,7 @@ echo --- End of WordStar/VT100 variants ---
 
 REM --- Restore source to default (mono) ---
 python SEBUILD.PY 0 0
-python CPMFMT.PY SESCREEN.MAC SESYNTAX.MAC
+python CPMFMT.PY SECONFIG.INC
 
 echo --- Build ADM-31 Editor ---
 cpmulator M80.COM =SESCREEN
@@ -164,6 +164,8 @@ if errorlevel 1 goto fail
 cpmulator L80.COM CLS,CLS/n/e
 if errorlevel 1 goto fail
 cpmulator L80.COM COLORS,COLORS/n/e
+if errorlevel 1 goto fail
+cpmulator L80.COM SEPATCH,SEPATCH/n/e
 if errorlevel 1 goto fail
 
 REM --- Clean up ---

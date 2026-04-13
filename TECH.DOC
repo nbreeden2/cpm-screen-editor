@@ -1,6 +1,6 @@
 
 
-                      SEDIT v1.22 Technical Manual
+                      SEDIT v1.23 Technical Manual
                   Build Environment and Source Reference
 
                     ================================
@@ -812,7 +812,7 @@ r
 
     10. REVISION HISTORY
 
-    v1.22   Find and replace (^QA): interactive Y/N/A/Esc
+    v1.23   Find and replace (^QA): interactive Y/N/A/Esc
             per match with reverse-video highlight.  Delete
             word right (^T).
     v1.19   Auto-detect terminal width (80/132) and row count

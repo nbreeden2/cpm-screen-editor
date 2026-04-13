@@ -1,6 +1,6 @@
 # SEDIT User Manual
 
-**SEDIT v1.22 — Screen Editor for CP/M 2.2**
+**SEDIT v1.23 — Screen Editor for CP/M 2.2**
 
 A full-screen text editor for CP/M 2.2 systems with VT100/ANSI terminals.
 Uses WordStar-compatible control key conventions with ANSI arrow key support.

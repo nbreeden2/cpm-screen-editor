@@ -15,10 +15,7 @@
 ;   1.0  1984-01-01  Initial release
 ;============================================================
         INCLUDE SEDIT.INC
-
-;--- Compile-time options (patched by SEBUILD.PY) ---------
-COLOR   EQU     0               ; 0=mono, 1=color
-SYNHI   EQU     0               ; 0=none, 1=ASM, 2=C
+        INCLUDE SECONFIG.INC
 
         EXTRN   CURBDP          ; current buffer desc ptr
         EXTRN   INSMODE         ; insert/overwrite mode
@@ -108,7 +105,7 @@ SPRABV: DB      ' above$'
 SPREQS: DB      ' === $'
 SPRBLW: DB      ' below$'
 SPRDNA: DB      ' vvv$'
-SPRBLD: DB      ' V1.22 $'
+SPRBLD: DB      ' V1.23 $'
 SPRBLN  EQU     8               ; length of SPRBLD (excluding $)
 
 ;=============================================================

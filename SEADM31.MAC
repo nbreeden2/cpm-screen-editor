@@ -88,7 +88,7 @@ SPRABV: DB      ' above$'
 SPREQS: DB      ' === $'
 SPRBLW: DB      ' below$'
 SPRDNA: DB      ' vvv$'
-SPRBLD: DB      ' V1.22 $'
+SPRBLD: DB      ' V1.23 $'
 SPRBLN  EQU     8
 
 ;=============================================================

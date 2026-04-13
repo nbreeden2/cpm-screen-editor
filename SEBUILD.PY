@@ -1,8 +1,8 @@
-"""SEBUILD.PY - Patch COLOR and SYNHI EQU values in SEDIT source files.
+"""SEBUILD.PY - Patch COLOR and SYNHI EQU values in SECONFIG.INC.
 
 Usage: python SEBUILD.PY <color> <synhi>
-  color  - 0 or 1 (COLOR EQU value in SESCREEN.MAC)
-  synhi  - 0, 1, or 2 (SYNHI EQU value in SESCREEN.MAC and SESYNTAX.MAC)
+  color  - 0 or 1
+  synhi  - 0, 1, or 2
 """
 
 import re
@@ -12,7 +12,6 @@ def patch_equ(filepath, name, value):
     """Replace 'name EQU <old>' with 'name EQU <new>' preserving comment."""
     with open(filepath, 'r') as f:
         text = f.read()
-    # Match: optional whitespace, name, whitespace, EQU, whitespace, number, optional comment
     pattern = re.compile(
         r'^(' + re.escape(name) + r'\s+EQU\s+)\d+(\s*;.*)?$',
         re.MULTILINE
@@ -42,15 +41,17 @@ def main():
     if synhi not in (0, 1, 2):
         print(f'ERROR: synhi must be 0, 1, or 2, got {synhi}')
         sys.exit(1)
+    if synhi > 0 and color == 0:
+        print(f'ERROR: highlighting requires color (color=0 synhi={synhi})')
+        sys.exit(1)
 
     ok = True
-    ok &= patch_equ('SESCREEN.MAC', 'COLOR', color)
-    ok &= patch_equ('SESCREEN.MAC', 'SYNHI', synhi)
-    ok &= patch_equ('SESYNTAX.MAC', 'SYNHI', synhi)
+    ok &= patch_equ('SECONFIG.INC', 'COLOR', color)
+    ok &= patch_equ('SECONFIG.INC', 'SYNHI', synhi)
 
     labels = {(0,0): 'mono', (1,0): 'color', (1,1): 'color+ASM', (1,2): 'color+C'}
     label = labels.get((color, synhi), f'COLOR={color} SYNHI={synhi}')
-    print(f'Patched: {label}')
+    print(f'Patched SECONFIG.INC: {label}')
 
     if not ok:
         sys.exit(1)

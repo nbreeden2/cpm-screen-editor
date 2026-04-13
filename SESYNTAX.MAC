@@ -34,8 +34,7 @@
 ;   1.0  1984-01-01  Initial release
 ;============================================================
 
-;--- Syntax highlighting option (must precede IF SYNHI) ----
-SYNHI   EQU     0           ; 0=none, 1=ASM, 2=C
+        INCLUDE SECONFIG.INC
 
 ;--- Imports ----------------------------------------------
         EXTRN   CURBDP          ; current descriptor
@@ -56,9 +55,6 @@ SYNHI   EQU     0           ; 0=none, 1=ASM, 2=C
 
 ;=============================================================
         INCLUDE SEDIT.INC
-
-;--- Compile-time option (patched by SEBUILD.PY) ----------
-SYNHI   EQU     0               ; 0=none, 1=ASM, 2=C
 
 ; SYNINIT - Set BD_SYNMD based on BD_FNAME extension.
 ; .MAC and .ASM -> SYN_ASM; anything else -> SYN_NONE.
