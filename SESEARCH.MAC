@@ -20,6 +20,8 @@
         EXTRN   CURBDP          ; current buffer descriptor
         EXTRN   GBMVRT          ; move cursor right one char
         EXTRN   GBMVTOP         ; move cursor to file top
+        EXTRN   GBGOTOL         ; go to line N
+        EXTRN   REROWS          ; runtime edit rows
         EXTRN   GBINSRT         ; insert char at cursor
         EXTRN   GBDELRT         ; delete char right
         EXTRN   OUTSTR          ; write $-string to console
@@ -983,21 +985,196 @@ SJMBDEC: ; Opening brace
         DCX     H
         JMP     SJMBLP
 
-SJMFND: ; Match found at HL — navigate cursor there
-        SHLD    SJMTGT          ; save target offset
-        CALL    GBMVTOP         ; move to top
+SJMFND: ; Match found at HL.
+        ; Count LFs from offset 0 to HL to get line number.
+        SHLD    SJMTGT          ; save match offset
+        LXI     H,0             ; start scanning from offset 0
+        LXI     D,1             ; DE = line counter (1-based)
+SJMLFL: ; Check if HL reached match offset
+        PUSH    D
+        PUSH    H
         LHLD    SJMTGT
-        SHLD    SRNAV
-SJMNVL: LHLD    SRNAV
+        MOV     B,H
+        MOV     C,L             ; BC = target
+        POP     H               ; HL = current offset
+        POP     D               ; DE = line count
         MOV     A,H
-        ORA     L
-        JZ      SJMNVD
-        CALL    GBMVRT
-        LHLD    SRNAV
+        CMP     B
+        JNZ     SJMLF1
+        MOV     A,L
+        CMP     C
+        JZ      SJMLFD          ; reached target
+SJMLF1: PUSH    D
+        PUSH    H
+        CALL    SRGBRD          ; A = byte at offset HL
+        POP     H
+        POP     D
+        CPI     LF
+        JNZ     SJMLF2
+        INX     D               ; count LF
+SJMLF2: INX     H
+        JMP     SJMLFL
+SJMLFD: ; DE = line number of match (1-based)
+        XCHG
+        SHLD    SJMLIN          ; save match line number
+
+        ; Read current TOPLN
+        LHLD    CURBDP
+        MOV     A,L
+        ADI     BD_TOPLN
+        MOV     L,A
+        MOV     A,H
+        ACI     0
+        MOV     H,A
+        MOV     E,M
+        INX     H
+        MOV     D,M             ; DE = TOPLN (0-based)
+        XCHG
+        SHLD    SJMTOP          ; save TOPLN
+
+        ; Check if match line is on screen:
+        ; Visible if TOPLN < match_line <= TOPLN + REROWS
+        ; (match_line is 1-based, TOPLN is 0-based,
+        ;  so visible line range is TOPLN+1 .. TOPLN+REROWS)
+        LHLD    SJMLIN          ; HL = match line (1-based)
+        XCHG                    ; DE = match line
+        LHLD    SJMTOP          ; HL = TOPLN
+        INX     H               ; HL = TOPLN+1
+        ; Check DE >= HL (match >= top+1)
+        MOV     A,E
+        SUB     L
+        MOV     A,D
+        SBB     H
+        JC      SJMABV          ; match line < TOPLN+1, above screen
+
+        ; Check DE <= TOPLN + REROWS
+        LHLD    SJMTOP          ; HL = TOPLN
+        LDA     REROWS
+        MOV     C,A
+        MVI     B,0
+        DAD     B               ; HL = TOPLN + REROWS
+        ; Compare DE <= HL
+        MOV     A,L
+        SUB     E
+        MOV     A,H
+        SBB     D
+        JC      SJMBLW          ; match > TOPLN+REROWS, below screen
+
+        ; --- Match is on screen: just navigate cursor ---
+        LHLD    SJMLIN
+        CALL    GBGOTOL         ; move cursor to line
+        ; GBGOTOL sets TOPLN and CSROW, but we want to keep
+        ; the original TOPLN so the screen doesn't scroll.
+        ; Restore TOPLN and compute correct CSROW.
+        LHLD    SJMTOP
+        PUSH    H
+        LHLD    CURBDP
+        MOV     A,L
+        ADI     BD_TOPLN
+        MOV     L,A
+        MOV     A,H
+        ACI     0
+        MOV     H,A
+        POP     D               ; DE = saved TOPLN
+        MOV     M,E
+        INX     H
+        MOV     M,D             ; restore BD_TOPLN
+        ; CSROW = match_line - 1 - TOPLN
+        LHLD    SJMLIN
+        DCX     H               ; HL = match_line - 1 (0-based)
+        MOV     A,L
+        SUB     E
+        ; A = CSROW (low byte is enough)
+        LHLD    CURBDP
+        PUSH    PSW
+        MOV     A,L
+        ADI     BD_CSROW
+        MOV     L,A
+        MOV     A,H
+        ACI     0
+        MOV     H,A
+        POP     PSW
+        MOV     M,A             ; BD_CSROW = match_line - 1 - TOPLN
+        JMP     SJMDON
+
+SJMBLW: ; --- Match is below screen (forward search) ---
+        ; Position match at bottom row: TOPLN = match_line - REROWS
+        LHLD    SJMLIN
+        LDA     REROWS
+        MOV     C,A
+        MVI     B,0
+        MOV     A,L
+        SUB     C
+        MOV     L,A
+        MOV     A,H
+        SBB     B
+        MOV     H,A             ; HL = match_line - REROWS
+        JNC     SJMBL1
+        LXI     H,0             ; clamp to 0
+SJMBL1: PUSH    H               ; save new TOPLN
+        LHLD    SJMLIN
+        CALL    GBGOTOL         ; move cursor to match line
+        ; Set TOPLN to our computed value
+        POP     D               ; DE = new TOPLN
+        LHLD    CURBDP
+        MOV     A,L
+        ADI     BD_TOPLN
+        MOV     L,A
+        MOV     A,H
+        ACI     0
+        MOV     H,A
+        MOV     M,E
+        INX     H
+        MOV     M,D
+        ; Set CSROW = REROWS - 1 (bottom row)
+        LHLD    CURBDP
+        MOV     A,L
+        ADI     BD_CSROW
+        MOV     L,A
+        MOV     A,H
+        ACI     0
+        MOV     H,A
+        LDA     REROWS
+        DCR     A
+        MOV     M,A
+        JMP     SJMDON
+
+SJMABV: ; --- Match is above screen (backward search) ---
+        ; Position match one row below top: TOPLN = match_line - 2
+        LHLD    SJMLIN
         DCX     H
-        SHLD    SRNAV
-        JMP     SJMNVL
-SJMNVD: MVI     A,1
+        DCX     H               ; HL = match_line - 2
+        MOV     A,H
+        ORA     A
+        JP      SJMAB1          ; positive, use it
+        LXI     H,0             ; clamp to 0
+SJMAB1: PUSH    H               ; save new TOPLN
+        LHLD    SJMLIN
+        CALL    GBGOTOL         ; move cursor to match line
+        ; Set TOPLN to our computed value
+        POP     D               ; DE = new TOPLN
+        LHLD    CURBDP
+        MOV     A,L
+        ADI     BD_TOPLN
+        MOV     L,A
+        MOV     A,H
+        ACI     0
+        MOV     H,A
+        MOV     M,E
+        INX     H
+        MOV     M,D
+        ; Set CSROW = 1 (one row below top)
+        LHLD    CURBDP
+        MOV     A,L
+        ADI     BD_CSROW
+        MOV     L,A
+        MOV     A,H
+        ACI     0
+        MOV     H,A
+        MVI     M,1
+        JMP     SJMDON
+
+SJMDON: MVI     A,1
         STA     DIRTY
         RET
 
@@ -1074,6 +1251,8 @@ SJMPOS:  DW    0               ; cursor offset
 SJMEND:  DW    0               ; text end
 SJMDEP:  DB    0               ; nesting depth counter
 SJMTGT:  DW    0               ; target offset (match location)
+SJMLIN:  DW    0               ; match line number (1-based)
+SJMTOP:  DW    0               ; saved TOPLN for visibility check
 SJMOPN:  DB    0               ; open char for current match ({ or ()
 SJMCLS:  DB    0               ; close char for current match (} or ))
 
