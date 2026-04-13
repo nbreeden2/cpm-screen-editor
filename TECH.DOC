@@ -110,28 +110,41 @@
 
         python CPMFMT.PY
 
-    CPMFMT.PY performs three operations:
+    CPMFMT.PY performs two operations:
 
-    a) INCLUDE expansion: Replaces any line containing
-       "INCLUDE SEDIT.INC" with the literal contents of SEDIT.INC.
-       This is necessary because M80 terminates input when it
-       encounters the Ctrl-Z EOF marker in an included file.
 
-    b) Line ending normalization: Converts all line endings to
+
+    a) Line ending normalization: Converts all line endings to
+
        CR+LF (0DH 0AH) as required by CP/M text files.
 
-    c) EOF marker: Appends a Ctrl-Z (1AH) byte at the end of the
-       file.
 
-    CPMFMT.PY is idempotent: after the first run, the INCLUDE
-    directive has been replaced by inlined content, so subsequent
-    runs only redo CR+LF normalization and EOF marking.
+
+    b) EOF marker: Appends a Ctrl-Z (1AH) byte at the end of
+
+       .MAC files.  For .INC files, Ctrl-Z is NOT appended so
+
+       that M80 INCLUDE can return to the parent file.
+
+
+
+    Each .MAC file contains an INCLUDE SEDIT.INC directive which
+
+    M80 processes natively at assembly time.  Editing SEDIT.INC
+
+    automatically affects all modules on the next assembly.
+
+
 
     IMPORTANT: CPMFMT.PY must be run after every edit to a .MAC
-    file when editing on Windows or any non-CP/M host.  It ensures
-    proper CR+LF line endings and Ctrl-Z EOF markers required by
-    M80.  Files edited directly under CP/M already have the correct
-    format and do not need preprocessing.
+
+    or .INC file when editing on Windows or any non-CP/M host.
+
+    It ensures proper CR+LF line endings and Ctrl-Z EOF markers
+
+    required by M80.  Files edited directly under CP/M already
+
+    have the correct format and do not need preprocessing.
 
     3.3  Step 2: Assembly
 
@@ -272,15 +285,13 @@
 
     4.  CONDITIONAL ASSEMBLY OPTIONS
 
-    Two equates in SEDIT.INC control compile-time features.  Since
-    CPMFMT.PY inlines SEDIT.INC into each .MAC file, these values
-    are present in every module.  To change them, either:
+    Two equates control compile-time features.  COLOR is defined
 
-    a) Edit SEDIT.INC and re-run CPMFMT.PY on all .MAC files
-       (requires restoring the INCLUDE directive first), or
+    in SESCREEN.MAC and SYNHI is defined in both SESCREEN.MAC and
 
-    b) Edit the inlined equates directly in each .MAC file that
-       uses them (SESCREEN.MAC and SESYNTAX.MAC).
+    SESYNTAX.MAC (not in SEDIT.INC, since they differ per build
+
+    variant).  SEBUILD.PY patches these values automatically.
 
     4.1  COLOR
 
@@ -318,8 +329,8 @@
 
     IMPORTANT: SYNHI must be set to the same value in both
     SESCREEN.MAC and SESYNTAX.MAC.  The SYNHI EQU in SESYNTAX.MAC
-    is defined before the imports/exports block (not inside the
-    inlined SEDIT.INC) because IF SYNHI guards appear in the
+    is defined after the INCLUDE SEDIT.INC directive (not inside
+    SEDIT.INC itself) because IF SYNHI guards appear in the
     EXTRN/PUBLIC declarations.
 
     Note: Syntax mode detection (SYNINIT) always runs regardless
@@ -678,8 +689,8 @@ r
 
     7.4  Monochrome Terminals
 
-    Set COLOR EQU 0 in SEDIT.INC (and in the inlined copies in
-    SESCREEN.MAC and SESYNTAX.MAC).  This eliminates all SGR color
+    Set COLOR EQU 0 in SESCREEN.MAC (patched by SEBUILD.PY or
+    edited manually).  This eliminates all SGR color
     sequences.  Bold, dim, and reverse video are still used for
     the info bar, ruler, and separator.
 
@@ -745,17 +756,21 @@ r
     instructions including but not limited to: EX, DJNZ, JR,
     LDIR, IX, IY, or alternate register sets.
 
-    8.5  SEDIT.INC Inlining Caveat
+    8.5  SEDIT.INC and M80 INCLUDE
 
-    CPMFMT.PY expands INCLUDE SEDIT.INC on the first run only.
-    After that, the INCLUDE directive is replaced by inlined content.
-    Subsequent runs of CPMFMT.PY only normalize line endings.
 
-    If SEDIT.INC is edited, the inlined copies in .MAC files are
-    NOT automatically updated.  You must either:
-      - Restore the INCLUDE directive in each affected .MAC file
-        and re-run CPMFMT.PY, or
-      - Manually update the inlined EQUs in each .MAC file
+
+    Each .MAC file includes SEDIT.INC via the M80 INCLUDE pseudo-op.
+
+    CPMFMT.PY does NOT append Ctrl-Z to .INC files, so M80 can
+
+    return to the parent .MAC file after processing the include.
+
+
+
+    Editing SEDIT.INC automatically affects all modules on the
+
+    next assembly.  No manual propagation is needed.
 
     In practice, the constants that differ between modules are
     COLOR and SYNHI (only used by SESCREEN.MAC and SESYNTAX.MAC).
