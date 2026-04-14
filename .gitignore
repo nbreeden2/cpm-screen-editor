@@ -27,6 +27,10 @@ Thumbs.db
 __pycache__/
 *.pyc
 
+# Ad artwork
+SEDIT-AD.*
+ad*.png
+
 # Local tooling
 .claude/
 build-1.bat
