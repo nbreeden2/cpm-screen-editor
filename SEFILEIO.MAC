@@ -52,6 +52,12 @@
         PUBLIC  FISAVFN         ; copy WRKFCB name to BD_FNAME
         PUBLIC  FISMOD          ; read BD_MODIF flag
         PUBLIC  WRKFCB          ; working FCB (for SEMENU)
+        PUBLIC  FILNBUF         ; filename buffer
+        PUBLIC  FIPARSN         ; parse filename with drive+user
+        PUBLIC  FILUSR          ; file's user number (FFH=unset)
+        PUBLIC  ORGUSR          ; original user number at startup
+        PUBLIC  FISWUSR         ; switch to file's user area
+        PUBLIC  FIRSTUSR        ; restore original user area
 
 ;=============================================================
 ; FIOPEN - Open a file and load it into the current buffer.
@@ -93,6 +99,9 @@ FISKIP:
 
         ; Zero the FCB control fields (CR, EX, S2, RC)
         CALL    FIRCB0
+
+        ; Switch to file's user area if specified
+        CALL    FISWUSR
 
         ; Attempt to open the file
         LXI     D,WRKFCB
@@ -221,6 +230,7 @@ FIFULL:
         LXI     D,WRKFCB
         MVI     C,BF_FCLOSE
         CALL    BDOS
+        CALL    FIRSTUSR        ; restore original user area
         CALL    FIBUFCLR        ; reset gap buffer to empty
         XRA     A
         STA     ISLOAD          ; clear loading flag
@@ -505,6 +515,7 @@ FIWIDE:
         LXI     D,WRKFCB
         MVI     C,BF_FCLOSE
         CALL    BDOS
+        CALL    FIRSTUSR        ; restore original user area
         CALL    FIBUFCLR        ; reset gap buffer to empty
         XRA     A
         STA     ISLOAD          ; clear loading flag
@@ -528,6 +539,9 @@ FIEOF:
         LXI     D,WRKFCB
         MVI     C,BF_FCLOSE
         CALL    BDOS
+
+        ; Restore original user area
+        CALL    FIRSTUSR
 
         ; If virtual mode, rebalance buffer around line 1
         ; so the gap has ~4 KB of editing headroom.
@@ -561,6 +575,9 @@ FISAVE:
         CALL    FISMOD
         ORA     A
         JZ      FSVSKP          ; not modified
+
+        ; Switch to file's user area for save
+        CALL    FISWUSR
 
         ; Build FCB from stored filename
         CALL    FIBLDFC
@@ -599,10 +616,13 @@ FSVVRT:
         CALL    VISAVALL
         JMP     FSVSKP
 
-FSVSKP: LXI     D,SAVEMSG
+FSVSKP: ; Restore original user area after save
+        CALL    FIRSTUSR
+        LXI     D,SAVEMSG
         JMP     STATMSG
 
-FSVERE: LXI     D,ERRMSG
+FSVERE: CALL    FIRSTUSR        ; restore user area on error too
+        LXI     D,ERRMSG
         CALL    STATMSG
         MVI     C,BF_CONIN
         JMP     BDOS            ; wait for any key
@@ -634,10 +654,14 @@ FIPROMPT:
         ORA     A
         JZ      FPCANC          ; empty input = cancel
 
-        ; Copy to FILNBUF, NUL-terminate
+        ; Copy to FILNBUF, NUL-terminate (max 17 chars)
         MVI     B,0
         MOV     C,A             ; C = length
-        LXI     H,RDLNBUF+2    ; source
+        MOV     A,C
+        CPI     18
+        JC      FPCPOK
+        MVI     C,17            ; cap at 17 chars
+FPCPOK: LXI     H,RDLNBUF+2    ; source
         LXI     D,FILNBUF       ; dest
 FPCPLP: MOV     A,M
         STAX    D
@@ -1097,11 +1121,16 @@ FBKLP2: LDAX    D
 
 ;------------------------------------------------------------
 ; FIPARSN - Parse filename in FILNBUF into WRKFCB.
-; Format: [d:]name[.ext]  (CP/M 8.3, upper-cased)
+; Format: [d[u]:] name[.ext]  (CP/M 8.3, upper-cased)
+;   d = drive letter A-P
+;   u = user number 0-15 (optional)
 ; Entry:  FILNBUF = NUL-terminated filename string
-; Exit:   WRKFCB populated; FIRCB0 called
+; Exit:   WRKFCB populated; FILUSR set; FIRCB0 called
 ;------------------------------------------------------------
 FIPARSN:
+        ; Reset FILUSR to FFH (unspecified)
+        MVI     A,0FFH
+        STA     FILUSR
         ; Zero WRKFCB
         LXI     H,WRKFCB
         MVI     B,FCB_SIZ
@@ -1121,17 +1150,100 @@ FPNSPL: MOV     M,A
 
         LXI     H,FILNBUF
 
-        ; Check for drive letter: if FILNBUF[1] = ':' then drive
+        ; Check for drive spec: scan first 4 chars for ':'
+        ; Formats: X: (drive only), X#: or X##: (drive+user)
         MOV     A,M             ; first char
         ORA     A
         RZ                      ; empty
-        INX     H
-        MOV     B,M             ; second char
-        DCX     H               ; back to start
-        MOV     A,B
+
+        ; Scan for ':' in first 4 chars to detect drive spec
+        PUSH    H               ; save FILNBUF start
+        MVI     B,4             ; check up to 4 chars
+        MVI     C,0             ; position counter
+FPNCLN: MOV     A,M
+        ORA     A
+        JZ      FPNCNF          ; NUL before colon - no drive
         CPI     ':'
-        JNZ     FPNND           ; no drive letter
-        ; Drive letter present
+        JZ      FPNCFD          ; found colon at position C
+        INX     H
+        INR     C
+        DCR     B
+        JNZ     FPNCLN
+FPNCNF: ; No colon found in first 4 chars - no drive spec
+        POP     H               ; restore to FILNBUF start
+        JMP     FPNND
+
+FPNCFD: ; Colon found at position C (0-based)
+        POP     H               ; HL = FILNBUF start
+        MOV     A,C
+        ORA     A
+        JZ      FPNND           ; colon at pos 0 - no drive, skip
+
+        ; Check first char: letter (A-P) or digit (0-9)?
+        MOV     A,M
+        CPI     '0'
+        JC      FPNND           ; below '0', not valid prefix
+        CPI     '9'+1
+        JC      FPNUON          ; digit first: user# only, no drive
+
+        ; First char is not a digit - check if letter A-P
+        ANI     5FH             ; upper case
+        CPI     'A'
+        JC      FPNND           ; not a letter, treat as filename
+        CPI     'P'+1
+        JNC     FPNND           ; past P, treat as filename
+
+        ; First char is a letter (drive). Check what follows.
+        MOV     A,C
+        CPI     1
+        JZ      FPNDRV          ; colon at pos 1: "X:" drive only
+
+        ; Position 2+: "X#:" or "X##:" - drive + user number
+        MOV     A,M             ; reload drive letter
+        ANI     5FH
+        SUI     'A'-1           ; A=1, B=2, ...
+        STA     WRKFCB+FCB_DR
+        INX     H               ; advance past drive letter
+        JMP     FPNUSR          ; parse user digits
+
+        ; --- User# only (first char is digit, no drive letter) ---
+        ; Formats: #: or ##: (default drive)
+FPNUON: ; HL -> first digit, colon follows after 1-2 digits
+
+        ; --- Parse 1-2 digit user number ---
+FPNUSR: MOV     A,M             ; first digit
+        SUI     '0'
+        JC      FPNND           ; not a digit
+        CPI     10
+        JNC     FPNND           ; not a digit
+        MOV     C,A             ; C = first digit value
+        INX     H
+        MOV     A,M             ; next char
+        CPI     ':'
+        JZ      FPNUDN          ; single digit, C = user number
+        ; Two-digit user number: C*10 + second digit
+        SUI     '0'
+        JC      FPNND           ; not a digit
+        CPI     10
+        JNC     FPNND
+        MOV     B,A             ; B = second digit
+        MOV     A,C
+        ADD     A               ; *2
+        ADD     A               ; *4
+        ADD     C               ; *5
+        ADD     A               ; *10
+        ADD     B               ; + second digit
+        MOV     C,A             ; C = user number
+        INX     H               ; advance to ':'
+FPNUDN: ; C = parsed user number, HL points to ':'
+        MOV     A,C
+        CPI     16
+        JNC     FPNND           ; user > 15, invalid
+        STA     FILUSR          ; store user number
+        INX     H               ; skip ':'
+        JMP     FPNND           ; continue with filename
+
+FPNDRV: ; Simple "X:" - drive letter only (no user#)
         MOV     A,M             ; get drive letter
         ANI     5FH             ; upper case
         SUI     'A'-1           ; A=1, B=2, ...
@@ -1188,6 +1300,30 @@ FPNESC: STAX    D
         DCR     B
         JNZ     FPNELP
         JMP     FIRCB0
+
+;------------------------------------------------------------
+; FISWUSR - Switch to file's user area.
+; If FILUSR != FFH, calls BDOS 32 to set user number.
+; Exit:   All regs clobbered.
+;------------------------------------------------------------
+FISWUSR:
+        LDA     FILUSR
+        CPI     0FFH
+        RZ                      ; unspecified, no switch
+        MOV     E,A
+        MVI     C,BF_USRNUM
+        JMP     BDOS
+
+;------------------------------------------------------------
+; FIRSTUSR - Restore original user area.
+; Always calls BDOS 32 with saved original user number.
+; Exit:   All regs clobbered.
+;------------------------------------------------------------
+FIRSTUSR:
+        LDA     ORGUSR
+        MOV     E,A
+        MVI     C,BF_USRNUM
+        JMP     BDOS
 
 ;=============================================================
 ; FIPRNUM - Print HL as decimal number (0-65535).
@@ -1286,8 +1422,8 @@ RDLNBUF: DB    79              ; max length
          DB    0               ; actual length (filled by BDOS)
          DS    80              ; input buffer
 
-; Parsed filename (NUL-terminated)
-FILNBUF: DS    16
+; Parsed filename (NUL-terminated, max d##:XXXXXXXX.XXX + NUL = 17)
+FILNBUF: DS    18
 
 ; FIWRITE temporaries
 FWGPBG: DW     0              ; gap begin (physical offset)
@@ -1307,6 +1443,10 @@ OVFLMSG: DB    'Large file: using virtual buffer...$'
 FIOAFN:  DB    0,'SEDIT00A','TMP'       ; AFTER temp FCB template
 FIWDM1:  DB    'Line $'
 FIWDM2:  DB    ' is wider than 255 characters.$'
+
+; User area tracking
+FILUSR: DB      0FFH            ; file's user number (FFH=unspecified)
+ORGUSR: DB      0               ; original user number at startup
 
 ; File load tracking
 FILNUM: DW      0               ; current line number during load

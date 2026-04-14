@@ -104,6 +104,14 @@
         PUBLIC  RSEPR           ; runtime separator row
         PUBLIC  RSTAT           ; runtime status row
 
+        EXTRN   FILUSR          ; file's user number (FFH=unset)
+        EXTRN   ORGUSR          ; original user number at startup
+        EXTRN   FISWUSR         ; switch to file's user area
+        EXTRN   FIRSTUSR        ; restore original user area
+        EXTRN   FILNBUF         ; filename buffer (SEFILEIO)
+        EXTRN   WRKFCB          ; working FCB (SEFILEIO)
+        EXTRN   FIPARSN         ; parse filename with drive+user
+
 ;=============================================================
 ; CODE SEGMENT
 ;=============================================================
@@ -119,6 +127,12 @@ START:
         DAD     SP
         SHLD    OLDSP           ; save for TPA calc
         LXI     SP,STKTOP       ; set our own stack
+
+        ; Save original user number
+        MVI     C,BF_USRNUM
+        MVI     E,0FFH          ; E=FFH = get current user
+        CALL    BDOS
+        STA     ORGUSR          ; save for restore on exit
 
         ; TPA top = BDOS handler address (operand of JMP at 0005H)
         LHLD    0006H           ; HL = BDOS address = TPA top
@@ -169,21 +183,21 @@ BFINLP: MVI     M,' '
         ; Initialize and clear screen, draw chrome
         CALL    SCRINIT
 
-        ; Parse optional temp drive from second command arg
-        ; Usage: SEDIT MYFILE.MAC B:
-        ; CCP puts drive byte at 006CH (second FCB)
-        ; 0=no arg, 1=A, 2=B, etc.
-        LDA     006CH           ; second FCB drive byte
-        STA     VTMPDRV
+        ; Parse command tail for filename and optional temp drive
+        ; Format: SEDIT [d[u]:]name[.ext] [d:]
+        ;   d = drive letter, u = user number (0-15)
+        ;   Second arg = virtual temp file drive (no user#)
+        ; Example: SEDIT C11:FILE.TXT F:
+        CALL    CLPARSE         ; parse command tail
 
         ; Initialize virtual buffer I/O (delete leftover temps)
         CALL    VIINIT
 
         ; Load file from command line arg if present
-        LDA     DFTFCB+1        ; first char of filename
-        CPI     ' '             ; space means no arg
+        LDA     CLHASF          ; did we find a filename?
+        ORA     A
         JZ      MAINLP          ; no file, skip load
-        LXI     D,DFTFCB        ; DE = FCB address
+        LXI     D,0             ; DE=0: WRKFCB already set
         CALL    FIOPEN          ; load into buffer 0
         INR     A               ; FFH -> 0 = error
         JZ      FILFAIL         ; file too large, exit
@@ -582,6 +596,8 @@ DXSAVE:
 
 DXEXIT:
         CALL    VICLEAN
+        ; Restore original user area
+        CALL    FIRSTUSR
         ; Restore terminal to initial column mode
         LDA     INITCOL
         ORA     A
@@ -1161,6 +1177,114 @@ SAVWMSG: DB    'Saving file, please wait...$'
 EXTSAVQ: DB    'Save changes? (Y/N/Esc) $'
 EXTASPMT: DB   'Save as: $'
 JNLMSG:  DB    'Line too long to join.$'
+CLUERR:  DB    'Error: cannot specify user# for temp drive.',CR,LF,'$'
+
+;------------------------------------------------------------
+; CLPARSE - Parse raw command tail into filename + temp drive.
+; Reads 0080H/0081H. Copies first arg to FILNBUF and calls
+; FIPARSN (which handles d[u]: prefix). Parses second arg
+; for virtual temp drive (drive only, no user#).
+; Exit:   CLHASF = 1 if filename found, 0 if not
+;         WRKFCB populated via FIPARSN
+;         FILUSR set if user# in first arg
+;         VTMPDRV set if second arg present
+;------------------------------------------------------------
+CLPARSE:
+        XRA     A
+        STA     CLHASF          ; no filename yet
+        STA     VTMPDRV         ; no temp drive yet
+
+        LDA     CMDTAIL         ; command tail length
+        ORA     A
+        RZ                      ; empty tail, nothing to do
+        MOV     B,A             ; B = remaining chars
+        LXI     H,CMDTAIL+1     ; HL = start of tail
+
+        ; Skip leading spaces
+CLSKP1: MOV     A,M
+        CPI     ' '
+        JNZ     CLARG1
+        INX     H
+        DCR     B
+        JNZ     CLSKP1
+        RET                     ; all spaces
+
+        ; --- First arg: filename ---
+CLARG1: MOV     A,B
+        ORA     A
+        RZ                      ; no more chars
+        ; Copy first arg to FILNBUF (up to 15 chars, stop at space/NUL)
+        LXI     D,FILNBUF
+        MVI     C,0             ; char count
+CLA1LP: MOV     A,B
+        ORA     A
+        JZ      CLA1DN          ; end of tail
+        MOV     A,M
+        CPI     ' '
+        JZ      CLA1DN          ; end of first arg
+        MOV     A,C
+        CPI     17              ; max FILNBUF chars (leave room for NUL)
+        JNC     CLA1SK          ; overflow, skip rest
+        MOV     A,M
+        STAX    D
+        INX     D
+        INR     C
+CLA1SK: INX     H
+        DCR     B
+        JMP     CLA1LP
+CLA1DN: XRA     A
+        STAX    D               ; NUL-terminate FILNBUF
+
+        ; Parse filename (sets WRKFCB, FILUSR)
+        CALL    FIPARSN
+        CALL    FISAVFN         ; copy WRKFCB to BD_FNAME
+
+        MVI     A,1
+        STA     CLHASF          ; we have a filename
+
+        ; --- Second arg: temp drive ---
+        ; Skip spaces between args
+CLSKP2: MOV     A,B
+        ORA     A
+        RZ                      ; no second arg
+        MOV     A,M
+        CPI     ' '
+        JNZ     CLARG2
+        INX     H
+        DCR     B
+        JMP     CLSKP2
+
+CLARG2: ; Second arg present - must be d: (drive only)
+        ; Check for letter followed by ':'
+        MOV     A,M             ; first char of second arg
+        ANI     5FH             ; upper case
+        CPI     'A'
+        JC      CLRET           ; not a letter, ignore
+        CPI     'P'+1
+        JNC     CLRET           ; past P, ignore
+        SUI     'A'-1           ; A=1, B=2, ...
+        STA     CLTDRV          ; save drive temporarily
+        INX     H
+        DCR     B
+        JZ      CLRET           ; only one char, ignore
+        MOV     A,M             ; second char
+        CPI     ':'
+        JNZ     CLUSRE          ; digit before colon = user# = error
+        ; Valid "X:" temp drive
+        LDA     CLTDRV
+        STA     VTMPDRV
+CLRET:  RET
+
+CLUSRE: ; Check if it's a digit (user# on temp drive = error)
+        CPI     '0'
+        JC      CLRET           ; not digit, just ignore
+        CPI     '9'+1
+        JNC     CLRET           ; not digit, just ignore
+        ; User# specified on temp drive - error
+        LXI     D,CLUERR
+        MVI     C,BF_PRTSTR
+        CALL    BDOS
+        JMP     WBOOT
 
 ;=============================================================
 ; DATA SEGMENT
@@ -1188,6 +1312,8 @@ RTXTCL: DB      TXTCOLS         ; runtime text columns (73 or 125)
 RSCRCL: DB      SCRCOLS         ; runtime screen columns (80 or 132)
 RTXTTB: DB      TXTCOLS-TABWID  ; runtime TXTCOLS-TABWID (69 or 121)
 VTMPDRV: DB     0               ; virtual temp file drive (0=default)
+CLHASF: DB      0               ; command line: has filename flag
+CLTDRV: DB      0               ; command line: temp drive scratch
 MLSROW: DB      0               ; saved CSROW for marking mode
 OLDTPLN: DW     0               ; saved TOPLN for scroll detect
 GOALCOL: DB     0FFH            ; target col for vertical moves (FF=unset)

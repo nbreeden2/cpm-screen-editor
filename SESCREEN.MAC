@@ -35,6 +35,7 @@
         EXTRN   REROWS          ; runtime edit rows (replaces EDITROW)
         EXTRN   RSEPR           ; runtime separator row (replaces SEPRROW)
         EXTRN   RSTAT           ; runtime status row (replaces STATROW)
+        EXTRN   FILUSR          ; file's user number (FFH=unspecified)
         IF SYNHI
         EXTRN   SYNLINE         ; tokenize line for highlighting
         EXTRN   SYNATTR         ; per-byte attribute buffer
@@ -105,7 +106,7 @@ SPRABV: DB      ' above$'
 SPREQS: DB      ' === $'
 SPRBLW: DB      ' below$'
 SPRDNA: DB      ' vvv$'
-SPRBLD: DB      ' V1.23 $'
+SPRBLD: DB      ' V1.24 $'
 SPRBLN  EQU     8               ; length of SPRBLD (excluding $)
 
 ;=============================================================
@@ -1213,7 +1214,25 @@ IBDRVOK:
         ADI     'A'             ; convert to letter
         PUSH    H               ; save BD_FNAME ptr across OUTCHAR
         CALL    OUTCHAR
-        MVI     A,':'
+        ; Show user# after drive letter if specified
+        LDA     FILUSR
+        CPI     0FFH
+        JZ      IBDRCL          ; unspecified, just show colon
+        ; Print user number (0-15)
+        CPI     10
+        JC      IBDR1D          ; single digit
+        ; Two digits: tens + ones
+        SUI     10
+        STA     IBUSRT          ; save ones digit
+        MVI     A,'1'
+        CALL    OUTCHAR
+        LDA     IBUSRT
+        ADI     '0'
+        CALL    OUTCHAR
+        JMP     IBDRCL
+IBDR1D: ADI     '0'
+        CALL    OUTCHAR
+IBDRCL: MVI     A,':'
         CALL    OUTCHAR
         POP     H               ; restore BD_FNAME ptr
         INX     H               ; HL -> BD_FNAME+1 (name start)
@@ -1973,6 +1992,7 @@ SCRCSV: DB      0               ; saved cursor row for SCREDCL
         ENDIF
 SLSKIP: DB      0               ; SLEDRAW horizontal skip target
 ISLOAD: DB      0               ; non-zero = file loading in progress
+IBUSRT: DB      0               ; INFOBAR: user# ones digit scratch
         CSEG
 
         END
