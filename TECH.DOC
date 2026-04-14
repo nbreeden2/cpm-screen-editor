@@ -24,8 +24,9 @@
 
     Module          Lines  Purpose
     -------         -----  -------
-    SEDIT.MAC        ~860  Entry point, main loop, action dispatch,
-                           TPA detection, buffer descriptor, dirty
+    SEDIT.MAC       ~1000  Entry point, main loop, action dispatch,
+                           TPA detection, command-line parsing,
+                           buffer descriptor, dirty
                            flag management
     SESCREEN.MAC    ~1740  Terminal I/O, screen rendering (SCRDRAW,
                            SCREDCL), info bar, cursor positioning,
@@ -35,8 +36,9 @@
     SEGAPBUF.MAC    ~3160  Gap buffer text engine: insert, delete,
                            cursor movement, line operations, word
                            movement, page up/down, line counting
-    SEFILEIO.MAC    ~1340  File load (FIOPEN) and save (FISAVE),
+    SEFILEIO.MAC    ~1440  File load (FIOPEN) and save (FISAVE),
                            FCB management, .BAK file handling,
+                           user area switching (FISWUSR/FIRSTUSR),
                            overflow to virtual buffer (FIOVFL)
     SEMENU.MAC       ~850  ESC menu overlay, 9 menu options with
                            handlers, column mode toggle, about box
@@ -429,15 +431,17 @@
 
     Initialization sequence:
       1. Save incoming stack pointer
-      2. Set stack to private STKTOP
-      3. Read TPATOP from CP/M page zero (0006H)
-      4. Calculate buffer size, check minimum (9 KB)
-      5. Initialize gap buffer (GBINIT)
-      6. Initialize key bindings (KBINIT)
-      7. Initialize screen (SCRINIT)
-      8. Initialize virtual I/O (VIINIT)
-      9. Load file from command-line FCB if present (FIOPEN)
-      10. Enter main loop (MAINLP)
+      2. Save current user number (BDOS 32)
+      3. Set stack to private STKTOP
+      4. Read TPATOP from CP/M page zero (0006H)
+      5. Calculate buffer size, check minimum (9 KB)
+      6. Initialize gap buffer (GBINIT)
+      7. Initialize key bindings (KBINIT)
+      8. Initialize screen (SCRINIT)
+      9. Parse command tail for filename and temp drive (CLPARSE)
+      10. Initialize virtual I/O (VIINIT)
+      11. Load file if present (FIOPEN, with user area switch)
+      12. Enter main loop (MAINLP)
 
     Main loop (MAINLP):
       1. Auto-scroll if cursor outside visible columns
@@ -812,6 +816,12 @@ r
 
     10. REVISION HISTORY
 
+    v1.24   CP/M user area support: d[u]: prefix on command
+            line and Save As (drive letter + user number 0-15).
+            FIPARSN extended for user number parsing.
+            FISWUSR/FIRSTUSR bracket file I/O with BDOS 32
+            user area switches.  Info bar shows user number.
+            Command tail parsed directly (not via CCP FCB).
     v1.23   Find and replace (^QA): interactive Y/N/A/Esc
             per match with reverse-video highlight.  Delete
             word right (^T).

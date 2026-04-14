@@ -19,8 +19,12 @@ Uses WordStar-compatible control key conventions with ANSI arrow key support.
 
 From the CP/M command prompt:
 
-    A>SEDIT              (start with empty buffer)
-    A>SEDIT MYFILE.TXT   (open a file directly)
+    A>SEDIT                    (start with empty buffer)
+    A>SEDIT MYFILE.TXT         (open a file directly)
+    A>SEDIT C:MYFILE.TXT       (open on drive C:)
+    A>SEDIT B3:MYFILE.TXT      (open on drive B:, user area 3)
+    A>SEDIT 11:MYFILE.TXT      (current drive, user area 11)
+    A>SEDIT MYFILE.TXT F:      (virtual temp files on F:)
 
 ### Screen Layout
 
@@ -36,7 +40,7 @@ The info bar (row 1) shows:
 
 | Field | Description |
 |-------|-------------|
-| Drive + filename | Current file (e.g. `A:MYFILE.TXT`) |
+| Drive + filename | Current file (e.g. `A:MYFILE.TXT` or `B3:MYFILE.TXT`) |
 | Lines | Total line count in buffer |
 | Row / Col | Cursor position (1-based) |
 | INS or OVR | Current editing mode |

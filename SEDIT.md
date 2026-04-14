@@ -54,11 +54,12 @@ Displays file metadata for the active buffer.
 
 ```
 A:MAIN    .MAC*  Lines:1024  Row: 142  Col:  35  [INS]
+B3:TEST   .C  *  Lines:  50  Row:  12  Col:   1  [INS]
 ```
 
 | Field | Description |
 |-------|-------------|
-| Drive + filename | `A:MAIN    .MAC` — CP/M drive letter and 8.3 filename (magenta if COLOR enabled) |
+| Drive + filename | `A:MAIN.MAC` or `B3:TEST.C` — CP/M drive letter, optional user number (0-15), and 8.3 filename (magenta if COLOR enabled) |
 | `*` after filename | Shown when the buffer has unsaved changes |
 | `Lines:nnnn` | Total number of lines in the file (blue if COLOR enabled) |
 | `Row:nnnn` | Current cursor line, 1-based (blue) |
@@ -526,32 +527,50 @@ Syntax mode is set automatically by SYNINIT based on file extension (`.MAC`, `.A
 
 ## 9. File I/O
 
-### 9.1 Load File
+### 9.1 Command Line
+
+```
+A>SEDIT                          Start with empty buffer
+A>SEDIT MYFILE.TXT               Open file on current drive and user area
+A>SEDIT C:MYFILE.TXT             Open file on drive C:
+A>SEDIT B3:MYFILE.TXT            Open file on drive B:, user area 3
+A>SEDIT 11:MYFILE.TXT            Open file on current drive, user area 11
+A>SEDIT C11:MYFILE.TXT F:        Drive C: user 11, virtual temp on F:
+```
+
+The command tail is parsed directly (not via the CCP default FCB) to support the `d[u]:` prefix format where `d` is a drive letter (A-P) and `u` is an optional user number (0-15). The second argument specifies the virtual temp file drive; user numbers are not allowed on the temp drive.
+
+If a user number is specified, SEDIT switches to that user area (BDOS function 32) for all file operations on the edited file, and restores the original user area when done. Virtual temp files are always created in the current user area on the temp drive.
+
+### 9.2 Load File
 
 1. Build FCB from filename; save filename into BD_FNAME
-2. Initialize gap buffer to empty
-3. Open via BDOS BF_FOPEN
-4. If not found: proceed as new empty file with `New file` status
-5. Read 128-byte records (BF_FREAD) sequentially into buffer:
+2. Switch to file's user area if specified (BDOS 32)
+3. Initialize gap buffer to empty
+4. Open via BDOS BF_FOPEN
+5. If not found: proceed as new empty file with `New file` status
+6. Read 128-byte records (BF_FREAD) sequentially into buffer:
    - Skip CPMEOF (`1AH`) markers
    - CR stored as-is (invisible in display)
    - LF marks line boundary
    - Lines wider than MAXCOLS (255) chars generate a warning
-6. Close file; move cursor to top; clear MODIFIED flag
-7. If virtual mode was activated during loading, rebalance the buffer around line 1 via VIGOTO to provide ~4 KB of editing headroom (without this, the gap would be only ~300-500 bytes after a large file load)
-8. Call SYNINIT to detect syntax mode from extension
+7. Close file; restore original user area
+8. Move cursor to top; clear MODIFIED flag
+9. If virtual mode was activated during loading, rebalance the buffer around line 1 via VIGOTO to provide ~4 KB of editing headroom (without this, the gap would be only ~300-500 bytes after a large file load)
+10. Call SYNINIT to detect syntax mode from extension
 
-### 9.2 Save File
+### 9.3 Save File
 
 1. Check BD_MODIF — skip if buffer is clean
-2. Build FCB from BD_FNAME
-3. Rename existing file to `.BAK` (delete old .BAK first)
-4. Create new file via BDOS BF_FMAKE
-5. Write buffer contents record-by-record (bytes written verbatim from gap buffer):
+2. Switch to file's user area if specified (BDOS 32)
+3. Build FCB from BD_FNAME
+4. Rename existing file to `.BAK` (delete old .BAK first)
+5. Create new file via BDOS BF_FMAKE
+6. Write buffer contents record-by-record (bytes written verbatim from gap buffer):
    - No CR+LF conversion needed — buffer already stores CR+LF pairs
    - Pad final 128-byte record with zeros
    - Append CPMEOF marker
-6. Close file; clear MODIFIED flag
+7. Close file; restore original user area; clear MODIFIED flag
 
 ---
 
@@ -616,12 +635,12 @@ All source files follow CP/M 8.3 naming. SEDIT is built from 12 modules plus a s
 
 | Source File | Purpose |
 |-------------|---------|
-| `SEDIT.MAC` | Entry point, main loop, action dispatch, memory allocation |
-| `SEDIT.INC` | Shared equates (inlined by CPMFMT.PY into each .MAC file) |
+| `SEDIT.MAC` | Entry point, main loop, action dispatch, command-line parsing, memory allocation |
+| `SEDIT.INC` | Shared equates included via M80 INCLUDE |
 | `SESCREEN.MAC` | VT100 output, screen rendering, info bar, cursor positioning |
 | `SEKEY.MAC` | Key input, VT100 escape sequence decoder, dispatch tables |
 | `SEGAPBUF.MAC` | Gap buffer text engine |
-| `SEFILEIO.MAC` | File load/save, FCB management, .BAK backup |
+| `SEFILEIO.MAC` | File load/save, FCB management, .BAK backup, user area switching |
 | `SEMENU.MAC` | ESC menu overlay, item dispatch, row 24 prompts |
 | `SESEARCH.MAC` | Find and replace |
 | `SEBLOCK.MAC` | Block mark, copy, delete, paste, clipboard buffer |
@@ -667,16 +686,18 @@ SEHELP must be the **last** module in the link order. `BMDATEND EQU $` is define
 ## 12. Startup Sequence
 
 1. Save incoming stack pointer; set local stack
-2. Read BDOS address from `0006H`; compute TPA top
-3. Calculate available RAM (TPATOP - BMDATEND); if < 9 KB, refuse to run
-4. Initialize single gap buffer (base = BMDATEND, size = available RAM)
-5. Set up buffer descriptor (BDESC0); fill BD_FNAME with spaces
-6. Load and parse `SEDIT.KEY`; fall back to compiled-in defaults if not found
-7. Detect terminal size via VT100 DSR: query row count and column width; set 132-column mode if detected; compute dynamic edit area rows (REROWS, RSEPR, RSTAT); save initial column mode for restore on exit
-8. Initialize screen: clear, draw info bar, ruler, separator
-9. If a filename was passed on command line (FCB at `005CH`), load file
-10. Draw initial edit area; position cursor at line 1, col 1
-11. Enter main edit loop
+2. Save current user number (BDOS 32) for restore on exit
+3. Read BDOS address from `0006H`; compute TPA top
+4. Calculate available RAM (TPATOP - BMDATEND); if < 9 KB, refuse to run
+5. Initialize single gap buffer (base = BMDATEND, size = available RAM)
+6. Set up buffer descriptor (BDESC0); fill BD_FNAME with spaces
+7. Load and parse `SEDIT.KEY`; fall back to compiled-in defaults if not found
+8. Detect terminal size via VT100 DSR: query row count and column width; set 132-column mode if detected; compute dynamic edit area rows (REROWS, RSEPR, RSTAT); save initial column mode for restore on exit
+9. Initialize screen: clear, draw info bar, ruler, separator
+10. Parse command tail for filename (with optional `d[u]:` prefix) and temp drive
+11. If a filename was given, load file (switching user area if specified)
+12. Draw initial edit area; position cursor at line 1, col 1
+13. Enter main edit loop
 
 ---
 
@@ -684,9 +705,10 @@ SEHELP must be the **last** module in the link order. `BMDATEND EQU $` is define
 
 1. If buffer is modified, prompt user to save
 2. Save as directed
-3. Restore terminal to column mode detected at startup (DECCOLM)
-4. Clear screen (`ESC [ 2 J ESC [ H`)
-5. Warm boot via `JMP 0000H`
+3. Restore original user area (BDOS 32)
+4. Restore terminal to column mode detected at startup (DECCOLM)
+5. Clear screen (`ESC [ 2 J ESC [ H`)
+6. Warm boot via `JMP 0000H`
 
 ---
 

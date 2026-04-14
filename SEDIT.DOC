@@ -61,6 +61,9 @@
 
         A>SEDIT                     Start with empty buffer
         A>SEDIT MYFILE.TXT          Open MYFILE.TXT for editing
+        A>SEDIT C:MYFILE.TXT        Open on drive C:
+        A>SEDIT B3:MYFILE.TXT       Open on drive B:, user area 3
+        A>SEDIT 11:MYFILE.TXT       Current drive, user area 11
         A>SEDIT MYFILE.TXT B:       Use drive B: for temp files
 
     If the named file exists, it is loaded into the edit buffer.  If
