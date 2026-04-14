@@ -630,7 +630,7 @@ All source files follow CP/M 8.3 naming. SEDIT is built from 12 modules plus a s
 |-------------|---------|
 | `SEDIT.MAC` | Entry point, main loop, action dispatch, command-line parsing, memory allocation |
 | `SEDIT.INC` | Shared equates included via M80 INCLUDE |
-| `SESCREEN.MAC` | VT100 output, screen rendering, info bar, cursor positioning |
+| `SESCREEN.MAC` | VT100 output, screen rendering, info bar, cursor positioning, terminal size detection (DETSIZ) |
 | `SEKEY.MAC` | Key input, VT100 escape sequence decoder, dispatch tables |
 | `SEGAPBUF.MAC` | Gap buffer text engine |
 | `SEFILEIO.MAC` | File load/save, FCB management, .BAK backup, user area switching |
@@ -641,6 +641,18 @@ All source files follow CP/M 8.3 naming. SEDIT is built from 12 modules plus a s
 | `SEKEYBND.MAC` | Key binding init from `SEDIT.KEY` |
 | `SEVIRTIO.MAC` | Virtual buffer I/O for large files |
 | `SEHELP.MAC` | Help screen overlay, BMDATEND marker |
+
+Alternate terminal drivers (replace SESCREEN/SEMENU/SEHELP in link command):
+
+| Source File | Purpose |
+|-------------|---------|
+| `SEADM31.MAC` | ADM-31 terminal driver (replaces SESCREEN.MAC) |
+| `SEC3102.MAC` | Cromemco 3102 terminal driver (replaces SESCREEN.MAC) |
+| `SEVT52.MAC` | VT52 terminal driver (replaces SESCREEN.MAC) |
+| `SEMENVT.MAC` | VT52 menu module (replaces SEMENU.MAC) |
+| `SEHELVT.MAC` | VT52 help screen (replaces SEHELP.MAC; linked last) |
+
+Terminal size detection (DETSIZ) is provided by each terminal driver: SESCREEN.MAC uses VT100 DSR for auto-detection; alternate drivers hardcode 80x24.
 
 Standalone utilities (not linked into SEDIT): `KEYCODE.MAC` (key diagnostic), `GETSIZE.MAC` (terminal size detection), `COL80.MAC` (set 80-column mode), `COL132.MAC` (set 132-column mode), `CLS.MAC` (clear screen).
 
@@ -669,6 +681,15 @@ L80 SEDIT,SESCREEN,SEKEY,SEGAPBUF,SEFILEIO,SEMENU,SESEARCH,SEBLOCK,SESYNTAX,SEKE
 ```
 
 Or use `SUBMIT BUILD` with `BUILD.SUB` on CP/M. To build the standalone utilities (GETSIZE, COL80, COL132, CLS, KEYCODE, MEMTEST, COLORS), use `SUBMIT TOOLS`.
+
+**VT52 variant** (replaces SESCREEN, SEMENU, SEHELP with VT52-specific modules):
+
+```
+M80 =SEVT52
+M80 =SEMENVT
+M80 =SEHELVT
+L80 SEDIT,SEVT52,SEKEY,SEGAPBUF,SEFILEIO,SEMENVT,SESEARCH,SEBLOCK,SESYNTAX,SEKEYBND,SEVIRTIO,SEHELVT,SEVT52/N/E
+```
 
 ### 11.2 Link Order Constraint
 

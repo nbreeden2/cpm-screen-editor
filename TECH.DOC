@@ -24,19 +24,20 @@
 
     Module          Lines  Purpose
     -------         -----  -------
-    SEDIT.MAC       ~1000  Entry point, main loop, action dispatch,
+    SEDIT.MAC        ~760  Entry point, main loop, action dispatch,
                            TPA detection, command-line parsing,
                            buffer descriptor, dirty
                            flag management
-    SESCREEN.MAC    ~1740  Terminal I/O, screen rendering (SCRDRAW,
+    SESCREEN.MAC    ~2200  Terminal I/O, screen rendering (SCRDRAW,
                            SCREDCL), info bar, cursor positioning,
-                           VT100 escape sequence output, SGR color
-    SEKEY.MAC        ~610  Keyboard input, VT100 escape sequence
+                           VT100 escape sequence output, SGR color,
+                           terminal size detection (DETSIZ)
+    SEKEY.MAC        ~640  Keyboard input, VT100/VT52 escape sequence
                            decoding, key type/action classification
     SEGAPBUF.MAC    ~3160  Gap buffer text engine: insert, delete,
                            cursor movement, line operations, word
                            movement, page up/down, line counting
-    SEFILEIO.MAC    ~1440  File load (FIOPEN) and save (FISAVE),
+    SEFILEIO.MAC    ~1500  File load (FIOPEN) and save (FISAVE),
                            FCB management, .BAK file handling,
                            user area switching (FISWUSR/FIRSTUSR),
                            overflow to virtual buffer (FIOVFL)
@@ -77,15 +78,21 @@
     2.3a Alternate Terminal Drivers
 
     SEADM31.MAC     ~1500  ADM-31 terminal driver (replaces
-    SEC3102.MAC     ~1200  Cromemco 3102 terminal driver (replaces
                            SESCREEN.MAC in link command)
+    SEVT52.MAC      ~1500  VT52 terminal driver (replaces
+                           SESCREEN.MAC in link command)
+    SEMENVT.MAC      ~520  VT52 menu module (replaces
+                           SEMENU.MAC in link command)
+    SEHELVT.MAC      ~255  VT52 help screen (replaces
+                           SEHELP.MAC in link command; linked last)
+    SEC3102.MAC     ~1450  Cromemco 3102 terminal driver (replaces
                            SESCREEN.MAC in link command)
 
     2.4  Build Scripts and Tools
 
     CPMFMT.PY              Python preprocessor (see section 3)
     SEBUILD.PY             Python EQU patcher for variant builds
-    build-all.bat          Windows build script (all 4 variants)
+    build-all.bat          Windows build script (all variants)
     BUILD.SUB              CP/M native build script (SUBMIT BUILD)
     TOOLS.SUB              CP/M standalone utility build (SUBMIT TOOLS)
 
@@ -816,6 +823,11 @@ r
 
     10. REVISION HISTORY
 
+    v1.25   VT52 terminal driver (SEVT52.MAC, SEMENVT.MAC,
+            SEHELVT.MAC).  DETSIZ moved from SEDIT.MAC to
+            terminal driver modules.  VT52 arrow keys
+            (ESC A/B/C/D) in SEKEY.MAC.  User number
+            display added to ADM-31 and 3102 drivers.
     v1.24   CP/M user area support: d[u]: prefix on command
             line and Save As (drive letter + user number 0-15).
             FIPARSN extended for user number parsing.

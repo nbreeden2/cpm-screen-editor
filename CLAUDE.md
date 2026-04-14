@@ -49,10 +49,10 @@ INFOBAR and CURPOS always run at MLDONE regardless of flags.
 | File | Purpose | Key Exports |
 |------|---------|-------------|
 | SEDIT.MAC | Entry point, main loop, action dispatch | INSMODE, DIRTY, CURBDP, TPATOP, DOEXIT |
-| SESCREEN.MAC | Terminal I/O, screen rendering | SCRINIT, SCRDRAW, SCREDCL, SCREDLN, INFOBAR, CURPOS, STATMSG, STATCLR, OUTSTR, OUTCHAR, CURGOTO |
-| SEKEY.MAC | Key input, VT100 ESC decode | GETKEY, KBDTBL |
+| SESCREEN.MAC | Terminal I/O, screen rendering, DETSIZ | SCRINIT, SCRDRAW, SCREDCL, SCREDLN, INFOBAR, CURPOS, STATMSG, STATCLR, OUTSTR, OUTCHAR, CURGOTO, DETSIZ |
+| SEKEY.MAC | Key input, VT100/VT52 ESC decode | GETKEY, KBDTBL |
 | SEGAPBUF.MAC | Gap buffer text engine | GBINIT, GBINSRT, GBDLFT, GBDELRT, GBMV*, GBPG*, GBDLLN, GBWRD*, GBGETLN, GBCNTLN, GBFNDCS, GBRDLNO, GBTMP |
-| SEFILEIO.MAC | File load/save (FCB, BDOS) | FIOPEN, FISAVE, FIPROMPT, FISAVFN, FISMOD |
+| SEFILEIO.MAC | File load/save (FCB, BDOS) | FIOPEN, FISAVE, FIPROMPT, FISAVFN, FISMOD, FISWUSR, FIRSTUSR |
 | SEMENU.MAC | ESC menu overlay | MNUSHOW |
 | SESEARCH.MAC | Find / replace | SRFNDNX, SRREPL |
 | SEBLOCK.MAC | Block mark, copy, delete, paste | BLMARK, BLCOPY, BLDEL, BLPASTE |
@@ -62,6 +62,18 @@ INFOBAR and CURPOS always run at MLDONE regardless of flags.
 | SEHELP.MAC | Help screen overlay, BMDATEND | HLPSHOW |
 | KEYCODE.MAC | Standalone key diagnostic (not linked) | — |
 | GETSIZE.MAC | Standalone terminal size detection (not linked) | — |
+
+Alternate terminal drivers (replace SESCREEN/SEMENU/SEHELP):
+
+| File | Purpose |
+|------|---------|
+| SEADM31.MAC | ADM-31 driver (replaces SESCREEN) |
+| SEC3102.MAC | Cromemco 3102 driver (replaces SESCREEN) |
+| SEVT52.MAC | VT52 driver (replaces SESCREEN) |
+| SEMENVT.MAC | VT52 menu (replaces SEMENU) |
+| SEHELVT.MAC | VT52 help (replaces SEHELP; linked last) |
+
+DETSIZ is EXTRN in SEDIT.MAC, PUBLIC in each terminal driver. SESCREEN.MAC has full VT100 DSR detection; alternate drivers hardcode 80x24.
 
 ## Gap Buffer Architecture (SEGAPBUF.MAC)
 
