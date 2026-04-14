@@ -1,35 +1,33 @@
 ;============================================================
-; FILE:    SEHELP.MAC
+; FILE:    SEHELVT.MAC
 ; PROJECT: SEDIT - Screen Editor for CP/M 2.2
 ; VERSION: 1.0
-; DATE:    1984-01-01
-; AUTHOR: Claude Code and RetroTechReboot
+; DATE:    2026-04-14
+; AUTHOR:  Claude Code and RetroTechReboot
 ;------------------------------------------------------------
 ; DESCRIPTION:
-;   Help screen display. HLPSHOW draws a two-column help
-;   reference overlay, waits for any key, then returns.
-;   The overlay uses reverse-video for the header line and
-;   normal text for the body.  Covers rows 1-24 fully.
-;------------------------------------------------------------
-; REVISION HISTORY:
-;   1.0  1984-01-01  Initial release
+;   VT52-compatible help screen display. Drop-in replacement
+;   for SEHELP.MAC. Uses VT52 escape sequences:
+;     Clear screen: ESC H ESC J
+;     Clear to EOL: ESC K
+;     Reverse video: ESC p / ESC q
+;
+;   MUST be linked LAST -- contains BMDATEND EQU $.
+;
+;   Build: M80 =SEHELVT
+;   Link:  (replace SEHELP with SEHELVT at end of link cmd)
 ;============================================================
 
 ;--- Imports ----------------------------------------------
-        EXTRN   CURGOTO         ; position cursor (B=row,C=col)
-        EXTRN   OUTSTR          ; write $-string to console
-        EXTRN   OUTCHAR         ; write single char
-        EXTRN   RSTAT           ; runtime status row
+        EXTRN   CURGOTO
+        EXTRN   OUTSTR
+        EXTRN   OUTCHAR
+        EXTRN   RSTAT
 
 ;--- Exports ----------------------------------------------
-        PUBLIC  HLPSHOW         ; show help and wait
-        PUBLIC  BMDATEND        ; end-of-DSEG marker (must link last)
+        PUBLIC  HLPSHOW
+        PUBLIC  BMDATEND
 
-;=============================================================
-; HLPSHOW - Display help screen, wait for keypress, return.
-; Entry:  (none)
-; Exit:   Screen dirty (caller sets DIRTY flag).
-;         All regs clobbered.
 ;=============================================================
         INCLUDE SEDIT.INC
 
@@ -48,7 +46,6 @@ HLPSHOW:
         CALL    OUTSTR
 
         ; Draw help lines (rows 3-23, 2 columns)
-        ; Index stored in HLPIDX (registers clobbered by calls)
         XRA     A
         STA     HLPIDX
 
@@ -66,7 +63,7 @@ HLPLP:  LDA     HLPIDX
         LDA     HLPIDX
         MOV     L,A
         MVI     H,0
-        DAD     H               ; *2
+        DAD     H
         LXI     D,HLPLTBL
         DAD     D
         MOV     E,M
@@ -108,20 +105,19 @@ HLPWAIT:
         LXI     D,HLPFTR
         CALL    OUTSTR
 
-        ; Drain any buffered keyboard input so a stale
-        ; keystroke from the menu cannot dismiss help instantly
+        ; Drain any buffered keyboard input
 HLPDRN: MVI     E,0FFH
         MVI     C,BF_RAWIO
         CALL    BDOS
         ORA     A
-        JNZ     HLPDRN          ; keep draining
+        JNZ     HLPDRN
 
-        ; Wait for a fresh keypress (non-blocking poll)
+        ; Wait for a fresh keypress
 HLPKEY: MVI     E,0FFH
         MVI     C,BF_RAWIO
         CALL    BDOS
         ORA     A
-        JZ      HLPKEY          ; no char yet, keep polling
+        JZ      HLPKEY
 
         ; Clear the footer line before returning
         LDA     RSTAT
@@ -135,20 +131,20 @@ HLPKEY: MVI     E,0FFH
         JMP     OUTSTR
 
 ;=============================================================
-; String constants
+; String constants — VT52 escape sequences
 ;=============================================================
 
-HLPCLR:  DB     ESC,'[0m',ESC,'[2J',ESC,'[H$'
-HLPCEL:  DB     ESC,'[K$'
-HLPNRM:  DB     ESC,'[0m$'
-HLPHDR:  DB     ESC,'[7m'
+HLPCLR:  DB     ESC,'H',ESC,'J','$'            ; home + erase to end
+HLPCEL:  DB     ESC,'K','$'                    ; erase to end of line
+HLPNRM:  DB     ESC,'q','$'                    ; reverse video off
+HLPHDR:  DB     ESC,'p'                        ; reverse video on
          DB     ' SEDIT v1.25 Key Reference'
          DB     '                              '
-         DB     ESC,'[0m$'
-HLPFTR:  DB     ESC,'[7m'
+         DB     ESC,'q','$'                    ; reverse video off
+HLPFTR:  DB     ESC,'p'                        ; reverse video on
          DB     ' Press any key to return...   '
          DB     '                              '
-         DB     ESC,'[0m$'
+         DB     ESC,'q','$'                    ; reverse video off
 
 ; Left column lines (40 chars max each, $-terminated)
 HLL01:  DB  '^E   Cursor up             $'
@@ -194,11 +190,9 @@ HLR18:  DB  'F3   Block mark            $'
 HLR19:  DB  'F4   Menu                  $'
 HLR20:  DB  '^M   Insert newline        $'
 
-HLPLINES EQU    20              ; number of help line pairs
+HLPLINES EQU    20
 
-; Pointer tables in CSEG: immune to DSEG corruption from
-; gap buffer or other data operations.
-; Left column text pointer table (word per line)
+; Pointer tables in CSEG
 HLPLTBL:
         DW      HLL01
         DW      HLL02
@@ -221,7 +215,6 @@ HLPLTBL:
         DW      HLL19
         DW      HLL20
 
-; Right column text pointer table
 HLPRTBL:
         DW      HLR01
         DW      HLR02
@@ -246,11 +239,7 @@ HLPRTBL:
 
 ;------------------------------------------------------------
 ; BMDATEND - marks the end of all static data.
-; This MUST be in CSEG at the very end of the last-linked
-; module, because L80 lays out [DSEG][CSEG] per module.
-; Placing it in DSEG would miss SEHELP's CSEG content
-; (HLPSHOW code, help strings, pointer tables), and the
-; gap buffer starting at BMDATEND would overwrite them.
+; MUST be in CSEG at the very end of the last-linked module.
 ;------------------------------------------------------------
 BMDATEND EQU    $
 
@@ -259,7 +248,6 @@ BMDATEND EQU    $
 ;=============================================================
         DSEG
 
-; Loop index for help display
 HLPIDX: DB      0
 
         END

@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SEDIT v1.24 - The Screen Editor for CP/M</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;700&family=Special+Elite&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: #2a2a2a;
+    display: flex;
+    justify-content: center;
+    padding: 30px 20px;
+  }
+
+  @page {
+    size: letter;
+    margin: 0;
+  }
+
+  @media print {
+    body { background: none; padding: 0; }
+    .page { box-shadow: none; border: none; }
+  }
+
+  .page {
+    width: 8.5in;
+    height: 11in;
+    background: #f5f0e0;
+    padding: 0.4in 0.5in;
+    font-family: 'Special Elite', 'Courier New', monospace;
+    color: #1a1a1a;
+    border: 2px solid #000;
+    box-shadow: 8px 8px 0 #000;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .border-outer {
+    border: 3px double #000;
+    padding: 16px 22px;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* --- Header / Logo --- */
+  .header {
+    text-align: center;
+    margin-bottom: 4px;
+  }
+
+  .logo-row {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 24px;
+  }
+
+  .logo pre {
+    font-family: 'IBM Plex Mono', 'Courier New', monospace;
+    font-size: 18px;
+    font-weight: 700;
+    line-height: 1.05;
+    text-align: left;
+  }
+
+  .logo-right {
+    text-align: left;
+  }
+
+  .logo-right .ver {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 28px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+  }
+
+  .logo-right .sub {
+    font-size: 10px;
+    letter-spacing: 0.15em;
+    margin-top: 2px;
+  }
+
+  .tagline {
+    text-align: center;
+    font-size: 14px;
+    letter-spacing: 0.4em;
+    font-weight: bold;
+    margin: 6px 0;
+    padding: 5px 0;
+    border-top: 2.5px solid #000;
+    border-bottom: 2.5px solid #000;
+  }
+
+  /* --- Hook --- */
+  .hook {
+    text-align: center;
+    margin: 8px 0 6px 0;
+  }
+
+  .hook .tired {
+    font-size: 15px;
+    font-weight: bold;
+    line-height: 1.55;
+  }
+
+  .hook .intro {
+    font-size: 12.5px;
+    margin-top: 5px;
+    line-height: 1.4;
+  }
+
+  /* --- Screen mockup --- */
+  .screen-wrap {
+    display: flex;
+    justify-content: center;
+    margin: 8px 0;
+  }
+
+  .screen {
+    background: #0a2a0a;
+    color: #33ff33;
+    font-family: 'IBM Plex Mono', 'Courier New', monospace;
+    font-size: 10px;
+    line-height: 1.4;
+    padding: 10px 14px;
+    border: 3px solid #222;
+    border-radius: 12px;
+    width: 92%;
+    box-shadow: inset 0 0 40px rgba(0,255,0,0.06), 0 2px 12px rgba(0,0,0,0.35);
+  }
+
+  .screen .infobar { color: #ff55ff; font-weight: bold; }
+  .screen .ruler   { color: #666; }
+  .screen .linenum { color: #55ff55; font-weight: bold; }
+  .screen .comment { color: #55ffff; }
+  .screen .opcode  { color: #ffff55; font-weight: bold; }
+  .screen .label   { color: #ffffff; font-weight: bold; }
+  .screen .sep     { color: #777; }
+  .screen .status  { color: #33ff33; }
+
+  /* --- Features --- */
+  h2 {
+    font-size: 13px;
+    margin: 8px 0 6px 0;
+    letter-spacing: 0.06em;
+  }
+
+  .features {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 2px 28px;
+    margin-bottom: 4px;
+  }
+
+  .feature {
+    display: flex;
+    gap: 8px;
+    font-size: 10.5px;
+    line-height: 1.35;
+    padding: 2px 0;
+  }
+
+  .feature .bullet {
+    flex-shrink: 0;
+    font-weight: bold;
+  }
+
+  .feature .fname {
+    font-weight: bold;
+  }
+
+  .feature .fdesc {
+    font-size: 9.5px;
+    color: #333;
+  }
+
+  .new-badge {
+    display: inline-block;
+    background: #000;
+    color: #f5f0e0;
+    padding: 0 5px;
+    font-size: 8px;
+    font-weight: bold;
+    vertical-align: middle;
+    letter-spacing: 0.1em;
+  }
+
+  .footnote {
+    font-size: 8.5px;
+    font-style: italic;
+    margin: 2px 0 6px 0;
+    color: #555;
+  }
+
+  .divider {
+    border: none;
+    border-top: 1.5px solid #000;
+    margin: 6px 0;
+  }
+
+  /* --- Editions row --- */
+  .editions-section h2 {
+    text-align: center;
+    margin-bottom: 4px;
+  }
+
+  .editions {
+    display: flex;
+    justify-content: center;
+    gap: 10px;
+    font-size: 10.5px;
+    margin: 4px 0 6px 0;
+  }
+
+  .edition {
+    text-align: center;
+    border: 1px solid #999;
+    padding: 4px 14px;
+    background: #ebe6d4;
+  }
+
+  .edition code {
+    font-family: 'IBM Plex Mono', monospace;
+    font-weight: bold;
+    font-size: 11px;
+  }
+
+  .edition .edesc {
+    font-size: 9px;
+    color: #444;
+    margin-top: 1px;
+  }
+
+  /* --- Bottom: requirements + available --- */
+  .bottom-section {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin: 4px 0;
+    font-size: 10.5px;
+    line-height: 1.55;
+  }
+
+  .requirements b, .available b {
+    font-size: 11px;
+  }
+
+  .available {
+    text-align: right;
+  }
+
+  /* --- CTA box --- */
+  .cta {
+    text-align: center;
+    border: 3px double #000;
+    padding: 8px 20px;
+    margin: 8px auto 6px auto;
+    max-width: 78%;
+    background: #ebe6d4;
+  }
+
+  .cta .line1 {
+    font-size: 13px;
+    font-weight: bold;
+    line-height: 1.45;
+  }
+
+  .cta .slogan {
+    font-size: 16px;
+    font-weight: bold;
+    font-style: italic;
+    margin-top: 4px;
+  }
+
+  /* --- Footer --- */
+  .footer {
+    text-align: center;
+    font-size: 10.5px;
+    margin-top: auto;
+    padding-top: 4px;
+    letter-spacing: 0.06em;
+  }
+</style>
+</head>
+<body>
+<div class="page">
+<div class="border-outer">
+
+<!-- LOGO -->
+<div class="header">
+  <div class="logo-row">
+    <div class="logo"><pre>███████ ███████ ██████  ██ ████████
+██      ██      ██   ██ ██    ██
+███████ █████   ██   ██ ██    ██
+     ██ ██      ██   ██ ██    ██
+███████ ███████ ██████  ██    ██</pre></div>
+    <div class="logo-right">
+      <div class="ver">v1.24</div>
+      <div class="sub">CP/M 2.2 &bull; INTEL 8080</div>
+    </div>
+  </div>
+</div>
+
+<div class="tagline">T H E &nbsp; S C R E E N &nbsp; E D I T O R &nbsp; F O R &nbsp; C P / M</div>
+
+<!-- HOOK -->
+<div class="hook">
+  <div class="tired">
+    TIRED OF LINE EDITORS? &nbsp; TIRED OF COUNTING LINE NUMBERS?<br>
+    TIRED OF TYPING &ldquo;L&rdquo; JUST TO SEE YOUR OWN CODE?
+  </div>
+  <div class="intro">Now there's <b>SEDIT</b> &mdash; the full-screen editor that turns your VT100 terminal into a real programming workstation.</div>
+</div>
+
+<!-- SCREEN MOCKUP -->
+<div class="screen-wrap">
+<div class="screen">
+<span class="infobar"> A:MAIN    .MAC   Lines: 342  Row:  17  Col:  12  [INS]  [Free:28416]</span>
+<br><span class="ruler"> &middot;&middot;&middot;&middot;:&middot;&middot;&middot;:&middot;&middot;&middot;:&middot;&middot;&middot;:&middot;&middot;&middot;:&middot;&middot;&middot;:&middot;&middot;&middot;:&middot;&middot;&middot;:&middot;&middot;&middot;:&middot;&middot;&middot;:&middot;&middot;&middot;:&middot;&middot;&middot;:&middot;&middot;&middot;:&middot;&middot;&middot;:&middot;&middot;&middot;:&middot;</span>
+<br><span class="linenum">   1 </span><span class="comment">;========================================</span>
+<br><span class="linenum">   2 </span><span class="comment">; SEDIT - Screen Editor for CP/M 2.2</span>
+<br><span class="linenum">   3 </span><span class="comment">;========================================</span>
+<br><span class="linenum">   4 </span>        <span class="opcode">INCLUDE</span> SEDIT.INC
+<br><span class="linenum">   5 </span>
+<br><span class="linenum">   6 </span><span class="label">START:</span>  <span class="opcode">LXI</span>     SP,STKTOP
+<br><span class="linenum">   7 </span>        <span class="opcode">CALL</span>    SCRINIT
+<br><span class="linenum">   8 </span>        <span class="opcode">CALL</span>    GBINIT
+<br>                            <span style="color:#888">. . .</span>
+<br><span class="sep"> ══════════════════════════════════ V1.24 ══════════════════════════════════</span>
+<br><span class="status"> File loaded.</span>
+</div>
+</div>
+
+<!-- FEATURES -->
+<h2>FEATURES THAT PUT YOU IN CONTROL:</h2>
+
+<div class="features">
+  <div class="feature">
+    <span class="bullet">&bull;</span>
+    <div><span class="fname">FULL-SCREEN EDITING</span> with line numbers<br>
+    <span class="fdesc">See your entire file &mdash; not just one line at a time.</span></div>
+  </div>
+  <div class="feature">
+    <span class="bullet">&bull;</span>
+    <div><span class="fname">WORDSTAR-COMPATIBLE</span> control keys<br>
+    <span class="fdesc">^E ^X ^S ^D and all the rest &mdash; they're all here.</span></div>
+  </div>
+  <div class="feature">
+    <span class="bullet">&bull;</span>
+    <div><span class="fname">FIND &amp; REPLACE</span> with highlighting<br>
+    <span class="fdesc">Interactive Y/N/A per match. No blind substitutions.</span></div>
+  </div>
+  <div class="feature">
+    <span class="bullet">&bull;</span>
+    <div><span class="fname">SYNTAX HIGHLIGHTING</span>&thinsp;* for ASM and C<br>
+    <span class="fdesc">Keywords, strings, comments &mdash; all in living color.</span></div>
+  </div>
+  <div class="feature">
+    <span class="bullet">&bull;</span>
+    <div><span class="fname">VIRTUAL BUFFER MODE</span> for large files<br>
+    <span class="fdesc">Edit files LARGER than your TPA. Automatic disk paging.</span></div>
+  </div>
+  <div class="feature">
+    <span class="bullet">&bull;</span>
+    <div><span class="fname">BLOCK OPERATIONS</span><br>
+    <span class="fdesc">Mark, copy, delete, and paste. Just like the big boys.</span></div>
+  </div>
+  <div class="feature">
+    <span class="bullet">&bull;</span>
+    <div><span class="fname">AUTO-DETECT TERMINAL</span> size at startup<br>
+    <span class="fdesc">80 or 132 columns? 24 or 30 rows? Automatic.</span></div>
+  </div>
+  <div class="feature">
+    <span class="bullet">&bull;</span>
+    <div><span class="fname">CP/M USER AREA SUPPORT</span> <span class="new-badge">NEW</span><br>
+    <span class="fdesc">All 16 user areas. <code>SEDIT B3:MYFILE.MAC</code> &mdash; done.</span></div>
+  </div>
+  <div class="feature">
+    <span class="bullet">&bull;</span>
+    <div><span class="fname">RUNS ON ANY 8080</span> or compatible<br>
+    <span class="fdesc">No Z80 required! 8080, 8085, Z80, NSC800.</span></div>
+  </div>
+  <div class="feature">
+    <span class="bullet">&bull;</span>
+    <div><span class="fname">CONFIGURABLE KEY BINDINGS</span><br>
+    <span class="fdesc">Load your own key map from disk.</span></div>
+  </div>
+</div>
+
+<div class="footnote">* Color features require VT100/ANSI color-capable terminal.</div>
+
+<hr class="divider">
+
+<!-- EDITIONS -->
+<div class="editions-section">
+  <h2>FOUR EDITIONS TO MATCH YOUR SYSTEM:</h2>
+  <div class="editions">
+    <div class="edition"><code>SEDIT.COM</code><div class="edesc">Monochrome</div></div>
+    <div class="edition"><code>SEDIT-CL.COM</code><div class="edesc">Color</div></div>
+    <div class="edition"><code>SEDIT-A.COM</code><div class="edesc">ASM Highlighting</div></div>
+    <div class="edition"><code>SEDIT-C.COM</code><div class="edesc">C Highlighting</div></div>
+  </div>
+</div>
+
+<hr class="divider">
+
+<!-- BOTTOM: REQUIREMENTS + AVAILABLE -->
+<div class="bottom-section">
+  <div class="requirements">
+    <b>SYSTEM REQUIREMENTS:</b><br>
+    &bull; CP/M 2.2 or compatible<br>
+    &bull; Intel 8080 or compatible CPU<br>
+    &bull; VT100/ANSI terminal<br>
+    &bull; 9 KB free TPA (minimum)<br>
+    &bull; One disk drive
+  </div>
+  <div class="available">
+    <b>AVAILABLE NOW.</b><br>
+    Complete 8080 assembly source included.<br>
+    No secrets. No blobs.<br><br>
+    Written in <b>13,500 lines</b> of<br>
+    hand-crafted 8080 assembly.
+  </div>
+</div>
+
+<!-- CTA -->
+<div class="cta">
+  <div class="line1">STOP EDITING THE HARD WAY.<br>
+  PUT A SCREEN EDITOR ON YOUR CP/M SYSTEM.</div>
+  <div class="slogan">SEDIT &mdash; BECAUSE LIFE IS TOO SHORT FOR ED.</div>
+</div>
+
+<!-- FOOTER -->
+<div class="footer">
+  RetroTechReboot &bull; github.com/nbreeden2/cpm-screen-editor
+</div>
+
+</div><!-- border-outer -->
+</div><!-- page -->
+</body>
+</html>

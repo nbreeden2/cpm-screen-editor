@@ -36,6 +36,14 @@
         EXTRN   RSEPR           ; runtime separator row (replaces SEPRROW)
         EXTRN   RSTAT           ; runtime status row (replaces STATROW)
         EXTRN   FILUSR          ; file's user number (FFH=unspecified)
+        EXTRN   COLMOD          ; column mode (0=80, 1=132)
+        EXTRN   RTXTTB          ; runtime TXTCOLS-TABWID
+        EXTRN   INITCOL         ; initial column mode at startup
+        EXTRN   DSROWS          ; detected terminal rows
+        EXTRN   DSCOLS          ; detected terminal columns
+        EXTRN   DSCPBUF         ; DSR collect buffer
+        EXTRN   DSCPWR          ; DSR collect write index
+        EXTRN   DSCPTM          ; DSR temp byte
         IF SYNHI
         EXTRN   SYNLINE         ; tokenize line for highlighting
         EXTRN   SYNATTR         ; per-byte attribute buffer
@@ -59,6 +67,7 @@
         PUBLIC  CURGOTO         ; goto row,col
         PUBLIC  OUTN4DG         ; output 4-digit number
         PUBLIC  ISLOAD          ; loading flag (for info bar)
+        PUBLIC  DETSIZ          ; terminal size detection (VT100 DSR)
 
 ;--- ESC sequence string constants --------------------
 ESCSTR:  DB     ESC,'[','$'     ; ESC [  (CSI intro)
@@ -106,7 +115,7 @@ SPRABV: DB      ' above$'
 SPREQS: DB      ' === $'
 SPRBLW: DB      ' below$'
 SPRDNA: DB      ' vvv$'
-SPRBLD: DB      ' V1.24 $'
+SPRBLD: DB      ' V1.25 $'
 SPRBLN  EQU     8               ; length of SPRBLD (excluding $)
 
 ;=============================================================
@@ -1961,6 +1970,193 @@ OUTHL4:
         XRA     A
         STA     OHLFLAG         ; reset leading zero flag
         JMP     OUTHL
+
+;=============================================================
+; DETSIZ - Detect terminal size via VT100 DSR (ESC[6n).
+; Sends save-cursor + far-corner + DSR as one burst, collects
+; the response into DSCPBUF with timeout, parses offline.
+; On error, leaves 80-col 24-row defaults.
+; Exit:   COLMOD, RTXTCL, RSCRCL, RTXTTB set if 132-col
+;         INITCOL, DSROWS, DSCOLS, REROWS, RSEPR, RSTAT set
+;         All regs clobbered
+;=============================================================
+DETSIZ:
+        ; Phase 1: Send all output
+        LXI     H,DSALL
+        CALL    DTSOUT
+        ; Phase 2: Collect response with timeout
+        XRA     A
+        STA     DSCPWR
+DTCOLL: LXI     B,10000
+DTCOLP: PUSH    B
+        MVI     E,0FFH
+        MVI     C,BF_RAWIO
+        CALL    BDOS
+        POP     B
+        ORA     A
+        JZ      DTCNOB
+        STA     DSCPTM
+        PUSH    B
+        PUSH    H
+        LDA     DSCPWR
+        MOV     L,A
+        MVI     H,0
+        LXI     D,DSCPBUF
+        DAD     D
+        LDA     DSCPTM
+        MOV     M,A
+        LDA     DSCPWR
+        INR     A
+        STA     DSCPWR
+        POP     H
+        POP     B
+        JMP     DTCOLL
+DTCNOB: DCX     B
+        MOV     A,B
+        ORA     C
+        JNZ     DTCOLP
+        ; Phase 3: Parse DSCPBUF for [row;colR
+        LXI     H,DSCPBUF
+        LDA     DSCPWR
+        ORA     A
+        JZ      DTFAIL
+        MOV     B,A
+DTPBRK: MOV     A,M
+        CPI     '['
+        JZ      DTPFND
+        INX     H
+        DCR     B
+        JNZ     DTPBRK
+        JMP     DTFAIL
+DTPFND: INX     H
+        DCR     B
+        JZ      DTFAIL
+        LXI     D,0
+DTPROW: MOV     A,M
+        CPI     ';'
+        JZ      DTPRGOT
+        SUI     '0'
+        MOV     C,A
+        PUSH    H
+        MOV     H,D
+        MOV     L,E
+        PUSH    B
+        MOV     B,H
+        MOV     C,L
+        DAD     H
+        DAD     H
+        DAD     B
+        DAD     H
+        POP     B
+        MVI     B,0
+        DAD     B
+        MOV     D,H
+        MOV     E,L
+        POP     H
+        INX     H
+        DCR     B
+        JNZ     DTPROW
+        JMP     DTFAIL
+DTPRGOT:
+        XCHG
+        SHLD    DSROWS
+        XCHG
+        INX     H
+        DCR     B
+        JZ      DTFAIL
+        LXI     D,0
+DTPCOL: MOV     A,M
+        CPI     'R'
+        JZ      DTPCGOT
+        SUI     '0'
+        MOV     C,A
+        PUSH    H
+        MOV     H,D
+        MOV     L,E
+        PUSH    B
+        MOV     B,H
+        MOV     C,L
+        DAD     H
+        DAD     H
+        DAD     B
+        DAD     H
+        POP     B
+        MVI     B,0
+        DAD     B
+        MOV     D,H
+        MOV     E,L
+        POP     H
+        INX     H
+        DCR     B
+        JNZ     DTPCOL
+        JMP     DTFAIL
+DTPCGOT:
+        XCHG
+        SHLD    DSCOLS
+        ; Phase 4: Restore cursor and set modes
+        LXI     H,DTRST
+        CALL    DTSOUT
+        LHLD    DSCOLS
+        MOV     A,H
+        ORA     A
+        JNZ     DT132
+        MOV     A,L
+        CPI     81
+        JNC     DT132
+        XRA     A
+        STA     INITCOL
+        JMP     DTSETR
+DT132:  MVI     A,1
+        STA     COLMOD
+        STA     INITCOL
+        MVI     A,125
+        STA     RTXTCL
+        MVI     A,132
+        STA     RSCRCL
+        MVI     A,121
+        STA     RTXTTB
+DTSETR: LHLD    DSROWS
+        MOV     A,L
+        CPI     24
+        JNC     DTRMXC
+        MVI     A,24
+        JMP     DTROK
+DTRMXC: CPI     77
+        JC      DTROK
+        MVI     A,76
+DTROK:  STA     RSTAT
+        DCR     A
+        STA     RSEPR
+        LDA     RSTAT
+        SUI     4
+        STA     REROWS
+        RET
+DTFAIL: LXI     H,DTRST
+        CALL    DTSOUT
+        XRA     A
+        STA     INITCOL
+        LXI     H,24
+        SHLD    DSROWS
+        RET
+
+;--- DTSOUT: NUL-terminated string output via BDOS RAWIO ---
+DTSOUT: MOV     A,M
+        ORA     A
+        RZ
+        MOV     E,A
+        PUSH    H
+        MVI     C,BF_RAWIO
+        CALL    BDOS
+        POP     H
+        INX     H
+        JMP     DTSOUT
+
+;--- DETSIZ string constants (NUL-terminated) ---
+DSALL:  DB      ESC,'7'
+        DB      ESC,'[','9','9','9',';','9','9','9','H'
+        DB      ESC,'[','6','n'
+        DB      0
+DTRST:  DB      ESC,'8',0
 
 ;--- Data for OUTHL leading-zero suppression ----------
         DSEG

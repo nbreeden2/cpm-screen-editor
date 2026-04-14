@@ -1,34 +1,29 @@
 ;============================================================
-; FILE:    SEC3102.MAC
+; FILE:    SEVT52.MAC
 ; PROJECT: SEDIT - Screen Editor for CP/M 2.2
 ; VERSION: 1.0
-; DATE:    2026-04-05
+; DATE:    2026-04-14
+; AUTHOR:  Claude Code and RetroTechReboot
 ;------------------------------------------------------------
 ; DESCRIPTION:
-;   Cromemco 3102 (Beehive DM10/DM30) terminal driver for
-;   SEDIT. Drop-in replacement for SESCREEN.MAC. Same PUBLIC
-;   exports, same EXTRN imports (minus SYNHI-dependent ones).
-;   No color, no syntax highlighting rendering.
+;   VT52 terminal driver for SEDIT. Drop-in replacement
+;   for SESCREEN.MAC. Same PUBLIC exports, same EXTRN imports
+;   (minus SYNHI-dependent ones). No color, no syntax
+;   highlighting rendering. Uses VT52 escape sequences:
 ;
-;   Cromemco 3102 escape sequences:
-;     Cursor address: ESC F line+20H col+20H
-;     Clear screen:   ESC E
+;     Cursor address: ESC Y row+20H col+20H
+;     Clear screen:   ESC H ESC J (home + erase to end)
 ;     Clear to EOL:   ESC K
-;     Cursor home:    ESC H
-;     Reverse video:  ESC d P / ESC d @
-;     Normal video:   ESC m
-;     Insert line:    ESC L
-;     Delete line:    ESC M
-;     Cursor up:      ESC A
-;     Cursor down:    ESC B
-;     Cursor right:   ESC C
-;     Cursor left:    ESC D
+;     Reverse video:  ESC p / ESC q (many VT52 clones)
 ;
-;   Arrow keys send: ^K(up) ^J(down) ^H(left) ^L(right)
-;   which match WordStar bindings already in SEKEY.MAC.
+;   NOTE: The base DEC VT52 has no reverse video or other
+;   attributes. Many clones (Heath H19, Soroc IQ-120,
+;   Televideo 912/920) add ESC p/ESC q for reverse video.
+;   On a strict VT52, block highlighting and menu selection
+;   will not be visually indicated.
 ;
-;   Build: M80 =SEC3102
-;   Link:  L80 SEDIT,SEC3102,SEKEY,SEGAPBUF,SEFILEIO,
+;   Build: M80 =SEVT52
+;   Link:  L80 SEDIT,SEVT52,SEKEY,SEGAPBUF,SEFILEIO,
 ;              SEMENU,SESEARCH,SEBLOCK,SESYNTAX,SEKEYBND,
 ;              SEVIRTIO,SEHELP,SEDIT/N/E
 ;============================================================
@@ -44,11 +39,11 @@
         EXTRN   GBGETLN
         EXTRN   GBCURLN
         EXTRN   GBCNTLN
-        EXTRN   GBGAPBG
-        EXTRN   GBGAPEN
         EXTRN   VBFLN
         EXTRN   VAFLN
         EXTRN   VIMODE
+        EXTRN   GBGAPBG
+        EXTRN   GBGAPEN
         EXTRN   GBFNDCS
         EXTRN   GBRDLNO
         EXTRN   REROWS
@@ -70,31 +65,28 @@
         PUBLIC  CURGOTO
         PUBLIC  OUTN4DG
         PUBLIC  ISLOAD
-        PUBLIC  DETSIZ
+        PUBLIC  DETSIZ          ; terminal size stub (fixed 80x24)
 
-        EXTRN   INITCOL
-        EXTRN   DSROWS
+        EXTRN   INITCOL         ; initial column mode (from SEDIT)
+        EXTRN   DSROWS          ; detected rows (from SEDIT)
 
 ;=============================================================
-; Cromemco 3102 escape sequence strings ($-terminated)
+; VT52 escape sequence strings ($-terminated)
 ;=============================================================
         CSEG
 
-CLRSTR: DB      ESC,'E','$'             ; clear screen
-CLREOL: DB      ESC,'K','$'             ; clear to end of line
-CURHOM: DB      ESC,'H','$'             ; cursor home
-ATTREV: DB      ESC,'d','P','$'         ; reverse video on
-ATTOFF: DB      ESC,'d','@','$'         ; reverse video off
-ATTNRM: DB      ESC,'m','$'             ; normal video (reset all)
+CLRSTR: DB      ESC,'H',ESC,'J','$'    ; home + erase to end of screen
+CLREOL: DB      ESC,'K','$'            ; clear to end of line
+ATTREV: DB      ESC,'p','$'            ; reverse video on (clone extension)
+ATTOFF: DB      ESC,'q','$'            ; reverse video off (clone extension)
 
 ;--- Info bar label strings ---------------------------
-IBLNSTR: DB     '   Lines:',' $'
-IBRNSTR: DB     '   Row:',' $'
-IBCNSTR: DB     '   Col:',' $'
-IBWDSTR: DB     '   Len:',' $'
-IBINSTR: DB     '  [INS]','$'
+IBLNSTR: DB     '  Ln:',' $'
+IBRNSTR: DB     '  Row:',' $'
+IBCNSTR: DB     '  Col:',' $'
+IBINSTR: DB     ' [INS]','$'
 IBFRSTR: DB     '[Free:','$'
-IBOVSTR: DB     '  [OVR]','$'
+IBOVSTR: DB     ' [OVR]','$'
 NAMNMST: DB     '[No Name]','$'
 LDNGMST: DB     '[Loading]','$'
 
@@ -110,17 +102,25 @@ SPRBLN  EQU     8
 
 ;=============================================================
 ; SCRINIT - Initialize terminal and draw chrome.
+; Entry:  (none)
+; Exit:   Screen cleared, chrome drawn; all regs clobbered
 ;=============================================================
 SCRINIT:
+        ; Clear screen
         LXI     D,CLRSTR
         CALL    OUTSTR
+        ; Draw info bar (row 1)
         CALL    INFOBAR
+        ; Draw ruler (row 2)
         CALL    RULRDRAW
+        ; Draw separator (row 23)
         CALL    SEPRDRAW
         RET
 
 ;=============================================================
-; SCRDRAW - Full screen redraw (20 edit lines).
+; SCRDRAW - Full screen redraw (REROWS edit lines).
+; Entry:  (none) - reads state from buffer descriptor
+; Exit:   All edit rows redrawn; all regs clobbered
 ;=============================================================
 SCRDRAW:
         ; Read TOPLN
@@ -133,13 +133,15 @@ SCRDRAW:
         MOV     H,A
         MOV     E,M
         INX     H
-        MOV     D,M
+        MOV     D,M             ; DE = TOPLN
+        XCHG                    ; HL = TOPLN
+        XCHG                    ; DE = TOPLN (keep in DE)
         LHLD    VBFLN
-        DAD     D
+        DAD     D               ; HL = VBFLN + TOPLN
         SHLD    SDTPLN
 
         ; Find TOPLN offset
-        CALL    GBFNDCS
+        CALL    GBFNDCS         ; HL = offset, NZ=found
         SHLD    SDLOFF
         MVI     A,1
         JNZ     SDRNF
@@ -147,6 +149,9 @@ SCRDRAW:
 SDRNF:  STA     SDFND
 
         ; --- Compute highlight range ---
+        ; If MRKBG == FFFF: no highlight
+        ; If MRKEN == FFFF: highlight MRKBG..CSOFF (marking)
+        ; If MRKEN != FFFF: highlight MRKBG..MRKEN (block set)
         LHLD    CURBDP
         MVI     A,BD_MRKBG
         ADD     L
@@ -158,8 +163,8 @@ SDRNF:  STA     SDFND
         INX     H
         ANA     M
         INR     A
-        JZ      SDHLNO
-        ; MRKBG is set
+        JZ      SDHLNO          ; MRKBG == FFFF -> no mark
+        ; MRKBG is set. Read it into DE.
         LHLD    CURBDP
         MVI     A,BD_MRKBG
         ADD     L
@@ -182,8 +187,8 @@ SDRNF:  STA     SDFND
         INX     H
         ANA     M
         INR     A
-        JZ      SDHLMRK
-        ; MRKEN set: highlight MRKBG..MRKEN
+        JZ      SDHLMRK         ; MRKEN == FFFF -> use CSOFF
+        ; MRKEN is set: highlight MRKBG..MRKEN
         LHLD    CURBDP
         MVI     A,BD_MRKEN
         ADD     L
@@ -195,7 +200,7 @@ SDRNF:  STA     SDFND
         INX     H
         MOV     B,M
         MOV     H,B
-        MOV     L,C
+        MOV     L,C             ; HL = MRKEN
         JMP     SDHLRNG
 SDHLMRK:
         ; MRKEN not set: highlight MRKBG..CSOFF
@@ -210,17 +215,17 @@ SDHLMRK:
         INX     H
         MOV     B,M
         MOV     H,B
-        MOV     L,C
+        MOV     L,C             ; HL = CSOFF
 SDHLRNG:
-        ; DE = MRKBG, HL = end. min/max:
+        ; DE = start, HL = end. min/max:
         MOV     A,H
         CMP     D
         JC      SDHLCS
-        JNZ     SDHLMK
+        JNZ     SDHLMK2
         MOV     A,L
         CMP     E
         JC      SDHLCS
-SDHLMK: XCHG
+SDHLMK2: XCHG
         SHLD    SDHLBG
         XCHG
         SHLD    SDHLEN
@@ -254,6 +259,7 @@ SDRWLP: LDA     REROWS
         CMP     B
         JNC     SDRWDN
 
+        ; Position cursor at this row
         ADI     EDITFR
         MOV     B,A
         MVI     C,1
@@ -267,18 +273,20 @@ SDRWLP: LDA     REROWS
         MVI     A,0
         ADC     H
         MOV     H,A
-        INX     H
+        INX     H               ; 1-based
         CALL    OUTN4DG
         MVI     A,' '
         CALL    OUTCHAR
 
+        ; Check if line exists
         LDA     SDFND
         ORA     A
         JZ      SDCLR
 
+        ; Read line via GBRDLNO
         LHLD    SDLOFF
         SHLD    SDLNST
-        CALL    GBRDLNO
+        CALL    GBRDLNO         ; HL=next offset, DE=text, NZ=ok
         SHLD    SDLOFF
         JNZ     SDTEXT
 
@@ -286,7 +294,9 @@ SDRWLP: LDA     REROWS
         STA     SDFND
         JMP     SDCLR
 
-SDTEXT: PUSH    D
+SDTEXT: ; Output text from DE, NUL-terminated
+        PUSH    D               ; save text ptr for highlight calc
+        ; Per-line highlight computation
         LDA     SDHLMD
         ORA     A
         JZ      SDHNHL
@@ -339,11 +349,11 @@ SDHLVL: LDA     SDHLE
 SDHNHL: MVI     A,0FFH
         STA     SDHLS
         STA     SDHLE
-SDHSET: POP     D
+SDHSET: POP     D               ; restore text ptr
         XRA     A
         STA     SDHLON
         STA     SDBYTI
-        MVI     C,0
+        MVI     C,0             ; visual column counter
 
         ; Skip phase (horizontal scroll)
         LDA     HSCROL
@@ -382,7 +392,8 @@ SDSKCK: LDA     SDSKIP
         JC      SDSKDN
         JZ      SDSKDN
         JMP     SDSKPL
-SDSKDN: LDA     SDHLMD
+SDSKDN: ; Check if entered highlight region
+        LDA     SDHLMD
         ORA     A
         JZ      SDSK2
         LDA     SDBYTI
@@ -443,7 +454,8 @@ SDTXLP: LDA     RTXTCL
         STA     SDBYTI
         JMP     SDTXLP
 
-SDTAB:  LDA     HSCROL
+SDTAB:  ; Expand tab
+        LDA     HSCROL
         ADD     C
         ANI     TABWID-1
         MOV     B,A
@@ -469,7 +481,8 @@ SDTBSP: MVI     A,' '
         STA     SDBYTI
         JMP     SDTXLP
 
-SDCLR:  LDA     SDHLON
+SDCLR:  ; Turn off highlight if active
+        LDA     SDHLON
         ORA     A
         JZ      SDCLR2
         PUSH    D
@@ -481,9 +494,11 @@ SDCLR:  LDA     SDHLON
         XRA     A
         STA     SDHLON
 SDCLR2:
+        ; Clear rest of line
         LXI     D,CLREOL
         CALL    OUTSTR
 
+        ; Advance row counter
         LDA     SDROW
         INR     A
         STA     SDROW
@@ -514,7 +529,9 @@ SDRVOF: PUSH    D
         RET
 
 ;=============================================================
-; SCREDCL - Redraw current cursor line.
+; SCREDCL - Redraw only the current cursor line.
+; Entry:  (none) - reads BD_CSROW
+; Exit:   One edit line redrawn; all regs clobbered
 ;=============================================================
 SCREDCL:
         LHLD    CURBDP
@@ -524,18 +541,18 @@ SCREDCL:
         MVI     A,0
         ADC     H
         MOV     H,A
-        MOV     B,M
+        MOV     B,M             ; B = cursor screen row (0-based)
         PUSH    B
         MOV     A,B
         ADI     EDITFR
         MOV     B,A
         MVI     C,1
         CALL    CURGOTO
-        CALL    GBCURLN
-        XCHG
-        POP     B
+        CALL    GBCURLN         ; HL = GGLBUF, A = len, NZ = exists
+        XCHG                    ; DE = text ptr
+        POP     B               ; B = screen row (0-based)
         JNZ     SLEDRAW
-        ; Empty buffer
+        ; Empty buffer: draw gutter + clear
         LHLD    CURBDP
         MOV     A,L
         ADI     BD_TOPLN
@@ -545,14 +562,14 @@ SCREDCL:
         MOV     H,A
         MOV     E,M
         INX     H
-        MOV     D,M
+        MOV     D,M             ; DE = TOPLN
         MOV     A,E
         ADD     B
         MOV     L,A
         MOV     A,D
         ACI     0
         MOV     H,A
-        INX     H
+        INX     H               ; 1-based
         CALL    OUTN4DG
         MVI     A,' '
         CALL    OUTCHAR
@@ -561,6 +578,8 @@ SCREDCL:
 
 ;=============================================================
 ; SCREDLN - Draw one edit area line.
+; Entry:  B = screen row offset (0 = first edit row)
+; Exit:   Line drawn; BC DE HL clobbered
 ;=============================================================
 SCREDLN:
         PUSH    B
@@ -569,10 +588,13 @@ SCREDLN:
         MOV     B,A
         MVI     C,1
         CALL    CURGOTO
+        ; Read line: B = row offset (still on stack)
         POP     B
         PUSH    B
+        ; Get line text
         MOV     L,B
         MVI     H,0
+        ; Read TOPLN
         PUSH    H
         LHLD    CURBDP
         MVI     A,BD_TOPLN
@@ -583,15 +605,15 @@ SCREDLN:
         MOV     H,A
         MOV     E,M
         INX     H
-        MOV     D,M
-        POP     H
-        DAD     D
-        CALL    GBGETLN
-        POP     B
+        MOV     D,M             ; DE = TOPLN
+        POP     H               ; HL = row offset
+        DAD     D               ; HL = TOPLN + row
+        CALL    GBGETLN         ; DE = text ptr
+        POP     B               ; B = row
         MOV     A,D
         ORA     E
         JNZ     SLEDRAW
-        ; Past end
+        ; Past end: gutter + clear
         MOV     L,B
         MVI     H,0
         PUSH    H
@@ -619,8 +641,11 @@ SCREDLN:
 
 ;=============================================================
 ; SLEDRAW - Draw one line with text content.
+; Entry:  DE = text ptr, B = screen row (0-based)
+; Exit:   Line drawn; all regs clobbered
 ;=============================================================
 SLEDRAW:
+        ; Draw gutter: line number
         PUSH    D
         PUSH    B
         LHLD    CURBDP
@@ -632,7 +657,7 @@ SLEDRAW:
         MOV     H,A
         MOV     E,M
         INX     H
-        MOV     D,M
+        MOV     D,M             ; DE = TOPLN
         POP     B
         PUSH    B
         MOV     A,E
@@ -641,7 +666,7 @@ SLEDRAW:
         MOV     A,D
         ACI     0
         MOV     H,A
-        INX     H
+        INX     H               ; 1-based
         XCHG
         LHLD    VBFLN
         DAD     D
@@ -649,11 +674,12 @@ SLEDRAW:
         MVI     A,' '
         CALL    OUTCHAR
         POP     B
-        POP     D
+        POP     D               ; DE = text ptr
 
-        MVI     C,0
+        ; Output text with tab expansion
+        MVI     C,0             ; visual column counter
 
-        ; Skip phase
+        ; Skip phase (horizontal scroll)
         LDA     HSCROL
         ORA     A
         JZ      SLETXT
@@ -686,6 +712,7 @@ SLSKCK: LDA     SLSKIP
         JMP     SLSKPL
 SLSKDN: MVI     C,0
 
+        ; Text output loop
 SLETXT: LDA     RTXTCL
         CMP     C
         JC      SLEEND
@@ -708,7 +735,8 @@ SLETXT: LDA     RTXTCL
         INR     C
         JMP     SLETXT
 
-SLETAB: LDA     HSCROL
+SLETAB: ; Expand tab
+        LDA     HSCROL
         ADD     C
         ANI     TABWID-1
         MOV     B,A
@@ -731,17 +759,21 @@ STABSP: MVI     A,' '
         INX     D
         JMP     SLETXT
 
-SLEEND: LXI     D,CLREOL
+SLEEND: ; Clear rest of line
+        LXI     D,CLREOL
         JMP     OUTSTR
 
 ;=============================================================
 ; INFOBAR - Update info bar on row 1.
+; Entry:  (none)
+; Exit:   Row 1 redrawn; all regs clobbered
 ;=============================================================
 INFOBAR:
         MVI     B,INFOROW
         MVI     C,1
         CALL    CURGOTO
 
+        ; Reverse video for info bar
         LXI     D,ATTREV
         CALL    OUTSTR
 
@@ -754,10 +786,12 @@ INFOBAR:
         ADC     H
         MOV     H,A
 
+        ; Check if loading
         LDA     ISLOAD
         ORA     A
         JNZ     IBLDNG
 
+        ; Check if name is blank
         INX     H
         MOV     A,M
         ANI     7FH
@@ -765,7 +799,7 @@ INFOBAR:
         DCX     H
         JZ      IBNONAME
 
-        ; Drive letter
+        ; Display drive letter
         MOV     A,M
         ORA     A
         JNZ     IBDRVOK
@@ -783,8 +817,10 @@ IBDRVOK:
         LDA     FILUSR
         CPI     0FFH
         JZ      IBDRCL
+        ; Print user number (0-15)
         CPI     10
         JC      IBDR1D
+        ; Two digits: tens + ones
         SUI     10
         STA     IBUSRT
         MVI     A,'1'
@@ -798,10 +834,11 @@ IBDR1D: ADI     '0'
 IBDRCL: MVI     A,':'
         CALL    OUTCHAR
         POP     H
-        INX     H
+        INX     H               ; HL -> name start
         JMP     IBNAME
 
-IBLDNG: PUSH    H
+IBLDNG: ; Loading indicator
+        PUSH    H
         LXI     D,LDNGMST
         CALL    OUTSTR
         POP     H
@@ -814,7 +851,8 @@ IBNONAME:
         POP     H
         JMP     IBNMDN
 
-IBNAME: MVI     B,8
+IBNAME: ; Print 8-char name
+        MVI     B,8
 IBNMLP: MOV     A,M
         ANI     7FH
         CPI     ' '
@@ -828,7 +866,7 @@ IBNMLP: MOV     A,M
         DCR     B
         JNZ     IBNMLP
 IBNMDN:
-        ; Extension
+        ; Print extension
         LHLD    CURBDP
         MVI     A,BD_FNAME+9
         ADD     L
@@ -859,7 +897,7 @@ IBEXTL: MOV     A,M
         JNZ     IBEXTL
 
 IBNEXT:
-        ; Modified indicator
+        ; Modified indicator (* after filename)
         LHLD    CURBDP
         MVI     A,BD_MODIF
         ADD     L
@@ -880,7 +918,7 @@ IBLNCT: ; Lines count
         CALL    GBCNTLN
         CALL    OUTHL4
 
-        ; Row
+        ; Row: absolute line
         LXI     D,IBRNSTR
         CALL    OUTSTR
         LHLD    CURBDP
@@ -911,7 +949,7 @@ IBLNCT: ; Lines count
         DAD     D
         CALL    OUTHL4
 
-        ; Col (tabs expanded)
+        ; Col: visual column (tabs expanded)
         LXI     D,IBCNSTR
         CALL    OUTSTR
         LHLD    CURBDP
@@ -921,7 +959,7 @@ IBLNCT: ; Lines count
         MVI     A,0
         ADC     H
         MOV     H,A
-        MOV     C,M
+        MOV     C,M             ; C = byte col
         PUSH    B
         CALL    GBCURLN
         POP     B
@@ -947,18 +985,10 @@ IBCLNX: INX     H
         JNZ     IBCLLP
 IBCLDN: MOV     L,D
         MVI     H,0
-        INX     H
+        INX     H               ; 1-based
         CALL    OUTHL4
 
-        ; Len
-        LXI     D,IBWDSTR
-        CALL    OUTSTR
-        CALL    GBCURLN
-        MOV     L,A
-        MVI     H,0
-        CALL    OUTHL4
-
-        ; Mode
+        ; Insert/Overwrite mode
         LDA     INSMODE
         ORA     A
         JNZ     IBOVRMD
@@ -969,11 +999,12 @@ IBOVRMD:
         LXI     D,IBOVSTR
         CALL    OUTSTR
 
+        ; Virtual buffer indicator
 IBVIRT:
         LDA     VIMODE
         ORA     A
         JZ      IBFREE
-        ; [Vssss,eeee]
+        ; Show [Vssss,eeee]
         MVI     A,'['
         CALL    OUTCHAR
         MVI     A,'V'
@@ -983,6 +1014,7 @@ IBVIRT:
         CALL    OUTHL4
         MVI     A,','
         CALL    OUTCHAR
+        ; Last line = total - VAFLN (-1 if VAFLN>0)
         CALL    GBCNTLN
         XCHG
         LHLD    VAFLN
@@ -1002,11 +1034,14 @@ IBVIRT:
 IBVDN:  CALL    OUTHL4
         MVI     A,']'
         CALL    OUTCHAR
+
         JMP     IBCLEAR
 
+        ; [Free:nnnnn] - show free gap buffer space
 IBFREE:
         LXI     D,IBFRSTR
         CALL    OUTSTR
+        ; Free = GAPEN - GAPBG
         CALL    GBGAPEN
         XCHG
         CALL    GBGAPBG
@@ -1015,7 +1050,7 @@ IBFREE:
         MOV     L,A
         MOV     A,D
         SBB     H
-        MOV     H,A
+        MOV     H,A             ; HL = free bytes
         CALL    OUTN5DG
         MVI     A,']'
         CALL    OUTCHAR
@@ -1027,7 +1062,9 @@ IBCLEAR:
         JMP     OUTSTR
 
 ;=============================================================
-; CURPOS - Position cursor at current edit position.
+; CURPOS - Position hardware cursor at current edit position.
+; Entry:  (none) - reads BD_CSROW, BD_CSCOL
+; Exit:   Cursor moved; all regs clobbered
 ;=============================================================
 CURPOS:
         LHLD    CURBDP
@@ -1037,12 +1074,13 @@ CURPOS:
         MVI     A,0
         ADC     H
         MOV     H,A
-        MOV     B,M
+        MOV     B,M             ; B = screen row
         INX     H
-        MOV     C,M
+        MOV     C,M             ; C = byte col
         MOV     A,B
         ADI     EDITFR
         MOV     B,A
+        ; Expand tabs for visual column
         PUSH    B
         CALL    GBCURLN
         POP     B
@@ -1076,26 +1114,30 @@ CPVDN:  LDA     HSCROL
 
 ;=============================================================
 ; CURGOTO - Move cursor to row B, col C (both 1-based).
-; Cromemco 3102: ESC F line+1FH col+1FH
+; VT52: ESC Y row+1FH col+1FH
+; Entry:  B = row (1-based), C = col (1-based)
+; Exit:   Cursor moved; AF clobbered
 ;=============================================================
 CURGOTO:
-        PUSH    B
+        PUSH    B               ; save row(B) col(C)
         MVI     A,ESC
         CALL    OUTCHAR
-        MVI     A,'F'
+        MVI     A,'Y'
         CALL    OUTCHAR
-        POP     B
+        POP     B               ; restore row(B) col(C)
         MOV     A,B
         ADI     1FH             ; row: 1-based + 1FH = 0-based + 20H
-        PUSH    B
+        PUSH    B               ; save col(C) for next output
         CALL    OUTCHAR
-        POP     B
+        POP     B               ; restore col(C)
         MOV     A,C
         ADI     1FH             ; col: 1-based + 1FH = 0-based + 20H
         JMP     OUTCHAR
 
 ;=============================================================
-; STATMSG - Write message to status bar (row 24).
+; STATMSG - Write message to status bar.
+; Entry:  DE = '$'-terminated string
+; Exit:   Message shown; regs clobbered
 ;=============================================================
 STATMSG:
         PUSH    D
@@ -1103,7 +1145,7 @@ STATMSG:
         MOV     B,A
         MVI     C,1
         CALL    CURGOTO
-        LXI     D,ATTNRM
+        LXI     D,ATTOFF
         CALL    OUTSTR
         LXI     D,CLREOL
         CALL    OUTSTR
@@ -1111,7 +1153,9 @@ STATMSG:
         JMP     OUTSTR
 
 ;=============================================================
-; STATCLR - Clear status bar (row 24).
+; STATCLR - Clear status bar.
+; Entry:  (none)
+; Exit:   Status row blank; regs clobbered
 ;=============================================================
 STATCLR:
         LDA     RSTAT
@@ -1128,6 +1172,7 @@ RULRDRAW:
         MVI     B,RULRROW
         MVI     C,1
         CALL    CURGOTO
+        ; Gutter spaces
         MVI     B,LNUMWID
 RLGUT:  MVI     A,' '
         PUSH    B
@@ -1135,6 +1180,7 @@ RLGUT:  MVI     A,' '
         POP     B
         DCR     B
         JNZ     RLGUT
+        ; Ruler: ':' every TABWID, else '-'
         LDA     RTXTCL
         MOV     B,A
         MVI     C,0
@@ -1153,18 +1199,20 @@ RLOUT:  PUSH    B
         RET
 
 ;=============================================================
-; SEPRDRAW - Draw separator on row 23.
+; SEPRDRAW - Draw separator row.
+; In virtual mode shows range info.
 ;=============================================================
 SEPRDRAW:
         LDA     RSEPR
         MOV     B,A
         MVI     C,1
         CALL    CURGOTO
+        ; Check virtual mode
         LDA     VIMODE
         ORA     A
         JZ      SPRNRM
 
-        ; Virtual mode separator
+        ; Virtual mode separator with range info
         LHLD    VBFLN
         MOV     A,H
         ORA     L
@@ -1213,7 +1261,8 @@ SPRNEQ: LXI     D,SPREQS
 SPRNDN: LXI     D,CLREOL
         JMP     OUTSTR
 
-SPRNRM: LXI     D,SPRBLD
+SPRNRM: ; Normal separator: version + '='
+        LXI     D,SPRBLD
         CALL    OUTSTR
         LDA     RSCRCL
         SUI     SPRBLN
@@ -1228,6 +1277,8 @@ SPRLP:  MVI     A,'='
 
 ;=============================================================
 ; OUTCHAR - Output single character to console.
+; Entry:  A = character
+; Exit:   Character sent; AF BC clobbered
 ;=============================================================
 OUTCHAR:
         MOV     E,A
@@ -1237,6 +1288,8 @@ OUTCHAR:
 
 ;=============================================================
 ; OUTSTR - Output '$'-terminated string.
+; Entry:  DE = string address
+; Exit:   String sent; AF BC DE clobbered
 ;=============================================================
 OUTSTR:
         LDAX    D
@@ -1250,6 +1303,8 @@ OUTSTR:
 
 ;=============================================================
 ; OUTN5DG - Output number as 5-digit decimal (leading spaces).
+; Entry:  HL = number (0-65535)
+; Exit:   5 chars output; AF BC DE HL clobbered
 ;=============================================================
 OUTN5DG:
         XRA     A
@@ -1285,12 +1340,14 @@ ON5THP: ADI     '0'
 
 ;=============================================================
 ; OUTN4DG - Output number as 4-digit decimal (leading spaces).
+; Entry:  HL = number (0-9999)
+; Exit:   4 chars output; AF BC DE HL clobbered
 ;=============================================================
 OUTN4DG:
         XRA     A
         STA     ON4LZF
-ON4KDG: ; Thousands
-        LXI     D,1000
+        ; Thousands
+ON4KDG: LXI     D,1000
         MVI     B,0
 ON4TH:  MOV     A,L
         SUB     E
@@ -1305,15 +1362,7 @@ ON4TH:  MOV     A,L
 ON4THD: MOV     A,B
         ORA     A
         JNZ     ON4THP
-        LDA     ON4LZF
-        ORA     A
-        JNZ     ON4THZ
         MVI     A,' '
-        PUSH    H
-        CALL    OUTCHAR
-        POP     H
-        JMP     ON4HN
-ON4THZ: MVI     A,'0'
         PUSH    H
         CALL    OUTCHAR
         POP     H
@@ -1387,12 +1436,18 @@ ON4TP:  ADI     '0'
         PUSH    H
         CALL    OUTCHAR
         POP     H
-ON4UN:  MOV     A,L
+ON4UN:  ; Units
+        MOV     A,L
         ADI     '0'
-        JMP     OUTCHAR
+        CALL    OUTCHAR
+        XRA     A
+        STA     ON4LZF
+        RET
 
 ;=============================================================
 ; OUTHL4 - Output HL as 4-digit decimal (leading spaces).
+; Entry:  HL = number (0-9999)
+; Exit:   4 chars output; AF BC DE HL clobbered
 ;=============================================================
 OUTHL4:
         XRA     A
@@ -1400,21 +1455,23 @@ OUTHL4:
         JMP     OUTN4DG
 
 ;=============================================================
-; DETSIZ - 3102 stub: no detection, fixed 80x24.
+;=============================================================
+; DETSIZ - VT52 stub: no detection, fixed 80x24.
+; VT52 has no DSR support. All runtime variables keep their
+; defaults (set in SEDIT.MAC DSEG initializers).
 ;=============================================================
 DETSIZ:
         XRA     A
-        STA     INITCOL
+        STA     INITCOL         ; 80-col mode
         LXI     H,24
         SHLD    DSROWS
         RET
 
-;=============================================================
 ; DATA SEGMENT
 ;=============================================================
         DSEG
 
-ON4LZF: DB      0
+ON4LZF: DB      0               ; leading-zero flag for OUTN4DG
 ; SCRDRAW working variables
 SDTPLN: DW      0
 SDLOFF: DW      0

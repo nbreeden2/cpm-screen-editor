@@ -8,9 +8,11 @@ REM   SEDIT-CL.COM - Color (color, no highlighting)
 REM   SEDIT-A.COM  - ASM   (color, ASM highlighting)
 REM   SEDIT-C.COM  - Color (color, C highlighting)
 REM   SEADM31.COM  - Mono  (no color, specific to the ADM-31)
-REM   SEC3102.COM  - Mono  (no color, soecific to the Cromemco 3102)
+REM   SEC3102.COM  - Mono  (no color, specific to the Cromemco 3102)
+REM   SEVT52.COM   - Mono  (no color, specific to VT52 terminals)
 REM
 REM Requires: cpmulator.exe, M80.COM, L80.COM, Python (CPMFMT.PY)
+echo REM Requires: cpmulator.exe, M80.COM, L80.COM, Python (CPMFMT.PY)
 REM ----------------------------------------------------------------
 
 echo === SEDIT Multi-Variant Build ===
@@ -36,6 +38,9 @@ python CPMFMT.PY SEADM31 SEADM31K
 if errorlevel 1 goto fail
 REM Specific to the Cromemco 3102 terminal
 python CPMFMT.PY SEC3102.MAC SEC3102K.MAC
+if errorlevel 1 goto fail
+REM Specific to the VT52 terminal
+python CPMFMT.PY SEVT52.MAC SEMENVT.MAC SEHELVT.MAC
 if errorlevel 1 goto fail
 
 
@@ -64,10 +69,16 @@ if errorlevel 1 goto fail
 python CPMFMT.PY SECONFIG.INC
 if errorlevel 1 goto fail
 cpmulator M80.COM =SESCREEN
+echo cpmulator M80.COM =SESCREEN
+pause
 if errorlevel 1 goto fail
 cpmulator M80.COM =SESYNTAX
+echo cpmulator M80.COM =SESYNTAX
+pause
 if errorlevel 1 goto fail
 cpmulator L80.COM SEDIT,SESCREEN,SEKEY,SEGAPBUF,SEFILEIO,SEMENU,SESEARCH,SEBLOCK,SESYNTAX,SEKEYBND,SEVIRTIO,SEHELP,SEDIT/N/E
+echo cpmulator L80.COM SEDIT,SESCREEN,SEKEY,SEGAPBUF,SEFILEIO,SEMENU,SESEARCH,SEBLOCK,SESYNTAX,SEKEYBND,SEVIRTIO,SEHELP,SEDIT/N/E
+pause
 if errorlevel 1 goto fail
 copy /y SEDIT.COM SEDIT-MONO.COM >nul
 echo Built SEDIT.COM (mono)
@@ -79,10 +90,16 @@ if errorlevel 1 goto fail
 python CPMFMT.PY SECONFIG.INC
 if errorlevel 1 goto fail
 cpmulator M80.COM =SESCREEN
+echo cpmulator M80.COM =SESCREEN
+pause
 if errorlevel 1 goto fail
 cpmulator M80.COM =SESYNTAX
+echo cpmulator M80.COM =SESYNTAX
+pause
 if errorlevel 1 goto fail
 cpmulator L80.COM SEDIT,SESCREEN,SEKEY,SEGAPBUF,SEFILEIO,SEMENU,SESEARCH,SEBLOCK,SESYNTAX,SEKEYBND,SEVIRTIO,SEHELP,SEDIT/N/E
+echo cpmulator L80.COM SEDIT,SESCREEN,SEKEY,SEGAPBUF,SEFILEIO,SEMENU,SESEARCH,SEBLOCK,SESYNTAX,SEKEYBND,SEVIRTIO,SEHELP,SEDIT/N/E
+pause
 if errorlevel 1 goto fail
 copy /y SEDIT.COM SEDIT-CL.COM >nul
 echo Built SEDIT-CL.COM (color)
@@ -94,10 +111,16 @@ if errorlevel 1 goto fail
 python CPMFMT.PY SECONFIG.INC
 if errorlevel 1 goto fail
 cpmulator M80.COM =SESCREEN
+echo cpmulator M80.COM =SESCREEN
+pause
 if errorlevel 1 goto fail
 cpmulator M80.COM =SESYNTAX
+echo cpmulator M80.COM =SESYNTAX
+pause
 if errorlevel 1 goto fail
 cpmulator L80.COM SEDIT,SESCREEN,SEKEY,SEGAPBUF,SEFILEIO,SEMENU,SESEARCH,SEBLOCK,SESYNTAX,SEKEYBND,SEVIRTIO,SEHELP,SEDIT/N/E
+echo cpmulator L80.COM SEDIT,SESCREEN,SEKEY,SEGAPBUF,SEFILEIO,SEMENU,SESEARCH,SEBLOCK,SESYNTAX,SEKEYBND,SEVIRTIO,SEHELP,SEDIT/N/E
+pause
 if errorlevel 1 goto fail
 copy /y SEDIT.COM SEDIT-A.COM >nul
 echo Built SEDIT-A.COM (ASM highlight)
@@ -109,10 +132,16 @@ if errorlevel 1 goto fail
 python CPMFMT.PY SECONFIG.INC
 if errorlevel 1 goto fail
 cpmulator M80.COM =SESCREEN
+echo cpmulator M80.COM =SESCREEN
+pause
 if errorlevel 1 goto fail
 cpmulator M80.COM =SESYNTAX
+echo cpmulator M80.COM =SESYNTAX
+pause
 if errorlevel 1 goto fail
 cpmulator L80.COM SEDIT,SESCREEN,SEKEY,SEGAPBUF,SEFILEIO,SEMENU,SESEARCH,SEBLOCK,SESYNTAX,SEKEYBND,SEVIRTIO,SEHELP,SEDIT/N/E
+echo cpmulator L80.COM SEDIT,SESCREEN,SEKEY,SEGAPBUF,SEFILEIO,SEMENU,SESEARCH,SEBLOCK,SESYNTAX,SEKEYBND,SEVIRTIO,SEHELP,SEDIT/N/E
+pause
 if errorlevel 1 goto fail
 copy /y SEDIT.COM SEDIT-C.COM >nul
 echo Built SEDIT-C.COM (C highlight)
@@ -124,48 +153,103 @@ python CPMFMT.PY SECONFIG.INC
 
 echo --- Build ADM-31 Editor ---
 cpmulator M80.COM =SESCREEN
+echo cpmulator M80.COM =SESCREEN
+pause
 if errorlevel 1 goto fail
 cpmulator M80.COM =SESYNTAX
+echo cpmulator M80.COM =SESYNTAX
+pause
 if errorlevel 1 goto fail
 cpmulator M80.COM =SEADM31
+echo cpmulator M80.COM =SEADM31
+pause
 if errorlevel 1 goto fail
 cpmulator M80.COM =SEADM31K
+echo cpmulator M80.COM =SEADM31K
+pause
 if errorlevel 1 goto fail
 cpmulator L80.COM SEDIT,SEADM31,SEADM31K,SEGAPBUF,SEFILEIO,SEMENU,SESEARCH,SEBLOCK,SESYNTAX,SEKEYBND,SEVIRTIO,SEHELP,SEADM31/N/E
+echo cpmulator L80.COM SEDIT,SEADM31,SEADM31K,SEGAPBUF,SEFILEIO,SEMENU,SESEARCH,SEBLOCK,SESYNTAX,SEKEYBND,SEVIRTIO,SEHELP,SEADM31/N/E
+pause
 echo Built SEADM31.COM
 echo --- End of ADM-31 Editor ---
 
 echo --- Build SEC3102 Editor ---
 cpmulator M80.COM =SESCREEN
+echo cpmulator M80.COM =SESCREEN
+pause
 if errorlevel 1 goto fail
 cpmulator M80.COM =SESYNTAX
+echo cpmulator M80.COM =SESYNTAX
+pause
 if errorlevel 1 goto fail
 cpmulator M80.COM =SEC3102
+echo cpmulator M80.COM =SEC3102
+pause
 if errorlevel 1 goto fail
 cpmulator M80.COM =SEC3102K
+echo cpmulator M80.COM =SEC3102K
+pause
 if errorlevel 1 goto fail
 cpmulator L80.COM SEDIT,SEC3102,SEC3102K,SEGAPBUF,SEFILEIO,SEMENU,SESEARCH,SEBLOCK,SESYNTAX,SEKEYBND,SEVIRTIO,SEHELP,SEC3102/N/E
+echo cpmulator L80.COM SEDIT,SEC3102,SEC3102K,SEGAPBUF,SEFILEIO,SEMENU,SESEARCH,SEBLOCK,SESYNTAX,SEKEYBND,SEVIRTIO,SEHELP,SEC3102/N/E
+pause
 echo Built SEC3102.COM
 echo --- End of Cromemco 3102 Editor ---
+
+echo --- Build VT52 Editor ---
+cpmulator M80.COM =SEVT52
+echo cpmulator M80.COM =SEVT52
+pause
+if errorlevel 1 goto fail
+cpmulator M80.COM =SEMENVT
+echo cpmulator M80.COM =SEMENVT
+pause
+if errorlevel 1 goto fail
+cpmulator M80.COM =SEHELVT
+echo cpmulator M80.COM =SEHELVT
+pause
+if errorlevel 1 goto fail
+cpmulator L80.COM SEDIT,SEVT52,SEKEY,SEGAPBUF,SEFILEIO,SEMENVT,SESEARCH,SEBLOCK,SESYNTAX,SEKEYBND,SEVIRTIO,SEHELVT,SEVT52/N/E
+echo cpmulator L80.COM SEDIT,SEVT52,SEKEY,SEGAPBUF,SEFILEIO,SEMENVT,SESEARCH,SEBLOCK,SESYNTAX,SEKEYBND,SEVIRTIO,SEHELVT,SEVT52/N/E
+pause
+echo Built SEVT52.COM
+echo --- End of VT52 Editor ---
 
 REM --- Link standalone utilities ---
 echo.
 echo Linking standalone utilities...
 cpmulator L80.COM GETSIZE,GETSIZE/n/e
+echo cpmulator L80.COM GETSIZE,GETSIZE/n/e
+pause
 if errorlevel 1 goto fail
 cpmulator L80.COM KEYCODE,KEYCODE/n/e
+echo cpmulator L80.COM KEYCODE,KEYCODE/n/e
+pause
 if errorlevel 1 goto fail
 cpmulator L80.COM MEMTEST,MEMTEST/n/e
+echo cpmulator L80.COM MEMTEST,MEMTEST/n/e
+pause
 if errorlevel 1 goto fail
 cpmulator L80.COM COL80,COL80/n/e
+echo cpmulator L80.COM COL80,COL80/n/e
+pause
 if errorlevel 1 goto fail
 cpmulator L80.COM COL132,COL132/n/e
+echo cpmulator L80.COM COL132,COL132/n/e
+pause
 if errorlevel 1 goto fail
 cpmulator L80.COM CLS,CLS/n/e
+echo cpmulator L80.COM CLS,CLS/n/e
+pause
 if errorlevel 1 goto fail
 cpmulator L80.COM COLORS,COLORS/n/e
+echo cpmulator L80.COM COLORS,COLORS/n/e
+pause
 if errorlevel 1 goto fail
 cpmulator L80.COM SEPATCH,SEPATCH/n/e
+echo cpmulator L80.COM SEPATCH,SEPATCH/n/e
+pause
 if errorlevel 1 goto fail
 
 REM --- Clean up ---
@@ -182,7 +266,8 @@ echo   SEDIT-CL.COM - Color (WordStar/VT100, color   , no highlighting)
 echo   SEDIT-A.COM  - ASM   (WordStar/VT100, color + ASM highlighting)
 echo   SEDIT-C.COM  - Color (WordStar/VT100, color + C highlighting)
 echo   SEADM31.COM  - Mono  (ADM-31        , no color, no highlighting)
-echo   SEC3102.COM  - Mono  (Cromemco 3102  ,no color, no highlighting)
+echo   SEC3102.COM  - Mono  (Cromemco 3102  , no color, no highlighting)
+echo   SEVT52.COM   - Mono  (VT52          , no color, no highlighting)
 goto end
 
 :fail

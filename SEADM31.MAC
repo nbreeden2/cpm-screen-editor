@@ -44,6 +44,7 @@
         EXTRN   REROWS
         EXTRN   RSEPR
         EXTRN   RSTAT
+        EXTRN   FILUSR
 
 ;--- Exports ------------------------------------------
         PUBLIC  SCRINIT
@@ -59,6 +60,10 @@
         PUBLIC  CURGOTO
         PUBLIC  OUTN4DG
         PUBLIC  ISLOAD
+        PUBLIC  DETSIZ
+
+        EXTRN   INITCOL
+        EXTRN   DSROWS
 
 ;=============================================================
 ; ADM-31 escape sequence strings ($-terminated)
@@ -88,7 +93,7 @@ SPRABV: DB      ' above$'
 SPREQS: DB      ' === $'
 SPRBLW: DB      ' below$'
 SPRDNA: DB      ' vvv$'
-SPRBLD: DB      ' V1.24 $'
+SPRBLD: DB      ' V1.25 $'
 SPRBLN  EQU     8
 
 ;=============================================================
@@ -806,7 +811,23 @@ IBDRVOK:
         ADI     'A'
         PUSH    H
         CALL    OUTCHAR
-        MVI     A,':'
+        ; Show user# after drive letter if specified
+        LDA     FILUSR
+        CPI     0FFH
+        JZ      IBDRCL
+        CPI     10
+        JC      IBDR1D
+        SUI     10
+        STA     IBUSRT
+        MVI     A,'1'
+        CALL    OUTCHAR
+        LDA     IBUSRT
+        ADI     '0'
+        CALL    OUTCHAR
+        JMP     IBDRCL
+IBDR1D: ADI     '0'
+        CALL    OUTCHAR
+IBDRCL: MVI     A,':'
         CALL    OUTCHAR
         POP     H
         INX     H               ; HL -> name start
@@ -1439,6 +1460,16 @@ OUTHL4:
         JMP     OUTN4DG
 
 ;=============================================================
+;=============================================================
+; DETSIZ - ADM-31 stub: no detection, fixed 80x24.
+;=============================================================
+DETSIZ:
+        XRA     A
+        STA     INITCOL
+        LXI     H,24
+        SHLD    DSROWS
+        RET
+
 ; DATA SEGMENT
 ;=============================================================
         DSEG
@@ -1462,6 +1493,7 @@ SDTMPB: DB      0
 SDSKIP: DB      0
 SLSKIP: DB      0
 ISLOAD: DB      0
+IBUSRT: DB      0               ; INFOBAR: user# ones digit scratch
 
         END
 

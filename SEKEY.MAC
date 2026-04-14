@@ -133,8 +133,30 @@ GKESC2: ; A = byte after ESC
         JZ      GKSS3
         CPI     'Z'             ; ESC Z = identify
         JZ      GKIDZP
+        ; VT52 arrow keys: ESC A/B/C/D (no CSI prefix)
+        CPI     'A'
+        JZ      GKV52U
+        CPI     'B'
+        JZ      GKV52D
+        CPI     'C'
+        JZ      GKV52R
+        CPI     'D'
+        JZ      GKV52L
         ; Unknown ESC sequence - ignore
         MVI     B,KT_NONE
+        RET
+
+GKV52U: MVI     B,KT_ACT
+        MVI     C,ACT_CURUP
+        RET
+GKV52D: MVI     B,KT_ACT
+        MVI     C,ACT_CURDN
+        RET
+GKV52R: MVI     B,KT_ACT
+        MVI     C,ACT_CURRT
+        RET
+GKV52L: MVI     B,KT_ACT
+        MVI     C,ACT_CURLT
         RET
 
 GKCSI:

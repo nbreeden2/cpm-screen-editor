@@ -103,6 +103,12 @@
         PUBLIC  REROWS          ; runtime edit rows
         PUBLIC  RSEPR           ; runtime separator row
         PUBLIC  RSTAT           ; runtime status row
+        PUBLIC  INITCOL         ; initial column mode at startup
+        PUBLIC  DSROWS          ; detected terminal rows
+        PUBLIC  DSCOLS          ; detected terminal columns
+        PUBLIC  DSCPBUF         ; DSR collect buffer
+        PUBLIC  DSCPWR          ; DSR collect write index
+        PUBLIC  DSCPTM          ; DSR temp byte
 
         EXTRN   FILUSR          ; file's user number (FFH=unset)
         EXTRN   ORGUSR          ; original user number at startup
@@ -111,6 +117,7 @@
         EXTRN   FILNBUF         ; filename buffer (SEFILEIO)
         EXTRN   WRKFCB          ; working FCB (SEFILEIO)
         EXTRN   FIPARSN         ; parse filename with drive+user
+        EXTRN   DETSIZ          ; terminal size detection (driver)
 
 ;=============================================================
 ; CODE SEGMENT
@@ -708,278 +715,10 @@ VRTADL: CALL    GBMVRT
         RET
 
 ;------------------------------------------------------------
-; DETSIZ - Detect terminal size via VT100 DSR.
-; Phase 1: Send all escape sequences (save cursor, move to
-;          far corner, request DSR) as fast as possible.
-; Phase 2: Collect the complete response into DSCPBUF using
-;          a timeout — each byte received resets the timer.
-; Phase 3: Parse DSCPBUF for ESC[row;colR pattern.
-; Phase 4: Restore cursor, set column/row mode.
-; On error, leaves 80-col 24-row defaults.
-; Exit:   COLMOD, RTXTCL, RSCRCL, RTXTTB set if 132-col
-;         INITCOL, DSROWS, DSCOLS, REROWS, RSEPR, RSTAT set
-;         All regs clobbered
+; DETSIZ is now provided by the terminal driver module.
+; (See SESCREEN.MAC for VT100 DSR, or SEVT52/SEADM31/SEC3102
+;  for fixed 80x24 stubs.)
 ;------------------------------------------------------------
-DETSIZ:
-        ;--- Phase 1: Send all output ---
-        LXI     H,DSALL
-        CALL    DSOUT
-        ;--- Phase 2: Collect response with timeout ---
-        XRA     A
-        STA     DSCPWR          ; write index = 0
-DSCOLL: LXI     B,10000         ; timeout counter
-DSCOLP: PUSH    B
-        MVI     E,0FFH
-        MVI     C,BF_RAWIO
-        CALL    BDOS
-        POP     B
-        ORA     A
-        JZ      DSCNOB          ; no byte, count down
-        ; Got a byte in A — save it, then store in DSCPBUF[write]
-        STA     DSCPTM          ; save the received byte
-        PUSH    B
-        PUSH    H
-        LDA     DSCPWR
-        MOV     L,A
-        MVI     H,0
-        LXI     D,DSCPBUF
-        DAD     D               ; HL = &DSCPBUF[write]
-        LDA     DSCPTM          ; restore received byte
-        MOV     M,A             ; store in buffer
-        LDA     DSCPWR
-        INR     A
-        STA     DSCPWR          ; advance write index
-        POP     H
-        POP     B
-        JMP     DSCOLL          ; restart timeout
-DSCNOB: DCX     B
-        MOV     A,B
-        ORA     C
-        JNZ     DSCOLP          ; keep waiting
-        ; Timeout expired — response collected (or never came)
-;       ;--- Debug: dump captured bytes then wait for keypress ---
-;       LDA     DSCPWR
-;       ORA     A
-;       JZ      DSDBDN          ; nothing to show
-;       STA     DSDCNT          ; save count
-;       ; CR/LF before hex dump
-;       CALL    DSCRLF
-;       ; Hex dump
-;       LDA     DSDCNT
-;       MOV     B,A
-;       LXI     H,DSCPBUF
-;DSDBLP: MOV    A,M
-;       PUSH    H
-;       PUSH    B
-;       ; Print byte as 2 hex digits
-;       PUSH    PSW
-;       RRC
-;       RRC
-;       RRC
-;       RRC
-;       ANI     0FH
-;       CALL    DSHXDG          ; high nibble
-;       POP     PSW
-;       ANI     0FH
-;       CALL    DSHXDG          ; low nibble
-;       ; Print space separator
-;       MVI     E,' '
-;       MVI     C,BF_RAWIO
-;       CALL    BDOS
-;       POP     B
-;       POP     H
-;       INX     H
-;       DCR     B
-;       JNZ     DSDBLP
-;       ; CR/LF then ASCII dump
-;       CALL    DSCRLF
-;       LDA     DSDCNT
-;       MOV     B,A
-;       LXI     H,DSCPBUF
-;DSDBAL: MOV    A,M
-;       PUSH    H
-;       PUSH    B
-;       ; Print printable chars, '.' for others
-;       CPI     20H
-;       JC      DSDBD
-;       CPI     7FH
-;       JC      DSDBP
-;DSDBD: MVI     A,'.'
-;DSDBP: MOV     E,A
-;       MVI     C,BF_RAWIO
-;       CALL    BDOS
-;       POP     B
-;       POP     H
-;       INX     H
-;       DCR     B
-;       JNZ     DSDBAL
-;       ; Wait for keypress
-;DSDBDN: MVI    E,0FFH
-;       MVI     C,BF_RAWIO
-;       CALL    BDOS
-;       ORA     A
-;       JZ      DSDBDN
-;       ;--- End debug ---
-        ;--- Phase 3: Parse DSCPBUF for [ row ; col R ---
-        ; Scan for '[' as anchor (ESC may have been lost)
-        LXI     H,DSCPBUF
-        LDA     DSCPWR
-        ORA     A
-        JZ      DSFAIL          ; nothing received
-        MOV     B,A             ; B = byte count
-DSPBRK: MOV     A,M
-        CPI     '['
-        JZ      DSPFND
-        INX     H
-        DCR     B
-        JNZ     DSPBRK
-        JMP     DSFAIL          ; no '[' found
-DSPFND: ; Found '['. Parse row digits until ';'
-        INX     H
-        DCR     B
-        JZ      DSFAIL
-        LXI     D,0             ; DE = row accumulator
-DSPROW: MOV     A,M
-        CPI     ';'
-        JZ      DSPRGOT
-        SUI     '0'
-        MOV     C,A             ; C = digit
-        ; DE = DE * 10 + digit
-        PUSH    H
-        MOV     H,D
-        MOV     L,E             ; HL = old value
-        PUSH    B
-        MOV     B,H
-        MOV     C,L             ; BC = old value
-        DAD     H               ; HL*2
-        DAD     H               ; HL*4
-        DAD     B               ; HL*5
-        DAD     H               ; HL*10
-        POP     B               ; C = digit
-        MVI     B,0
-        DAD     B               ; HL = val*10 + digit
-        MOV     D,H
-        MOV     E,L             ; DE = new value
-        POP     H               ; restore buffer ptr
-        INX     H
-        DCR     B
-        JNZ     DSPROW
-        JMP     DSFAIL          ; ran out of bytes
-DSPRGOT:
-        XCHG
-        SHLD    DSROWS          ; save row count
-        XCHG
-        ; Parse col digits until 'R'
-        INX     H
-        DCR     B
-        JZ      DSFAIL
-        LXI     D,0             ; DE = col accumulator
-DSPCOL: MOV     A,M
-        CPI     'R'
-        JZ      DSPCGOT
-        SUI     '0'
-        MOV     C,A
-        PUSH    H
-        MOV     H,D
-        MOV     L,E
-        PUSH    B
-        MOV     B,H
-        MOV     C,L
-        DAD     H               ; HL*2
-        DAD     H               ; HL*4
-        DAD     B               ; HL*5
-        DAD     H               ; HL*10
-        POP     B
-        MVI     B,0
-        DAD     B
-        MOV     D,H
-        MOV     E,L
-        POP     H
-        INX     H
-        DCR     B
-        JNZ     DSPCOL
-        JMP     DSFAIL
-DSPCGOT:
-        XCHG
-        SHLD    DSCOLS          ; save column count
-        ;--- Phase 4: Restore cursor and set modes ---
-        LXI     H,DSRST
-        CALL    DSOUT
-        ; Check if width > 80
-        LHLD    DSCOLS
-        MOV     A,H
-        ORA     A
-        JNZ     DS132           ; high byte > 0
-        MOV     A,L
-        CPI     81
-        JNC     DS132           ; >= 81
-        ; Width <= 80: defaults correct
-        XRA     A
-        STA     INITCOL
-        JMP     DSSETROW
-DS132:  ; Set 132-col runtime variables
-        MVI     A,1
-        STA     COLMOD
-        STA     INITCOL
-        MVI     A,125           ; 132 - LNUMWID(5) - 2
-        STA     RTXTCL
-        MVI     A,132
-        STA     RSCRCL
-        MVI     A,121           ; 125 - TABWID(4)
-        STA     RTXTTB
-        ; Fall through to DSSETROW
-DSSETROW:
-        ; Compute runtime row variables from DSROWS.
-        ; Clamp to minimum 24, maximum 76.
-        LHLD    DSROWS
-        MOV     A,L
-        CPI     24
-        JNC     DSRMXC
-        MVI     A,24            ; clamp minimum
-        JMP     DSROK
-DSRMXC: CPI     77
-        JC      DSROK
-        MVI     A,76            ; clamp maximum
-DSROK:  STA     RSTAT           ; status row = DSROWS
-        DCR     A
-        STA     RSEPR           ; separator row = DSROWS - 1
-        LDA     RSTAT
-        SUI     4               ; edit rows = DSROWS - 4
-        STA     REROWS
-        RET
-DSFAIL: ; Error: restore cursor, keep all defaults (24-row)
-        LXI     H,DSRST
-        CALL    DSOUT
-        XRA     A
-        STA     INITCOL
-        LXI     H,24
-        SHLD    DSROWS
-        ; REROWS/RSEPR/RSTAT already initialized to 24-row defaults
-        RET
-
-;------------------------------------------------------------
-; DSCRLF - Output CR+LF via BDOS RAWIO.
-;------------------------------------------------------------
-DSCRLF:
-        MVI     E,CR
-        MVI     C,BF_RAWIO
-        CALL    BDOS
-        MVI     E,LF
-        MVI     C,BF_RAWIO
-        JMP     BDOS
-
-;------------------------------------------------------------
-; DSHXDG - Output one hex nibble (0-15) in A as ASCII.
-;------------------------------------------------------------
-DSHXDG:
-        CPI     10
-        JC      DSHXD1
-        ADI     'A'-10
-        JMP     DSHXD2
-DSHXD1: ADI     '0'
-DSHXD2: MOV     E,A
-        MVI     C,BF_RAWIO
-        JMP     BDOS
 
 ;------------------------------------------------------------
 ; DSOUT - Output NUL-terminated string at HL via BDOS RAWIO.
@@ -998,15 +737,7 @@ DSOUT:
         INX     H
         JMP     DSOUT
 
-;------------------------------------------------------------
-; DETSIZ string constants (NUL-terminated for DSOUT)
-;------------------------------------------------------------
-; Combined output: save cursor + move to far corner + DSR query
-DSALL:  DB      ESC,'7'                         ; save cursor
-        DB      ESC,'[','9','9','9',';','9','9','9','H' ; far corner
-        DB      ESC,'[','6','n'                 ; DSR query
-        DB      0                               ; NUL terminator
-DSRST:  DB      ESC,'8',0                       ; restore cursor
+;--- Exit column restore strings (NUL-terminated) ---
 DXWIDE: DB      ESC,'[','?','3','h',0           ; DECCOLM 132
 DXNORM: DB      ESC,'[','?','3','l',0           ; DECCOLM 80
 

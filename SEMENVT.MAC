@@ -1,0 +1,523 @@
+;============================================================
+; FILE:    SEMENVT.MAC
+; PROJECT: SEDIT - Screen Editor for CP/M 2.2
+; VERSION: 1.0
+; DATE:    2026-04-14
+; AUTHOR:  Claude Code and RetroTechReboot
+;------------------------------------------------------------
+; DESCRIPTION:
+;   VT52-compatible ESC menu module. Drop-in replacement for
+;   SEMENU.MAC. Uses VT52 reverse video (ESC p / ESC q) for
+;   menu highlighting. No bold, no DECCOLM column toggle.
+;   The 80/132 toggle menu item is present but shows a
+;   "Not available" message.
+;
+;   Build: M80 =SEMENVT
+;   Link:  (replace SEMENU with SEMENVT in link command)
+;============================================================
+        INCLUDE SEDIT.INC
+
+;--- Imports ----------------------------------------------
+        EXTRN   GETKEY
+        EXTRN   CURBDP
+        EXTRN   DIRTY
+        EXTRN   DOEXIT
+        EXTRN   FIOPEN
+        EXTRN   FISAVE
+        EXTRN   FIPROMPT
+        EXTRN   SRFIND
+        EXTRN   HLPSHOW
+        EXTRN   CURGOTO
+        EXTRN   OUTSTR
+        EXTRN   OUTCHAR
+        EXTRN   STATMSG
+        EXTRN   STATCLR
+        EXTRN   SAVWMSG
+        EXTRN   SYNINIT
+        EXTRN   RSTAT
+
+;--- Exports ----------------------------------------------
+        PUBLIC  MNUSHOW
+
+;--- Menu geometry ----------------------------------------
+MNUROW1 EQU     6
+MNUROW2 EQU     17
+MNUCOL1 EQU     28
+MNUCOL2 EQU     54
+MNUITMS EQU     9
+MNUFROW EQU     MNUROW1+2
+MNUTCOL EQU     MNUCOL1+2
+
+;=============================================================
+        CSEG
+
+MNUSHOW:
+        CALL    MNUDRAW
+        MVI     A,0
+        STA     MNUSEL
+
+MNULP:  CALL    MNUHIL
+        CALL    GETKEY
+        MOV     A,B
+        ORA     A
+        JZ      MNULP
+        CPI     KT_ACT
+        JZ      MNUACD
+        MOV     A,C
+        CPI     CR
+        JZ      MNUACT
+        CPI     'K'
+        JZ      MNUUP
+        CPI     'k'
+        JZ      MNUUP
+        CPI     'J'
+        JZ      MNUDN
+        CPI     'j'
+        JZ      MNUDN
+        CPI     '1'
+        JC      MNULSC
+        CPI     '9'+1
+        JNC     MNULSC
+        SUI     '1'
+        STA     MNUSEL
+        JMP     MNUACT
+
+MNULSC: ORI     20H
+        CPI     'o'
+        MVI     B,0
+        JZ      MNULSL
+        CPI     's'
+        MVI     B,1
+        JZ      MNULSL
+        CPI     'a'
+        MVI     B,2
+        JZ      MNULSL
+        CPI     'f'
+        MVI     B,3
+        JZ      MNULSL
+        CPI     'g'
+        MVI     B,4
+        JZ      MNULSL
+        CPI     'h'
+        MVI     B,5
+        JZ      MNULSL
+        CPI     'b'
+        MVI     B,6
+        JZ      MNULSL
+        CPI     't'
+        MVI     B,7
+        JZ      MNULSL
+        CPI     'x'
+        MVI     B,8
+        JZ      MNULSL
+        CPI     'e'
+        MVI     B,8
+        JZ      MNULSL
+        JMP     MNULP
+
+MNULSL: MOV     A,B
+        STA     MNUSEL
+        JMP     MNUACT
+
+MNUACD: MOV     A,C
+        CPI     ACT_CURUP
+        JZ      MNUUP
+        CPI     ACT_CURDN
+        JZ      MNUDN
+        CPI     ACT_MENU
+        JZ      MNUCNC
+        CPI     ACT_INSNL
+        JZ      MNUACT
+        JMP     MNULP
+
+MNUUP:  LDA     MNUSEL
+        ORA     A
+        JZ      MNULP
+        DCR     A
+        STA     MNUSEL
+        JMP     MNULP
+
+MNUDN:  LDA     MNUSEL
+        CPI     MNUITMS-1
+        JZ      MNULP
+        INR     A
+        STA     MNUSEL
+        JMP     MNULP
+
+MNUCNC: JMP     MNUCLR
+
+MNUACT: CALL    MNUCLR
+        LDA     MNUSEL
+        MOV     L,A
+        MVI     H,0
+        DAD     H
+        LXI     D,MNUTBL
+        DAD     D
+        MOV     E,M
+        INX     H
+        MOV     D,M
+        XCHG
+        PCHL
+
+;=============================================================
+; Menu item handlers
+;=============================================================
+
+MNOPEN: CALL    STATCLR
+        LXI     D,OPNPMT
+        CALL    FIPROMPT
+        JZ      MNODNE
+        LXI     D,0
+        CALL    FIOPEN
+        MVI     A,1
+        STA     DIRTY
+MNODNE: RET
+
+MNSAVE: CALL    STATCLR
+        LHLD    CURBDP
+        MVI     A,BD_FNAME+1
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A
+        MOV     A,M
+        ANI     7FH
+        CPI     ' '
+        JNZ     MNSVGO
+        LXI     D,SVAPMT
+        CALL    FIPROMPT
+        JZ      MNSVDN
+        CALL    FISAVFN2
+        CALL    SYNINIT
+MNSVGO: LXI     D,SAVWMSG
+        CALL    STATMSG
+        CALL    FISAVE
+MNSVDN: JMP     STATCLR
+
+MNSVAS: CALL    STATCLR
+        LXI     D,SVAPMT
+        CALL    FIPROMPT
+        JZ      MNSADN
+        CALL    FISAVFN2
+        CALL    SYNINIT
+        LHLD    CURBDP
+        MVI     A,BD_MODIF
+        ADD     L
+        MOV     L,A
+        MVI     A,0
+        ADC     H
+        MOV     H,A
+        MVI     M,1
+        LXI     D,SAVWMSG
+        CALL    STATMSG
+        CALL    FISAVE
+MNSADN: JMP     STATCLR
+
+MNFIND: CALL    STATCLR
+        CALL    SRFIND
+        MVI     A,1
+        STA     DIRTY
+        RET
+
+MNGOTO: CALL    STATCLR
+        LDA     RSTAT
+        MOV     B,A
+        MVI     C,1
+        CALL    CURGOTO
+        LXI     D,GTOPMT
+        CALL    OUTSTR
+        LXI     D,GTOBUF
+        MVI     C,BF_RDLINE
+        CALL    BDOS
+        LDA     GTOBUF+1
+        ORA     A
+        JZ      MNGDNE
+        CALL    MGPARSE
+        MOV     A,H
+        ORA     L
+        JZ      MNGDNE
+        CALL    GBGOTOL
+        MVI     A,1
+        STA     DIRTY
+MNGDNE: RET
+
+MNHELP: CALL    HLPSHOW
+        MVI     A,1
+        STA     DIRTY
+        RET
+
+MNABUT: LXI     D,ABTMSG
+        CALL    STATMSG
+MNADRN: MVI     E,0FFH
+        MVI     C,BF_RAWIO
+        CALL    BDOS
+        ORA     A
+        JNZ     MNADRN
+MNAKEY: MVI     E,0FFH
+        MVI     C,BF_RAWIO
+        CALL    BDOS
+        ORA     A
+        JZ      MNAKEY
+        RET
+
+;--- Toggle 80/132: not available on VT52 ---
+MNTGCL: LXI     D,NAVMSG
+        CALL    STATMSG
+        RET
+
+MNQUIT: JMP     DOEXIT
+
+;=============================================================
+; MNUDRAW - Draw menu box and items
+;=============================================================
+MNUDRAW:
+        ; Top border
+        MVI     B,MNUROW1
+        MVI     C,MNUCOL1
+        CALL    CURGOTO
+        LXI     D,MNUTOP
+        CALL    OUTSTR
+        ; Title
+        MVI     B,MNUROW1+1
+        MVI     C,MNUCOL1
+        CALL    CURGOTO
+        LXI     D,MNUTIT
+        CALL    OUTSTR
+        ; Items
+        XRA     A
+        STA     MNUIDX
+MNUDRW: LDA     MNUIDX
+        CPI     MNUITMS
+        JZ      MNUDRB
+        ADI     MNUFROW
+        MOV     B,A
+        MVI     C,MNUCOL1
+        CALL    CURGOTO
+        LXI     D,MNULFT
+        CALL    OUTSTR
+        LDA     MNUIDX
+        MOV     L,A
+        MVI     H,0
+        DAD     H
+        LXI     D,MNUTXP
+        DAD     D
+        MOV     E,M
+        INX     H
+        MOV     D,M
+        CALL    OUTSTR
+        LXI     D,MNURGT
+        CALL    OUTSTR
+        LDA     MNUIDX
+        INR     A
+        STA     MNUIDX
+        JMP     MNUDRW
+
+MNUDRB: LDA     MNUIDX
+        ADI     MNUFROW
+        MOV     B,A
+        MVI     C,MNUCOL1
+        CALL    CURGOTO
+        LXI     D,MNUBOT
+        JMP     OUTSTR
+
+;=============================================================
+; MNUHIL - Highlight selected item
+;=============================================================
+MNUHIL: MVI     A,0
+        STA     MNUIDX
+MNUHLP: LDA     MNUIDX
+        CPI     MNUITMS
+        RZ
+        ADI     MNUFROW
+        MOV     B,A
+        MVI     C,MNUTCOL
+        CALL    CURGOTO
+        LDA     MNUIDX
+        MOV     B,A
+        LDA     MNUSEL
+        CMP     B
+        JNZ     MNUHNR
+        LXI     D,ATTRREV
+        CALL    OUTSTR
+        JMP     MNUHTS
+MNUHNR: LXI     D,ATTRNRM
+        CALL    OUTSTR
+MNUHTS: LDA     MNUIDX
+        MOV     L,A
+        MVI     H,0
+        DAD     H
+        LXI     D,MNUTXP
+        DAD     D
+        MOV     E,M
+        INX     H
+        MOV     D,M
+        CALL    OUTSTR
+        LXI     D,ATTRNRM
+        CALL    OUTSTR
+        LDA     MNUIDX
+        INR     A
+        STA     MNUIDX
+        JMP     MNUHLP
+
+;=============================================================
+; MNUCLR - Clear menu area
+;=============================================================
+MNUCLR: MVI     A,MNUROW1
+        STA     MNUIDX
+MNUCLP: LDA     MNUIDX
+        CPI     MNUROW2+1
+        JZ      MNUCDN
+        MOV     B,A
+        MVI     C,MNUCOL1
+        CALL    CURGOTO
+        MVI     B,MNUCOL2-MNUCOL1+1
+MNUCSP: MVI     A,' '
+        PUSH    B
+        CALL    OUTCHAR
+        POP     B
+        DCR     B
+        JNZ     MNUCSP
+        LDA     MNUIDX
+        INR     A
+        STA     MNUIDX
+        JMP     MNUCLP
+MNUCDN: MVI     A,1
+        STA     DIRTY
+        RET
+
+;=============================================================
+; MGPARSE - Parse decimal from GTOBUF+2
+;=============================================================
+MGPARSE:
+        LXI     H,0
+        SHLD    MGPVAL
+        LDA     GTOBUF+1
+        ORA     A
+        RZ
+        MOV     B,A
+        LXI     H,GTOBUF+2
+MGPLP:  MOV     A,M
+        CPI     '0'
+        JC      MGPDN
+        CPI     '9'+1
+        JNC     MGPDN
+        SUI     '0'
+        STA     MGPDGT
+        INX     H
+        PUSH    H
+        PUSH    B
+        LHLD    MGPVAL
+        DAD     H
+        MOV     D,H
+        MOV     E,L
+        DAD     H
+        DAD     H
+        DAD     D
+        LDA     MGPDGT
+        MOV     E,A
+        MVI     D,0
+        DAD     D
+        SHLD    MGPVAL
+        POP     B
+        POP     H
+        DCR     B
+        JNZ     MGPLP
+MGPDN:  LHLD    MGPVAL
+        RET
+
+        EXTRN   GBGOTOL
+
+;=============================================================
+; FISAVFN2 - Copy WRKFCB to BD_FNAME
+;=============================================================
+FISAVFN2:
+        LHLD    CURBDP
+        MOV     A,L
+        ADI     BD_FNAME
+        MOV     L,A
+        MOV     A,H
+        ACI     0
+        MOV     H,A
+        LXI     D,WRKFCB+FCB_DR
+        MVI     B,12
+FS2LP:  LDAX    D
+        MOV     M,A
+        INX     H
+        INX     D
+        DCR     B
+        JNZ     FS2LP
+        RET
+
+        EXTRN   WRKFCB
+
+;=============================================================
+; String constants
+;=============================================================
+
+; VT52 reverse video on/off
+ATTRREV: DB     ESC,'p','$'
+ATTRNRM: DB     ESC,'q','$'
+
+; Menu box borders (no embedded ESC sequences - CURGOTO used)
+MNUTOP: DB      '+------------------------+','$'
+MNUTIT: DB      '| SEDIT MENU             |','$'
+MNULFT: DB      '| ','$'
+MNURGT: DB      ' |','$'
+MNUBOT: DB      '+------------------------+','$'
+
+; Item text (plain text, no bold SGR)
+MNTX1:  DB      '1. Open File          ','$'
+MNTX2:  DB      '2. Save File          ','$'
+MNTX3:  DB      '3. Save As...         ','$'
+MNTX4:  DB      '4. Find text...       ','$'
+MNTX5:  DB      '5. Go To Line...      ','$'
+MNTX6:  DB      '6. Help               ','$'
+MNTX7:  DB      '7. About              ','$'
+MNTX8:  DB      '8. Toggle columns(N/A)','$'
+MNTX9:  DB      '9. Exit               ','$'
+
+; Prompts and messages
+OPNPMT: DB      'Open file: $'
+SVAPMT: DB      'Save as:   $'
+GTOPMT: DB      'Go to line: $'
+ABTMSG: DB      'SEDIT v1.25 CP/M Screen Editor  (any key)$'
+NAVMSG: DB      'Column toggle not available on this terminal.$'
+
+; Dispatch table
+MNUTBL: DW      MNOPEN
+        DW      MNSAVE
+        DW      MNSVAS
+        DW      MNFIND
+        DW      MNGOTO
+        DW      MNHELP
+        DW      MNABUT
+        DW      MNTGCL
+        DW      MNQUIT
+
+; Item text pointer table
+MNUTXP: DW      MNTX1
+        DW      MNTX2
+        DW      MNTX3
+        DW      MNTX4
+        DW      MNTX5
+        DW      MNTX6
+        DW      MNTX7
+        DW      MNTX8
+        DW      MNTX9
+
+;=============================================================
+; DATA SEGMENT
+;=============================================================
+        DSEG
+
+MNUSEL: DB      0
+MNUIDX: DB      0
+GTOBUF: DB      8
+        DB      0
+        DS      10
+MGPVAL: DW      0
+MGPDGT: DB      0
+
+        END
+
