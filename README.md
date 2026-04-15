@@ -654,7 +654,7 @@ Alternate terminal drivers (replace SESCREEN/SEMENU/SEHELP in link command):
 
 Terminal size detection (DETSIZ) is provided by each terminal driver: SESCREEN.MAC uses VT100 DSR for auto-detection; alternate drivers hardcode 80x24.
 
-Standalone utilities (not linked into SEDIT): `KEYCODE.MAC` (key diagnostic), `GETSIZE.MAC` (terminal size detection), `COL80.MAC` (set 80-column mode), `COL132.MAC` (set 132-column mode), `CLS.MAC` (clear screen).
+Standalone utility: `SEPATCH.MAC` patches SECONFIG.INC for variant builds on CP/M.
 
 ### 11.1 Build Process
 
@@ -680,7 +680,7 @@ M80 =SEHELP
 L80 SEDIT,SESCREEN,SEKEY,SEGAPBUF,SEFILEIO,SEMENU,SESEARCH,SEBLOCK,SESYNTAX,SEKEYBND,SEVIRTIO,SEHELP,SEDIT/N/E
 ```
 
-Or use `SUBMIT BUILD` with `BUILD.SUB` on CP/M. To build the standalone utilities (GETSIZE, COL80, COL132, CLS, KEYCODE, MEMTEST, COLORS), use `SUBMIT TOOLS`.
+Or use `SUBMIT BUILD` with `BUILD.SUB` on CP/M.
 
 **VT52 variant** (replaces SESCREEN, SEMENU, SEHELP with VT52-specific modules):
 

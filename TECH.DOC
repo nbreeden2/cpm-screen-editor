@@ -65,15 +65,10 @@
                            buffer descriptor field offsets, key
                            action codes, conditional assembly flags
 
-    2.3  Standalone Utilities (not linked into SEDIT.COM)
+    2.3  Standalone Utility
 
-    COL80.COM         ~35  Set terminal to 80-column mode
-    COL132.COM        ~35  Set terminal to 132-column mode
-    CLS.COM           ~35  Clear screen and home cursor
-    GETSIZE.COM      ~300  Terminal size detection utility
-    KEYCODE.COM     ~3600  Key code diagnostic tool
-    MEMTEST.COM      ~500  TPA memory test (7 patterns, looping)
-    COLORS.COM       ~200  ANSI/VT100 color test display
+    SEPATCH.COM      ~330  Patch SECONFIG.INC for variant builds
+
 
     2.3a Alternate Terminal Drivers
 
@@ -94,7 +89,6 @@
     SEBUILD.PY             Python EQU patcher for variant builds
     build-all.bat          Windows build script (all variants)
     BUILD.SUB              CP/M native build script (SUBMIT BUILD)
-    TOOLS.SUB              CP/M standalone utility build (SUBMIT TOOLS)
 
 
     3.  BUILD PROCESS

@@ -44,7 +44,7 @@ Row  N: STATROW  — status messages / prompts, RSTAT
 
 INFOBAR and CURPOS always run at MLDONE regardless of flags.
 
-## Module Map (12 linked modules + 2 standalone)
+## Module Map (12 linked modules)
 
 | File | Purpose | Key Exports |
 |------|---------|-------------|
@@ -60,8 +60,7 @@ INFOBAR and CURPOS always run at MLDONE regardless of flags.
 | SEKEYBND.MAC | Key binding init from SEDIT.KEY | KBINIT |
 | SEVIRTIO.MAC | Virtual buffer I/O for large files | VIMODE, VISAVALL, VIGOTO, VAFLN, VAFCB, VAFEX, VIOVFL |
 | SEHELP.MAC | Help screen overlay, BMDATEND | HLPSHOW |
-| KEYCODE.MAC | Standalone key diagnostic (not linked) | — |
-| GETSIZE.MAC | Standalone terminal size detection (not linked) | — |
+| SEPATCH.MAC | Standalone config patcher (not linked) | — |
 
 Alternate terminal drivers (replace SESCREEN/SEMENU/SEHELP):
 

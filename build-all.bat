@@ -1,7 +1,7 @@
 cls
 @echo off
 REM ----------------------------------------------------------------
-REM BUILD-ALL.BAT - Build all 4 SEDIT variants
+REM BUILD-ALL.BAT - Build all SEDIT variants + SEPATCH
 REM
 REM   SEDIT.COM    - Mono  (no color, no highlighting)
 REM   SEDIT-CL.COM - Color (color, no highlighting)
@@ -31,7 +31,7 @@ python CPMFMT.PY SEHELP.MAC SEKEY.MAC SEKEYBND.MAC SEMENU.MAC
 if errorlevel 1 goto fail
 python CPMFMT.PY SESEARCH.MAC
 if errorlevel 1 goto fail
-python CPMFMT.PY COL80.MAC COL132.MAC CLS.MAC MEMTEST.MAC COLORS.MAC GETSIZE.MAC SEPATCH.MAC
+python CPMFMT.PY SEPATCH.MAC
 if errorlevel 1 goto fail
 REM Specific to the ADM 31 terminal
 python CPMFMT.PY SEADM31 SEADM31K
@@ -52,13 +52,11 @@ for %%M in (SEDIT SEBLOCK SEFILEIO SEGAPBUF SEHELP SEKEY SEKEYBND SEMENU SESEARC
     if errorlevel 1 goto fail
 )
 
-echo Assembling standalone utilities...
-for %%M in (GETSIZE MEMTEST KEYCODE COL80 COL132 CLS COLORS SEPATCH) do (
-    cpmulator M80.COM =%%M
-    echo %%M
-	pause
-    if errorlevel 1 goto fail
-)
+echo Assembling SEPATCH utility...
+cpmulator M80.COM =SEPATCH
+echo SEPATCH
+pause
+if errorlevel 1 goto fail
 
 REM --- Build each variant ---
 echo --- WordStar/VT100 Variants ---
@@ -216,37 +214,9 @@ pause
 echo Built SEVT52.COM
 echo --- End of VT52 Editor ---
 
-REM --- Link standalone utilities ---
+REM --- Link SEPATCH utility ---
 echo.
-echo Linking standalone utilities...
-cpmulator L80.COM GETSIZE,GETSIZE/n/e
-echo cpmulator L80.COM GETSIZE,GETSIZE/n/e
-pause
-if errorlevel 1 goto fail
-cpmulator L80.COM KEYCODE,KEYCODE/n/e
-echo cpmulator L80.COM KEYCODE,KEYCODE/n/e
-pause
-if errorlevel 1 goto fail
-cpmulator L80.COM MEMTEST,MEMTEST/n/e
-echo cpmulator L80.COM MEMTEST,MEMTEST/n/e
-pause
-if errorlevel 1 goto fail
-cpmulator L80.COM COL80,COL80/n/e
-echo cpmulator L80.COM COL80,COL80/n/e
-pause
-if errorlevel 1 goto fail
-cpmulator L80.COM COL132,COL132/n/e
-echo cpmulator L80.COM COL132,COL132/n/e
-pause
-if errorlevel 1 goto fail
-cpmulator L80.COM CLS,CLS/n/e
-echo cpmulator L80.COM CLS,CLS/n/e
-pause
-if errorlevel 1 goto fail
-cpmulator L80.COM COLORS,COLORS/n/e
-echo cpmulator L80.COM COLORS,COLORS/n/e
-pause
-if errorlevel 1 goto fail
+echo Linking SEPATCH...
 cpmulator L80.COM SEPATCH,SEPATCH/n/e
 echo cpmulator L80.COM SEPATCH,SEPATCH/n/e
 pause
