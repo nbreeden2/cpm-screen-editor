@@ -85,9 +85,6 @@
 
     2.4  Build Scripts and Tools
 
-    CPMFMT.PY              Python preprocessor (see section 3)
-    SEBUILD.PY             Python EQU patcher for variant builds
-    build-all.bat          Windows build script (all variants)
     BUILD.SUB              CP/M native build script (SUBMIT BUILD)
     SEADM31.SUB            CP/M ADM-31 variant build
     SEC3102.SUB            CP/M Cromemco 3102 variant build
@@ -99,61 +96,13 @@
 
     3.1  Prerequisites
 
-    To build on a modern system (Windows):
-      - Python 3.x (for CPMFMT.PY)
-      - cpmulator.exe (CP/M emulator for running M80/L80)
+    Prerequisites:
       - M80.COM (Microsoft Macro-80 assembler)
       - L80.COM (Microsoft Link-80 linker)
-
-    To build natively on CP/M:
-      - M80.COM and L80.COM on an accessible disk
-      - SUBMIT.COM (for BUILD.SUB) or manual commands
-
-    3.2  Step 1: Preprocessing with CPMFMT.PY
-
-        python CPMFMT.PY SEDIT.MAC SESCREEN.MAC SEKEY.MAC ...
-
-    Or to process all .MAC files:
-
-        python CPMFMT.PY
-
-    CPMFMT.PY performs two operations:
+      - SUBMIT.COM (for .SUB build scripts) or manual commands
 
 
-
-    a) Line ending normalization: Converts all line endings to
-
-       CR+LF (0DH 0AH) as required by CP/M text files.
-
-
-
-    b) EOF marker: Appends a Ctrl-Z (1AH) byte at the end of
-
-       .MAC files.  For .INC files, Ctrl-Z is NOT appended so
-
-       that M80 INCLUDE can return to the parent file.
-
-
-
-    Each .MAC file contains an INCLUDE SEDIT.INC directive which
-
-    M80 processes natively at assembly time.  Editing SEDIT.INC
-
-    automatically affects all modules on the next assembly.
-
-
-
-    IMPORTANT: CPMFMT.PY must be run after every edit to a .MAC
-
-    or .INC file when editing on Windows or any non-CP/M host.
-
-    It ensures proper CR+LF line endings and Ctrl-Z EOF markers
-
-    required by M80.  Files edited directly under CP/M already
-
-    have the correct format and do not need preprocessing.
-
-    3.3  Step 2: Assembly
+    3.2  Assembly
 
     Each module is assembled separately to produce a .REL
     (relocatable object) file:
@@ -174,7 +123,7 @@
     The "=filename" syntax tells M80 to read filename.MAC and
     produce filename.REL.
 
-    3.4  Step 3: Linking
+    3.3  Linking
 
         L80 SEDIT,SESCREEN,SEKEY,SEGAPBUF,SEFILEIO,SEMENU,...
             SESEARCH,SEBLOCK,SESYNTAX,SEKEYBND,SEVIRTIO,...
@@ -187,91 +136,34 @@
     CRITICAL: SEHELP must be the LAST module in the link order.
     See section 5.3 for the reason.
 
-    3.5  Quick Build (Windows)
-
-    The build-all.bat script automates the full build:
-
-        build-all.bat
-
-    It runs CPMFMT.PY, assembles all modules via cpmulator, links
-    all four SEDIT variants, and cleans up .REL files.  The script
-    includes an optional section for copying results to a disk
-    image directory which is disabled by default (edit the paths
-    to match your environment if needed).  See section 3.7 for
-    details on variant builds.
-
-    3.6  Quick Build (CP/M native)
+    3.4  Quick Build
 
     Copy BUILD.SUB to the disk containing the source and tools:
 
         SUBMIT BUILD
 
     This runs all M80 and L80 commands in sequence.  Note that
-    The .SUB files do not run CPMFMT.PY; source files must be
-    preprocessed before transfer to CP/M media.
+    The .SUB files assemble and link all modules.  Source files
+    must have correct CP/M format (CR+LF line endings, Ctrl-Z EOF).
 
-    3.7  Building All 4 Variants (Windows)
+    3.5  Building Variants
 
-    The build-all.bat script builds four SEDIT variants in a
-    single run:
+    The COLOR and SYNHI EQU values in SECONFIG.INC must be
+    set before each variant build.  Use SEPATCH on CP/M:
+    
+        SEPATCH <color> <synhi>
+    
+    Or edit SECONFIG.INC directly with ED.
 
-        build-all.bat
+    For each variant, run SEPATCH:
 
-    It produces:
+    SEDIT.COM (Mono):        SEPATCH 0 0
 
-        SEDIT.COM       Mono   (COLOR=0, SYNHI=0)
-        SEDIT-CL.COM    Color  (COLOR=1, SYNHI=0)
-        SEDIT-A.COM     ASM    (COLOR=1, SYNHI=1)
-        SEDIT-C.COM     C      (COLOR=1, SYNHI=2)
+    SEDIT-CL.COM (Color):    SEPATCH 1 0
 
-    The script assembles the 10 invariant modules once, then for
-    each variant:
+    SEDIT-A.COM (ASM):       SEPATCH 1 1
 
-      1. Runs SEBUILD.PY to patch COLOR and SYNHI EQU values in
-         SESCREEN.MAC and SESYNTAX.MAC
-      2. Runs CPMFMT.PY on the two patched files
-      3. Assembles SESCREEN and SESYNTAX with M80
-      4. Links all 12 modules with L80
-      5. Copies the resulting SEDIT.COM to the variant filename
-
-    After all variants are built, the source files are restored to
-    the default (mono) configuration.
-
-    SEBUILD.PY usage:
-
-        python SEBUILD.PY <color> <synhi>
-
-    Where color is 0 or 1, and synhi is 0, 1, or 2.  The script
-    patches the EQU lines in SESCREEN.MAC and SESYNTAX.MAC using
-    regular expression replacement.
-
-    3.8  Building Variants on CP/M (Manual)
-
-    On a native CP/M system without Python, the EQU values must be
-    edited manually before each build.  Only two files need to be
-    changed: SESCREEN.MAC and SESYNTAX.MAC.
-
-    For each variant, edit the following EQU lines:
-
-    SEDIT.COM (Mono):
-        SESCREEN.MAC:   COLOR   EQU     0
-        SESCREEN.MAC:   SYNHI   EQU     0
-        SESYNTAX.MAC:   SYNHI   EQU     0
-
-    SEDIT-CL.COM (Color):
-        SESCREEN.MAC:   COLOR   EQU     1
-        SESCREEN.MAC:   SYNHI   EQU     0
-        SESYNTAX.MAC:   SYNHI   EQU     0
-
-    SEDIT-A.COM (ASM highlighting):
-        SESCREEN.MAC:   COLOR   EQU     1
-        SESCREEN.MAC:   SYNHI   EQU     1
-        SESYNTAX.MAC:   SYNHI   EQU     1
-
-    SEDIT-C.COM (C highlighting):
-        SESCREEN.MAC:   COLOR   EQU     1
-        SESCREEN.MAC:   SYNHI   EQU     2
-        SESYNTAX.MAC:   SYNHI   EQU     2
+    SEDIT-C.COM (C):         SEPATCH 1 2
 
     After editing, reassemble the two changed modules and re-link:
 
@@ -292,13 +184,11 @@
 
     4.  CONDITIONAL ASSEMBLY OPTIONS
 
-    Two equates control compile-time features.  COLOR is defined
+    Two equates control compile-time features.  Both are defined
 
-    in SESCREEN.MAC and SYNHI is defined in both SESCREEN.MAC and
+    in SECONFIG.INC (patched by SEPATCH or edited directly).
 
-    SESYNTAX.MAC (not in SEDIT.INC, since they differ per build
 
-    variant).  SEBUILD.PY patches these values automatically.
 
     4.1  COLOR
 
@@ -698,8 +588,8 @@ r
 
     7.4  Monochrome Terminals
 
-    Set COLOR EQU 0 in SESCREEN.MAC (patched by SEBUILD.PY or
-    edited manually).  This eliminates all SGR color
+    Set COLOR EQU 0 in SECONFIG.INC (use SEPATCH or
+    edit directly).  This eliminates all SGR color
     sequences.  Bold, dim, and reverse video are still used for
     the info bar, ruler, and separator.
 
@@ -771,7 +661,7 @@ r
 
     Each .MAC file includes SEDIT.INC via the M80 INCLUDE pseudo-op.
 
-    CPMFMT.PY does NOT append Ctrl-Z to .INC files, so M80 can
+    .INC files must NOT have a Ctrl-Z EOF marker, so M80 can
 
     return to the parent .MAC file after processing the include.
 
@@ -800,9 +690,9 @@ r
     9.2  Assembly Errors After Editing
 
     If M80 reports errors after editing a .MAC file:
-      - Run python CPMFMT.PY on the file first
-      - Check that the Ctrl-Z EOF marker is present (CPMFMT.PY
-        adds it automatically)
+      - Verify file has CR+LF line endings
+      - Check that the Ctrl-Z EOF marker is present (.MAC files
+        require it; .INC files must NOT have it)
       - Check that line endings are CR+LF
 
     9.3  BMDATEND Wrong / Buffer Overwrites Code
@@ -877,8 +767,8 @@ r
             shortcut changed to E.
     v1.11   C language syntax highlighting with multi-line block
             comment tracking.  Four build variants (mono, color,
-            ASM highlight, C highlight).  SEBUILD.PY and
-            build-all.bat for automated variant builds.  Removed
+            ASM highlight, C highlight).  SEPATCH utility and
+            SEPATCH for variant configuration.  Removed
             Z80 IX/IY from ASM register highlight table.
     v1.10   Virtual buffer mode for files larger than TPA.
             SEVIRTIO.MAC module added.  FIOVFL overflow handler in
@@ -896,3 +786,4 @@ r
 
                          ================================
                               End of TECH.DOC
+
