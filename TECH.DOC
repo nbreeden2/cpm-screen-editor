@@ -89,6 +89,10 @@
     SEBUILD.PY             Python EQU patcher for variant builds
     build-all.bat          Windows build script (all variants)
     BUILD.SUB              CP/M native build script (SUBMIT BUILD)
+    SEADM31.SUB            CP/M ADM-31 variant build
+    SEC3102.SUB            CP/M Cromemco 3102 variant build
+    SEVT52.SUB             CP/M VT52 variant build
+    SEPATCH.SUB            CP/M SEPATCH utility build
 
 
     3.  BUILD PROCESS
@@ -203,7 +207,7 @@
         SUBMIT BUILD
 
     This runs all M80 and L80 commands in sequence.  Note that
-    BUILD.SUB and TOOLS.SUB do not run CPMFMT.PY; source files must be
+    The .SUB files do not run CPMFMT.PY; source files must be
     preprocessed before transfer to CP/M media.
 
     3.7  Building All 4 Variants (Windows)
