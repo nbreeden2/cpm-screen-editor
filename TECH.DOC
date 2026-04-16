@@ -731,6 +731,10 @@ r
 
     10. REVISION HISTORY
 
+    v1.26   SEDIT.KEY search: current drive/user then A0:
+            fallback.  Per-variant .SUB build scripts with
+            SEPATCH.  L80 hyphen workaround for SEDIT-A/C/CL.
+            Comprehensive SEDIT.DOC and TECH.DOC updates.
     v1.25   VT52 terminal driver (SEVT52.MAC, SEMENVT.MAC,
             SEHELVT.MAC).  DETSIZ moved from SEDIT.MAC to
             terminal driver modules.  VT52 arrow keys
