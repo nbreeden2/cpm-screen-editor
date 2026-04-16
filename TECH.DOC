@@ -85,7 +85,10 @@
 
     2.4  Build Scripts and Tools
 
-    BUILD.SUB              CP/M native build script (SUBMIT BUILD)
+    SEDIT.SUB              Mono build (SUBMIT SEDIT)
+    SEDITCL.SUB            Color build (SUBMIT SEDITCL)
+    SEDITA.SUB             ASM highlight build (SUBMIT SEDITA)
+    SEDITC.SUB             C highlight build (SUBMIT SEDITC)
     SEADM31.SUB            CP/M ADM-31 variant build
     SEC3102.SUB            CP/M Cromemco 3102 variant build
     SEVT52.SUB             CP/M VT52 variant build
@@ -138,12 +141,12 @@
 
     3.4  Quick Build
 
-    Copy BUILD.SUB to the disk containing the source and tools:
+    Each variant has its own .SUB file.  For example:
 
-        SUBMIT BUILD
+        SUBMIT SEDIT
 
-    This runs all M80 and L80 commands in sequence.  Note that
-    The .SUB files assemble and link all modules.  Source files
+    This runs SEPATCH to configure SECONFIG.INC, assembles all
+    modules with M80, and links with L80.  Source files
     must have correct CP/M format (CR+LF line endings, Ctrl-Z EOF).
 
     3.5  Building Variants
