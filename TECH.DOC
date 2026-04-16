@@ -1,6 +1,6 @@
 
 
-                      SEDIT v1.25 Technical Manual
+                      SEDIT v1.26 Technical Manual
                   Build Environment and Source Reference
 
                     ================================
@@ -14,8 +14,8 @@
     The source is organized into 12 separately assembled modules plus
     a shared include file.
 
-    Total source: approximately 13,500 lines across all modules.
-    Binary size: approximately 20-22 KB (SEDIT.COM, depending on variant).
+    Total source: approximately 15,000 lines across all modules.
+    Binary size: approximately 23-27 KB depending on variant.
 
 
     2.  SOURCE FILES
@@ -24,7 +24,7 @@
 
     Module          Lines  Purpose
     -------         -----  -------
-    SEDIT.MAC        ~760  Entry point, main loop, action dispatch,
+    SEDIT.MAC       ~1060  Entry point, main loop, action dispatch,
                            TPA detection, command-line parsing,
                            buffer descriptor, dirty
                            flag management
@@ -32,7 +32,7 @@
                            SCREDCL), info bar, cursor positioning,
                            VT100 escape sequence output, SGR color,
                            terminal size detection (DETSIZ)
-    SEKEY.MAC        ~640  Keyboard input, VT100/VT52 escape sequence
+    SEKEY.MAC        ~470  Keyboard input, VT100/VT52 escape sequence
                            decoding, key type/action classification
     SEGAPBUF.MAC    ~3160  Gap buffer text engine: insert, delete,
                            cursor movement, line operations, word
@@ -41,21 +41,21 @@
                            FCB management, .BAK file handling,
                            user area switching (FISWUSR/FIRSTUSR),
                            overflow to virtual buffer (FIOVFL)
-    SEMENU.MAC       ~850  ESC menu overlay, 9 menu options with
+    SEMENU.MAC       ~690  ESC menu overlay, 9 menu options with
                            handlers, column mode toggle, about box
-    SESEARCH.MAC    ~1040  Find, find-next, find-and-replace,
-                                                      case-insensitive search through gap buffer
-    SEBLOCK.MAC      ~720  Block mark, copy, delete, paste with
+    SESEARCH.MAC    ~1260  Find, find-next, find-and-replace,
+                           case-insensitive search, brace matching
+    SEBLOCK.MAC      ~545  Block mark, copy, delete, paste with
                            2048-byte clipboard buffer
     SESYNTAX.MAC    ~1800  Syntax highlighting tokenizers (ASM + C),
                            keyword/register/directive tables,
                            multi-line comment pre-scan
-    SEKEYBND.MAC     ~500  Key binding initialization, SEDIT.KEY
-                           file parser, default binding tables
+    SEKEYBND.MAC     ~375  Key binding initialization, SEDIT.KEY
+                           file parser (current drive then A0:)
     SEVIRTIO.MAC    ~1440  Virtual buffer I/O for files larger than
                            TPA: temp file management, VIGOTO merge-
                            split, three-phase save (VISAVALL)
-    SEHELP.MAC       ~420  Help screen overlay, BMDATEND marker
+    SEHELP.MAC       ~265  Help screen overlay, BMDATEND marker
                            (must be linked last)
 
     2.2  Include File
@@ -74,14 +74,18 @@
 
     SEADM31.MAC     ~1500  ADM-31 terminal driver (replaces
                            SESCREEN.MAC in link command)
+    SEADM31K.MAC     ~445  ADM-31 key decoder (replaces
+                           SEKEY.MAC in link command)
     SEVT52.MAC      ~1500  VT52 terminal driver (replaces
                            SESCREEN.MAC in link command)
     SEMENVT.MAC      ~520  VT52 menu module (replaces
                            SEMENU.MAC in link command)
     SEHELVT.MAC      ~255  VT52 help screen (replaces
                            SEHELP.MAC in link command; linked last)
-    SEC3102.MAC     ~1450  Cromemco 3102 terminal driver (replaces
+    SEC3102.MAC     ~1440  Cromemco 3102 terminal driver (replaces
                            SESCREEN.MAC in link command)
+    SEC3102K.MAC     ~455  Cromemco 3102 key decoder (replaces
+                           SEKEY.MAC in link command)
 
     2.4  Build Scripts and Tools
 
@@ -130,7 +134,10 @@
 
         L80 SEDIT,SESCREEN,SEKEY,SEGAPBUF,SEFILEIO,SEMENU,...
             SESEARCH,SEBLOCK,SESYNTAX,SEKEYBND,SEVIRTIO,...
-            SEHELP,SEDIT/N/E
+            SEHELP,SEDIT-A/N/E
+
+    The .SUB files handle SEPATCH, assembly, and linking with
+    the correct output filename automatically (see section 2.4).
 
     The /N flag suppresses the symbol table listing.  The /E flag
     tells L80 to produce the .COM file and exit.  The last argument
@@ -155,8 +162,18 @@
     set before each variant build.  Use SEPATCH on CP/M:
     
         SEPATCH <color> <synhi>
+
+    Arguments:
+      color  0 = monochrome (no SGR color sequences)
+             1 = color (VT100/ANSI SGR color enabled)
+      synhi  0 = no syntax highlighting
+             1 = ASM highlighting (.MAC, .ASM, .INC files)
+             2 = C highlighting (.C, .H files)
+
+    Note: synhi 1 or 2 requires color 1.  SEPATCH will reject
+    combinations like SEPATCH 0 1 (highlighting without color).
     
-    Or edit SECONFIG.INC directly with ED.
+    Or edit SECONFIG.INC directly with SEDIT.
 
     For each variant, run SEPATCH:
 
@@ -174,12 +191,12 @@
         M80 =SESYNTAX
         L80 SEDIT,SESCREEN,SEKEY,SEGAPBUF,SEFILEIO,SEMENU,...
             SESEARCH,SEBLOCK,SESYNTAX,SEKEYBND,SEVIRTIO,...
-            SEHELP,SEDIT/N/E
+            SEHELP,SEDIT-A/N/E
 
-    Then rename SEDIT.COM to the desired variant filename using
-    PIP or REN:
+    The .SUB files handle SEPATCH, assembly, and linking with
+    the correct output filename automatically (see section 2.4).
 
-        REN SEDIT-A.COM=SEDIT.COM
+
 
     The remaining 10 modules do not depend on COLOR or SYNHI and
     do not need to be reassembled between variants.

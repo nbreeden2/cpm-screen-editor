@@ -481,7 +481,7 @@ MNTX9:  DB      '9. Exit               ','$'
 OPNPMT: DB      'Open file: $'
 SVAPMT: DB      'Save as:   $'
 GTOPMT: DB      'Go to line: $'
-ABTMSG: DB      'SEDIT v1.25 CP/M Screen Editor  (any key)$'
+ABTMSG: DB      'SEDIT v1.26 CP/M Screen Editor  (any key)$'
 NAVMSG: DB      'Column toggle not available on this terminal.$'
 
 ; Dispatch table

@@ -138,7 +138,7 @@ HLPCLR:  DB     ESC,'H',ESC,'J','$'            ; home + erase to end
 HLPCEL:  DB     ESC,'K','$'                    ; erase to end of line
 HLPNRM:  DB     ESC,'q','$'                    ; reverse video off
 HLPHDR:  DB     ESC,'p'                        ; reverse video on
-         DB     ' SEDIT v1.25 Key Reference'
+         DB     ' SEDIT v1.26 Key Reference'
          DB     '                              '
          DB     ESC,'q','$'                    ; reverse video off
 HLPFTR:  DB     ESC,'p'                        ; reverse video on
