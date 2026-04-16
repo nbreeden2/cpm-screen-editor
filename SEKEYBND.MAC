@@ -34,6 +34,7 @@
 
 ;--- Imports ----------------------------------------------
         EXTRN   KBDTBL          ; ctrl key action table (32 bytes)
+        EXTRN   ORGUSR          ; original user number at startup
 
 ;--- Exports ----------------------------------------------
         PUBLIC  KBINIT          ; initialise key bindings
@@ -90,19 +91,49 @@ ACTNMTB:
 ; KBINIT - Initialise key bindings.
 ; Attempts to open SEDIT.KEY; if found, reads lines and
 ; applies CTRL bindings to KBDTBL.
+; Search order: current drive/user, then A0:.
 ; Entry:  (none)
 ; Exit:   All regs clobbered.
 ;=============================================================
 KBINIT:
-        ; Try to open SEDIT.KEY
-        LXI     H,KBFCB
-        CALL    KBFCINIT        ; zero and set name in FCB
-
+        ; Try to open SEDIT.KEY on current drive/user (drive=0)
+        CALL    KBFCINIT        ; zero FCB and set name
         LXI     D,KBFCB
         MVI     C,BF_FOPEN
         CALL    BDOS
         INR     A               ; 0FFH -> 0 means not found
-        JZ      KBDONE          ; file not found, use defaults
+        JNZ     KBFOPN          ; found on current drive
+
+        ; Not found: try A0: (drive A:, user 0)
+        CALL    KBFCINIT        ; reset FCB
+        MVI     A,1             ; drive A: (1-based)
+        STA     KBFCB           ; set drive byte
+        ; Switch to user 0
+        MVI     E,0
+        MVI     C,BF_USRNUM
+        CALL    BDOS
+        ; Try open on A:
+        LXI     D,KBFCB
+        MVI     C,BF_FOPEN
+        CALL    BDOS
+        INR     A
+        JNZ     KBFA0           ; found on A0:
+        ; Not found on A0: either — restore user and use defaults
+        LDA     ORGUSR
+        MOV     E,A
+        MVI     C,BF_USRNUM
+        CALL    BDOS
+        JMP     KBDONE
+
+KBFA0:  ; Found on A0: — will restore user after close
+        MVI     A,1
+        STA     KBUSRA          ; flag: restore user after close
+        JMP     KBFRD
+
+KBFOPN: ; Found on current drive/user
+        XRA     A
+        STA     KBUSRA          ; flag: no user restore needed
+KBFRD:
 
         ; File open: read 128-byte records and scan lines
         XRA     A
@@ -180,6 +211,14 @@ KBSKPL:
 KBCLOS:
         LXI     D,KBFCB
         MVI     C,BF_FCLOSE
+        CALL    BDOS
+        ; Restore original user if we switched to A0:
+        LDA     KBUSRA
+        ORA     A
+        JZ      KBDONE
+        LDA     ORGUSR
+        MOV     E,A
+        MVI     C,BF_USRNUM
         CALL    BDOS
 
 KBDONE:
@@ -325,6 +364,7 @@ ACLNF:  XRA     A               ; not found: return 0
 KBFCB:   DS     FCB_SIZ         ; FCB for SEDIT.KEY
 KBDMABF: DS     RECSIZ          ; DMA buffer for key file
 KBEOF:   DB     0               ; end-of-file flag
+KBUSRA:  DB     0               ; non-zero = opened from A0:, restore user
 
 ; SEDIT.KEY filename in FCB-name format (space padded)
 KBFNAME: DB     'S','E','D','I','T',' ',' ',' '

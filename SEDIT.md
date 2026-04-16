@@ -10,7 +10,7 @@
 
 ## 1. Overview
 
-SEDIT is a full-screen plain-text editor for CP/M 2.2 written in Intel 8080 assembly language, assembled with M80 and linked with L80. It targets VT100/ANSI terminals. Navigation and editing use WordStar-style Ctrl-key bindings as the default set; bindings are user-configurable via an external key binding file (`SEDIT.KEY`). Pressing ESC opens an interactive menu for file, navigation, and block operations.
+SEDIT is a full-screen plain-text editor for CP/M 2.2 written in Intel 8080 assembly language, assembled with M80 and linked with L80. It supports VT100/ANSI, VT52, ADM-31, and Cromemco 3102 terminals. Navigation and editing use WordStar-style Ctrl-key bindings as the default set; bindings are user-configurable via an external key binding file (`SEDIT.KEY`). Pressing ESC opens an interactive menu for file, navigation, and block operations.
 
 ### 1.1 Goals
 
@@ -473,7 +473,7 @@ FFFF +-------------------------------------------+
 
 - BMDATEND is defined at the end of SEHELP.MAC's CSEG (the last linked module)
 - Buffer base = BMDATEND, buffer size = TPATOP - BMDATEND
-- Minimum required TPA: 9 KB (MINMEM = 9*1024); refuses to run if less
+- Minimum 9 KB free memory beyond the editor binary (MINMEM = 9*1024); refuses to run if less
 - Typical usable buffer: ~30-38 KB on a 64K system
 
 ---

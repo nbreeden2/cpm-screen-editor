@@ -9,20 +9,24 @@
     1.  INTRODUCTION
 
     SEDIT is a full-screen text editor for CP/M 2.2 systems equipped
-    with a VT100-compatible terminal.  It provides WordStar-style
+    with a VT100/ANSI, VT52, ADM-31, or Cromemco 3102 terminal.
+    It provides WordStar-style
     control key commands, block operations, find/replace, syntax
     highlighting for assembly and C language, and support for editing files
     larger than available memory using disk-backed virtual buffers.
 
     SEDIT requires an Intel 8080 or compatible processor, a minimum of
-    9 KB free TPA (Transient Program Area), and a VT100/ANSI terminal
-    or emulator supporting cursor addressing and SGR attributes.
+    9 KB free memory beyond the editor binary, and a supported
+    terminal or emulator.  Supported terminals: VT100/ANSI
+    (with SGR color attributes), VT52, ADM-31, and Cromemco
+    3102.  The VT52, ADM-31, and Cromemco 3102 variants do
+    not require SGR and operate in monochrome only.
 
 
 
     2.  PROGRAM VARIANTS
 
-    SEDIT is available in four pre-built variants.  Each variant is
+    SEDIT is available in seven pre-built variants.  Each variant is
     a standalone .COM file; choose the one appropriate for your
     terminal and editing needs.
 
@@ -70,6 +74,9 @@
         A>SEDIT C:MYFILE.TXT        Open on drive C:
         A>SEDIT B3:MYFILE.TXT       Open on drive B:, user area 3
         A>SEDIT 11:MYFILE.TXT       Current drive, user area 11
+        A>SEDIT C:MYFILE.TXT        Open on drive C:
+        A>SEDIT B3:MYFILE.TXT       Open on drive B:, user area 3
+        A>SEDIT 11:MYFILE.TXT       Current drive, user area 11
         A>SEDIT MYFILE.TXT B:       Use drive B: for temp files
 
     If the named file exists, it is loaded into the edit buffer.  If
@@ -92,8 +99,10 @@
 
     4.  SCREEN LAYOUT
 
-    SEDIT auto-detects the terminal size at startup (80 or 132 columns,
-    24-30+ rows).  Column mode can be toggled via the ESC menu.
+    The VT100/ANSI version auto-detects the terminal size at startup
+    (80 or 132 columns, 24-30+ rows) and the column mode can be
+    toggled via the ESC menu.  The VT52, ADM-31, and Cromemco
+    3102 versions use a fixed 80x24 display.
 
         Row  1    Information bar: filename (* if modified), line
                   count, cursor position (row:col), file length,
@@ -190,13 +199,15 @@
 
     The search string may be up to 64 characters.  Search is case-
     insensitive and starts from the current cursor position.  If the
-    text is not found forward, the search does not wrap.  The status
-r
+    text is not found, the search does not wrap around to the
     Find and replace (^Q,A) prompts for a search string and a
     replacement string.  Each match is highlighted in reverse video.
     Press Y to replace, N to skip, A to replace all remaining
     without asking, or Esc to stop.
-    line displays "Found." or "Not found." as appropriate.
+    beginning of the file.  In virtual buffer mode, the search
+    only covers the in-memory buffer, not the BEFORE or AFTER
+    temp files.  The status line displays "Found." or "Not
+    found." as appropriate.
 
     5.6  File Operations
 
@@ -232,13 +243,14 @@ r
         5. Go To       Jump to a line number
         6. Help        Display key reference screen
         7. About       Show version information
-        8. 80/132 col  Toggle 80/132 column display mode
+        8. 80/132 col  Toggle column mode (on supporting terminals)
         9. Exit        Exit the editor
 
     The "Go To" option prompts for a decimal line number and
     positions the cursor at that line.
 
-    The 80/132 column toggle sends VT100 DECCOLM escape sequences.
+    The 80/132 column toggle sends VT100 DECCOLM escape sequences
+    and is only available on VT100/ANSI terminals.
     The screen is cleared on mode change (this is normal VT100
     behavior).  In 132-column mode, the text area expands to 125
     visible columns.
@@ -260,11 +272,14 @@ r
 
     8.  SYNTAX HIGHLIGHTING
 
-    SEDIT provides syntax highlighting for 8080/Z80 assembly language
-    source files.  Highlighting is enabled automatically when the
-    file extension is .MAC, .ASM, or .INC.
+    The SEDIT-A and SEDIT-C variants provide syntax highlighting.
+    SEDIT-A highlights 8080/Z80 assembly language source files
+    when the file extension is .MAC, .ASM, or .INC.  SEDIT-C
+    highlights C language source files when the extension is
+    .C or .H.  Other variants (SEDIT.COM, SEDIT-CL.COM, SEVT52,
+    SEADM31, SEC3102) do not include syntax highlighting.
 
-    Token colors:
+    SEDIT-A token colors:
 
         Labels (column 1)      Yellow
         Opcodes                Bright yellow
@@ -274,8 +289,8 @@ r
         Strings                Magenta
         Comments (;)           Green
 
-    C language highlighting is also available for .C and .H files.
-    C token colors:
+    SEDIT-C token colors:
+
 
         Keywords               Bold white
         Preprocessor (#)       Magenta
@@ -285,17 +300,22 @@ r
         Normal text            White
         Braces { }             Bright red/green/blue (by nesting depth)
 
-    Syntax highlighting is a compile-time option controlled by the
-    SYNHI equate: 0=none, 1=ASM, 2=C.  The COLOR equate controls
-    color output (0=monochrome, 1=color).  These equates must be
-    edited directly in SESCREEN.MAC and SESYNTAX.MAC.  Pre-built
+    Syntax highlighting is a compile-time option controlled by
+    the SYNHI equate in SECONFIG.INC: 0=none, 1=ASM, 2=C.  The
+    COLOR equate controls color output (0=mono, 1=color).  Use
+    SEPATCH to set these values before building.  Pre-built
     variants are provided for each combination (see section 2).
+    See TECH.DOC for complete build and compilation instructions.
 
 
     9.  KEY BINDING CUSTOMIZATION
 
-    SEDIT reads an optional key binding file named SEDIT.KEY from the
-    current disk at startup.  This file allows reassigning control
+    SEDIT reads an optional key binding file named SEDIT.KEY at
+    startup.  It searches the current drive and user area first;
+    if not found, it retries on drive A:, user 0.  This allows
+    SEDIT.KEY to be kept alongside SEDIT.COM on the system disk
+    even when editing files on other drives.  This file allows
+    reassigning control
     key actions.
 
     File format (plain text, one binding per line):
@@ -383,12 +403,12 @@ r
       - Maximum line length: 255 characters
       - Maximum clipboard size: 2048 bytes
       - Maximum search string: 64 characters
-r
     Brace matching (^Q,[) only scans within the in-memory buffer.
     In virtual buffer mode, a match outside the loaded region will
     not be found.
 
-    SEDIT requires a minimum of 9 KB free TPA.  If insufficient
+    SEDIT requires a minimum of 9 KB free memory beyond the editor
+    binary for the edit buffer.  If insufficient
     memory is available, the message "Insufficient memory" is
     displayed and the editor exits.
 
@@ -436,7 +456,8 @@ r
 
     The terminal must support at least 80 columns by 24 rows.  SEDIT
     auto-detects the actual terminal size via VT100 DSR and adjusts
-r
+    the edit area dynamically (24-30+ rows supported).
+
     A Tera Term keyboard mapping file (SEDIT.CNF) is included for
     users connecting via Tera Term.  To install:
       1. Copy SEDIT.CNF to your Tera Term directory
@@ -446,7 +467,6 @@ r
     This maps PC keyboard keys (arrows, Home, End, PgUp, PgDn,
     Insert, Delete, F1-F4) to the VT100 escape sequences SEDIT
     expects.
-    the edit area dynamically (24-30+ rows supported).
 
     Input escape sequences recognized:
 

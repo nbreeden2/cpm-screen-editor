@@ -2,7 +2,7 @@
 
 **SEDIT v1.25 — Screen Editor for CP/M 2.2**
 
-A full-screen text editor for CP/M 2.2 systems with VT100/ANSI terminals.
+A full-screen text editor for CP/M 2.2 systems with VT100/ANSI, VT52, ADM-31, or Cromemco 3102 terminals.
 Uses WordStar-compatible control key conventions with ANSI arrow key support.
 
 ---
@@ -14,7 +14,7 @@ Uses WordStar-compatible control key conventions with ANSI arrow key support.
 - CP/M 2.2 or compatible operating system
 - VT100/ANSI compatible terminal (80 or 132 columns, 24-30+ rows, auto-detected)
 - Also available: VT52, ADM-31, and Cromemco 3102 terminal variants (80x24 fixed)
-- Minimum 9 KB free TPA (Transient Program Area)
+- Minimum 9 KB free memory beyond the editor binary for the edit buffer
 
 ### Starting SEDIT
 
