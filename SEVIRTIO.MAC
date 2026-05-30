@@ -58,6 +58,8 @@
         PUBLIC  VIWFCB          ; output FCB pointer
         PUBLIC  VIOPOS          ; output buffer position
         PUBLIC  VIFLUSH         ; flush output buffer
+        PUBLIC  VIWERR          ; sticky FWRITE error flag (load)
+        PUBLIC  VIWRC           ; records VIWBYT/VIFLUSH believe written
 
 ;=============================================================
 ; CODE SEGMENT
@@ -155,6 +157,8 @@ VIGOTO:
         SHLD    VIWFCB
         XRA     A
         STA     VIOPOS          ; reset output position
+        LXI     H,0
+        SHLD    VIWRC           ; reset record counter for MERGE phase
 
         ; Copy BEFORE temp if it exists
         LHLD    VBFLN
@@ -183,6 +187,26 @@ VGT_NA:
         LXI     D,VMGFCB
         MVI     C,BF_FCLOSE
         CALL    BDOS
+
+        ; --- Verify MERGE temp size (catch silent BDOS disk-full) ---
+        XRA     A
+        STA     VMGFCB+33
+        STA     VMGFCB+34
+        STA     VMGFCB+35
+        LXI     D,VMGFCB
+        MVI     C,35            ; Compute File Size
+        CALL    BDOS
+        LDA     VMGFCB+33       ; DE = actual records on disk
+        MOV     E,A
+        LDA     VMGFCB+34
+        MOV     D,A
+        LHLD    VIWRC           ; HL = expected records
+        MOV     A,L
+        CMP     E
+        JNZ     VGT_MERR
+        MOV     A,H
+        CMP     D
+        JNZ     VGT_MERR
 
         ; Delete old BEFORE and AFTER temps
         CALL    VIDLBEF
@@ -557,6 +581,13 @@ VGT_FIN:
 VGT_VM:
         MVI     A,1
         STA     VIMODE
+        JMP     VGT_DN
+VGT_MERR:
+        ; Phase 0 MERGE temp came up short on disk - signal caller.
+        ; Leave temps in place; FIDFULL will clean them up via VICLEAN.
+        MVI     A,1
+        STA     VIWERR
+        RET
 VGT_DN:
         ; Restore syntax mode
         CALL    SYNINIT
@@ -665,6 +696,17 @@ VWB_CP: MOV     A,M
         XCHG
         MVI     C,BF_FWRITE
         CALL    BDOS
+        ORA     A
+        JNZ     VWB_ERR         ; BDOS reported failure
+        ; Write reported success - count it
+        LHLD    VIWRC
+        INX     H
+        SHLD    VIWRC
+        JMP     VWB_RST
+VWB_ERR:
+        MVI     A,1
+        STA     VIWERR          ; sticky: disk full / write error
+VWB_RST:
         ; Reset position
         XRA     A
         STA     VIOPOS
@@ -714,6 +756,16 @@ VFL_CP: MOV     A,M
         XCHG
         MVI     C,BF_FWRITE
         CALL    BDOS
+        ORA     A
+        JNZ     VFL_ERR
+        LHLD    VIWRC
+        INX     H
+        SHLD    VIWRC
+        JMP     VFL_RST
+VFL_ERR:
+        MVI     A,1
+        STA     VIWERR          ; sticky error
+VFL_RST:
         ; Reset position
         XRA     A
         STA     VIOPOS
@@ -1315,6 +1367,8 @@ VIMODE: DB      0               ; 0=normal, 1=virtual mode
 VBFLN:  DW      0               ; lines in BEFORE temp
 VAFLN:  DW      0               ; lines in AFTER temp
 VIOVFL: DB      0               ; overflow flag (for FIOPEN)
+VIWERR: DB      0               ; sticky FWRITE error (load-time)
+VIWRC:  DW      0               ; records written via VIWBYT/VIFLUSH
 
 ; Output buffering
 VIWFCB: DW      0               ; pointer to current write FCB

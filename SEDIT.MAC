@@ -628,7 +628,14 @@ DXRET:  LXI     D,CLRMSG
 ; STATMSG already shown by FIOPEN; wait for keypress, exit.
 ;------------------------------------------------------------
 FILFAIL:
-        CALL    GETKEY          ; wait for any key
+        ; Drain any buffered keystrokes (e.g. Enter from CCP) so
+        ; the user actually sees the error before the warm boot.
+FLFDRN: MVI     E,0FFH
+        MVI     C,BF_RAWIO
+        CALL    BDOS
+        ORA     A
+        JNZ     FLFDRN
+        CALL    GETKEY          ; wait for a fresh key
         JMP     WBOOT
 
 ;------------------------------------------------------------
@@ -966,9 +973,14 @@ CLA1SK: INX     H
 CLA1DN: XRA     A
         STAX    D               ; NUL-terminate FILNBUF
 
-        ; Parse filename (sets WRKFCB, FILUSR)
-        CALL    FIPARSN
+        ; FIPARSN/FISAVFN clobber HL and BC, but the second-arg
+        ; parsing below needs HL=tail pointer and B=remaining chars.
+        PUSH    H
+        PUSH    B
+        CALL    FIPARSN         ; parse filename (sets WRKFCB, FILUSR)
         CALL    FISAVFN         ; copy WRKFCB to BD_FNAME
+        POP     B
+        POP     H
 
         MVI     A,1
         STA     CLHASF          ; we have a filename

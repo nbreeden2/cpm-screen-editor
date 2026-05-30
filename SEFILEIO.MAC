@@ -42,7 +42,10 @@
         EXTRN   VIWFCB          ; output FCB pointer
         EXTRN   VIOPOS          ; output buffer position
         EXTRN   VIFLUSH         ; flush output buffer
+        EXTRN   VIWERR          ; sticky FWRITE error flag (load)
+        EXTRN   VIWRC           ; records VIWBYT/VIFLUSH believe written
         EXTRN   VIGOTO          ; merge-split at target line
+        EXTRN   VICLEAN         ; delete all temp files
         EXTRN   RSTAT           ; runtime status row
 
 ;--- Exports ----------------------------------------------
@@ -96,6 +99,12 @@ FISKIP:
 
         ; Initialise gap buffer to empty
         CALL    FIBUFCLR
+
+        ; Clear sticky overflow-write error flag and record counter
+        XRA     A
+        STA     VIWERR
+        LXI     H,0
+        SHLD    VIWRC
 
         ; Zero the FCB control fields (CR, EX, S2, RC)
         CALL    FIRCB0
@@ -488,6 +497,10 @@ FIOVNL:
 FIOVDN:
         ; Flush remaining buffered bytes to AFTER temp
         CALL    VIFLUSH
+        ; Check sticky FWRITE error (disk full during overflow)
+        LDA     VIWERR
+        ORA     A
+        JNZ     FIDFULL
         ; Close AFTER temp
         LXI     D,CMDTAIL
         MVI     C,BF_SETDMA
@@ -495,15 +508,61 @@ FIOVDN:
         LXI     D,VAFCB
         MVI     C,BF_FCLOSE
         CALL    BDOS
+        ; --- Verify AFTER temp size matches records we wrote.
+        ; Some BDOS implementations silently swallow disk-full on
+        ; sequential writes, so we cross-check via Compute File Size.
+        XRA     A
+        STA     VAFCB+33        ; clear random-record fields
+        STA     VAFCB+34
+        STA     VAFCB+35
+        LXI     D,VAFCB
+        MVI     C,35            ; Compute File Size
+        CALL    BDOS
+        LDA     VAFCB+33        ; HL = actual record count
+        MOV     L,A
+        LDA     VAFCB+34
+        MOV     H,A
+        XCHG                    ; DE = actual
+        LHLD    VIWRC           ; HL = expected
+        MOV     A,L
+        CMP     E
+        JNZ     FIDFULL
+        MOV     A,H
+        CMP     D
+        JNZ     FIDFULL
         ; Fall through to FIEOF (source file still open)
         JMP     FIEOF
 
 FIOVFA:
-        ; BF_FMAKE failed (directory full?) - fall back to error
+        ; BF_FMAKE failed (no directory space) - disk full
         XRA     A
         STA     VIMODE          ; cancel virtual mode
         STA     VIOVFL
-        JMP     FIFULL          ; show error, close source
+        JMP     FIDFULL
+
+FIDFULL:
+        ; Disk-full failure during overflow load or rebalance.
+        ; Clean up all temp files, restore state, show error, FFH.
+        LXI     D,CMDTAIL
+        MVI     C,BF_SETDMA
+        CALL    BDOS
+        CALL    VICLEAN         ; delete BEFORE / AFTER / MERGE temps
+        XRA     A
+        STA     VIOVFL
+        ; Close source file (best-effort)
+        LXI     D,WRKFCB
+        MVI     C,BF_FCLOSE
+        CALL    BDOS
+        CALL    FIRSTUSR        ; restore original user area
+        CALL    FIBUFCLR        ; reset gap buffer to empty
+        XRA     A
+        STA     ISLOAD
+        STA     VIWERR
+        CALL    SYNINIT
+        LXI     D,FIDFMSG       ; "Disk full loading file..."
+        CALL    STATMSG
+        MVI     A,0FFH          ; return error
+        RET
 
 FIWDPOP:
         POP     H               ; balance PUSH H from width check
@@ -550,6 +609,10 @@ FIEOF:
         JZ      FIOOPN
         LXI     H,1             ; target line 1
         CALL    VIGOTO          ; merge-split rebalance
+        ; Did the rebalance detect a silent disk-full?
+        LDA     VIWERR
+        ORA     A
+        JNZ     FIDFULL
 
 FIOOPN: ; New or loaded: move cursor to top, clear modified
         XRA     A
@@ -1439,6 +1502,7 @@ LOADMSG: DB    'File loaded.$'
 SAVEMSG: DB    'File saved. $'
 ERRMSG:  DB    'Disk full or write error! Press any key.$'
 FULLMSG: DB    'File is too big.$'
+FIDFMSG: DB    'Disk full loading file. Press any key.$'
 OVFLMSG: DB    'Large file: using virtual buffer...$'
 FIOAFN:  DB    0,'SEDIT00A','TMP'       ; AFTER temp FCB template
 FIWDM1:  DB    'Line $'

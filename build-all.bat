@@ -236,7 +236,7 @@ echo   SEDIT-CL.COM - Color (WordStar/VT100, color   , no highlighting)
 echo   SEDIT-A.COM  - ASM   (WordStar/VT100, color + ASM highlighting)
 echo   SEDIT-C.COM  - Color (WordStar/VT100, color + C highlighting)
 echo   SEADM31.COM  - Mono  (ADM-31        , no color, no highlighting)
-echo   SEC3102.COM  - Mono  (Cromemco 3102  , no color, no highlighting)
+echo   SEC3102.COM  - Mono  (Cromemco 3102 , no color, no highlighting)
 echo   SEVT52.COM   - Mono  (VT52          , no color, no highlighting)
 goto end
 
