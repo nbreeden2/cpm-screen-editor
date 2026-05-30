@@ -731,6 +731,15 @@ r
 
     10. REVISION HISTORY
 
+    v1.27   Detect silent disk-full during virtual buffer load
+            via BDOS 35 (Compute File Size) cross-check after
+            each temp file close.  Catches the AFTER temp and
+            the VIGOTO Phase 0 MERGE temp.  New FIDFULL handler
+            cleans up via VICLEAN and shows a clear error.
+            Fix CLPARSE register clobber that prevented the
+            temp-drive second arg (e.g. SEDIT FILE.MAC C:)
+            from being honored.  FILFAIL drains buffered
+            keystrokes so the error message stays visible.
     v1.26   SEDIT.KEY search: current drive/user then A0:
             fallback.  Per-variant .SUB build scripts with
             SEPATCH.  L80 hyphen workaround for SEDIT-A/C/CL.

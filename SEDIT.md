@@ -751,6 +751,7 @@ SEHELP must be the **last** module in the link order. `BMDATEND EQU $` is define
 | Buffer full | BEL; status message |
 | File load: line > 255 chars | Warning in status bar |
 | Disk full on save | `Disk error` in status bar; buffer stays modified |
+| Disk full during virtual-buffer load | `Disk full loading file. Press any key.` in status bar; temps cleaned up; warm-boot on key |
 | File not found on open | Open empty buffer; `New file` in status bar |
 | TPA too small (< 9 KB) | Print message to console; exit immediately |
 | Not found (search) | `Not found` in status bar; cursor unchanged |
