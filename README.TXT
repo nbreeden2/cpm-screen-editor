@@ -59,6 +59,18 @@
                     reverse video on terminals that support it.
                     Fixed 80x24 display.
 
+    SEADM31.COM     ADM-31 terminal.  For Lear Siegler ADM-31 and
+                    compatible terminals.  Monochrome only.
+                    Fixed 80x24 display.
+
+    SEC3102.COM     Cromemco 3102 terminal.  For the Cromemco 3102
+                    terminal.  Monochrome only.  Fixed 80x24
+                    display.
+
+    SEPATCH.COM     Utility (not an editor).  Patches COLOR and
+                    SYNHI values in SECONFIG.INC on CP/M before
+                    rebuilding a variant.  See TECH.DOC.
+
     All variants are functionally identical in editing features,
     key bindings, virtual buffer support, and file handling.  The
     only differences are in terminal color output and syntax
@@ -539,5 +551,5 @@
 
 
                          ================================
-                              End of SEDIT.DOC
+                              End of README.TXT
 
