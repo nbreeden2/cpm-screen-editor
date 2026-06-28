@@ -1,0 +1,3 @@
+LIB80 SHARED=SEGAPBUF,SEFILEIO,SESEARCH,SEBLOCK,SESYNTAX,SEKEYBND,SEVIRTIO/E
+L80 SEDIT,SEADM31,SEADM31K,SHARED,SEMENU,SEHELP,SEADM31/N/E
+
