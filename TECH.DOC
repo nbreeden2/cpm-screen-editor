@@ -89,14 +89,54 @@
 
     2.4  Build Scripts and Tools
 
-    SEDIT.SUB              Mono build (SUBMIT SEDIT)
-    SEDITCL.SUB            Color build (SUBMIT SEDITCL)
-    SEDITA.SUB             ASM highlight build (SUBMIT SEDITA)
-    SEDITC.SUB             C highlight build (SUBMIT SEDITC)
-    SEADM31.SUB            CP/M ADM-31 variant build
-    SEC3102.SUB            CP/M Cromemco 3102 variant build
-    SEVT52.SUB             CP/M VT52 variant build
-    SEPATCH.SUB            CP/M SEPATCH utility build
+    Identical build scripts are provided in two forms:
+      *.SUB  -- standard CP/M SUBMIT
+      *.QSB  -- QP/M QSUB (use this on systems with QP/M)
+    Both have the same content; pick whichever your
+    environment supports.
+
+    CLEAN.SUB              Erase all .REL files
+    SHARED.SUB             Build SHARED.LIB (assemble 6 shared
+                           modules + LIB-80 bundle)
+    SEPATCH.SUB            Build SEPATCH.COM utility
+    SEDIT.SUB              Mono build      (output: SEDIT.COM)
+    SEDITCL.SUB            Color build     (output: SEDIT-CL.COM)
+    SEDITA.SUB             ASM highlight   (output: SEDIT-A.COM)
+    SEDITC.SUB             C highlight     (output: SEDIT-C.COM)
+    SEADM31.SUB            ADM-31 variant  (output: SEADM31.COM)
+    SEC3102.SUB            Cromemco 3102   (output: SEC3102.COM)
+    SEVT52.SUB             VT52 variant    (output: SEVT52.COM)
+
+    2.5  Shared Library (SHARED.LIB)
+
+    Six modules are byte-identical across every SEDIT variant:
+
+        SEGAPBUF, SEFILEIO, SESEARCH,
+        SEBLOCK,  SEKEYBND, SEVIRTIO
+
+    They are assembled once by SHARED.SUB and bundled into
+    SHARED.LIB using LIB-80.  Each variant link then references
+    SHARED.LIB instead of naming the six modules individually.
+
+    Rationale: QP/M's QSUB has an input line-length limit that
+    the original full-list L80 command exceeded.  Bundling the
+    shared modules into a library keeps every variant's L80
+    line under that limit.
+
+    The .LIB extension (not .REL) is intentional: it lets
+    "ERA *.REL" in the variant builds clear stale objects
+    without erasing SHARED.LIB.  L80 must be given the full
+    name SHARED.LIB on the command line (L80 defaults to
+    .REL when no extension is supplied).
+
+    SESYNTAX is NOT in SHARED.LIB -- its PUBLIC symbols are
+    gated by the SYNHI EQU (see section 4.2), so a single
+    pre-built copy cannot satisfy every variant.  SESYNTAX
+    is reassembled per variant.
+
+    SEHELP is NOT in SHARED.LIB -- it must remain a separately
+    named module so it can be linked last (BMDATEND,
+    section 5.3).
 
 
     3.  BUILD PROCESS
@@ -104,57 +144,74 @@
     3.1  Prerequisites
 
     Prerequisites:
-      - M80.COM (Microsoft Macro-80 assembler)
-      - L80.COM (Microsoft Link-80 linker)
-      - SUBMIT.COM (for .SUB build scripts) or manual commands
+      - M80.COM    (Microsoft Macro-80 assembler)
+      - L80.COM    (Microsoft Link-80 linker)
+      - LIB80.COM  (Microsoft LIB-80 librarian, for SHARED.LIB)
+      - SUBMIT.COM (for .SUB scripts on standard CP/M)
+        or QSUB.COM (for .QSB scripts on QP/M)
 
 
     3.2  Assembly
 
-    Each module is assembled separately to produce a .REL
-    (relocatable object) file:
+    Variant-specific modules are assembled separately to produce
+    .REL (relocatable object) files:
 
         M80 =SEDIT
         M80 =SESCREEN
         M80 =SEKEY
-        M80 =SEGAPBUF
-        M80 =SEFILEIO
-        M80 =SEMENU
-        M80 =SESEARCH
-        M80 =SEBLOCK
         M80 =SESYNTAX
-        M80 =SEKEYBND
-        M80 =SEVIRTIO
+        M80 =SEMENU
         M80 =SEHELP
+
+    The six shared modules (section 2.5) are pre-built into
+    SHARED.LIB by SHARED.SUB and do not need to be reassembled
+    for each variant build.
 
     The "=filename" syntax tells M80 to read filename.MAC and
     produce filename.REL.
 
     3.3  Linking
 
-        L80 SEDIT,SESCREEN,SEKEY,SEGAPBUF,SEFILEIO,SEMENU,...
-            SESEARCH,SEBLOCK,SESYNTAX,SEKEYBND,SEVIRTIO,...
-            SEHELP,SEDIT-A/N/E
+        L80 SEDIT,SESCREEN,SEKEY,SESYNTAX,SHARED.LIB,
+            SEMENU,SEHELP,SEDIT/N/E
 
-    The .SUB files handle SEPATCH, assembly, and linking with
-    the correct output filename automatically (see section 2.4).
+    The .SUB / .QSB files handle SEPATCH, assembly, and linking
+    with the correct output filename automatically (section 2.4).
+
+    SHARED.LIB carries the six shared modules (section 2.5).
+    It must be named with its full .LIB extension; L80 defaults
+    to .REL when no extension is given.
 
     The /N flag suppresses the symbol table listing.  The /E flag
     tells L80 to produce the .COM file and exit.  The last argument
-    before /N/E is the output filename (SEDIT.COM).
+    before /N/E is the output filename.
 
     CRITICAL: SEHELP must be the LAST module in the link order.
     See section 5.3 for the reason.
 
     3.4  Quick Build
 
-    Each variant has its own .SUB file.  For example:
+    Use QSUB <name> on QP/M, or SUBMIT <name> on standard CP/M.
 
-        SUBMIT SEDIT
+    Clean rebuild from scratch:
 
-    This runs SEPATCH to configure SECONFIG.INC, assembles all
-    modules with M80, and links with L80.  Source files
-    must have correct CP/M format (CR+LF line endings, Ctrl-Z EOF).
+        SUBMIT CLEAN
+        SUBMIT SHARED
+        SUBMIT SEDIT          (or any other variant)
+
+    Iterative rebuild (only variant-specific source changed):
+
+        SUBMIT SEDITC         (no need to rerun SHARED)
+
+    Rebuild after a shared-module source change:
+
+        SUBMIT SHARED
+        SUBMIT <variant>
+
+    The variant .SUB / .QSB runs SEPATCH to configure SECONFIG.INC,
+    assembles all variant-specific modules with M80, and links with
+    L80 against SHARED.LIB.  Source files must have correct CP/M
+    format (CR+LF line endings, Ctrl-Z EOF).
 
     3.5  Building Variants
 
@@ -185,21 +242,24 @@
 
     SEDIT-C.COM (C):         SEPATCH 1 2
 
-    After editing, reassemble the two changed modules and re-link:
+    After editing, reassemble the changed modules and re-link.
+
+    If only variant-specific modules changed (e.g., SESCREEN):
 
         M80 =SESCREEN
-        M80 =SESYNTAX
-        L80 SEDIT,SESCREEN,SEKEY,SEGAPBUF,SEFILEIO,SEMENU,...
-            SESEARCH,SEBLOCK,SESYNTAX,SEKEYBND,SEVIRTIO,...
-            SEHELP,SEDIT-A/N/E
+        L80 SEDIT,SESCREEN,SEKEY,SESYNTAX,SHARED.LIB,
+            SEMENU,SEHELP,SEDIT-A/N/E
 
-    The .SUB files handle SEPATCH, assembly, and linking with
-    the correct output filename automatically (see section 2.4).
+    SESYNTAX must be reassembled whenever SYNHI changes (its
+    PUBLIC symbols are gated by the SYNHI EQU).  Variant .SUB
+    files already do this -- SEPATCH runs before M80 =SESYNTAX.
 
+    If a SHARED.LIB module changed (e.g., SEGAPBUF), rebuild the
+    library first, then re-link the variant:
 
-
-    The remaining 10 modules do not depend on COLOR or SYNHI and
-    do not need to be reassembled between variants.
+        SUBMIT SHARED
+        L80 SEDIT,SESCREEN,SEKEY,SESYNTAX,SHARED.LIB,
+            SEMENU,SEHELP,SEDIT-A/N/E
 
 
     4.  CONDITIONAL ASSEMBLY OPTIONS
